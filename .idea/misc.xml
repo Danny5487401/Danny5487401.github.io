@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="BufFileManager">
+    <libraries>
+      <module>
+        <name>buf.build/beta/googleapis</name>
+        <path>$USER_HOME$/.cache/buf/v1/module/data/buf.build/beta/googleapis/1c473ad9220a49bca9320f4cc690eba5</path>
+        <reference>buf.build/beta/googleapis:1c473ad9220a49bca9320f4cc690eba5</reference>
+        <yaml>$USER_HOME$/.cache/buf/v1/module/data/buf.build/beta/googleapis/1c473ad9220a49bca9320f4cc690eba5/buf.yaml</yaml>
+      </module>
+      <module>
+        <name>buf.build/googleapis/googleapis</name>
+        <path>$USER_HOME$/.cache/buf/v1/module/data/buf.build/googleapis/googleapis/463926e7ee924d46ad0a726e1cf4eacd</path>
+        <reference>buf.build/googleapis/googleapis:463926e7ee924d46ad0a726e1cf4eacd</reference>
+        <yaml>$USER_HOME$/.cache/buf/v1/module/data/buf.build/googleapis/googleapis/463926e7ee924d46ad0a726e1cf4eacd/buf.yaml</yaml>
+      </module>
+      <module>
+        <lockedDependencies>
+          <dependency>
+            <commit>62f35d8aed1149c291d606d958a7ce32</commit>
+            <owner>googleapis</owner>
+            <remote>buf.build</remote>
+            <repository>googleapis</repository>
+          </dependency>
+        </lockedDependencies>
+        <name>buf.build/grpc-ecosystem/grpc-gateway</name>
+        <path>$USER_HOME$/.cache/buf/v1/module/data/buf.build/grpc-ecosystem/grpc-gateway/a1ecdc58eccd49aa8bea2a7a9022dc27</path>
+        <reference>buf.build/grpc-ecosystem/grpc-gateway:a1ecdc58eccd49aa8bea2a7a9022dc27</reference>
+        <yaml>$USER_HOME$/.cache/buf/v1/module/data/buf.build/grpc-ecosystem/grpc-gateway/a1ecdc58eccd49aa8bea2a7a9022dc27/buf.yaml</yaml>
+      </module>
+      <module>
+        <lockedDependencies>
+          <dependency>
+            <commit>2e73676eef8642dfba4ed782b7c8d6fe</commit>
+            <owner>beta</owner>
+            <remote>buf.build</remote>
+            <repository>googleapis</repository>
+          </dependency>
+        </lockedDependencies>
+        <name>buf.build/grpc-ecosystem/grpc-gateway</name>
+        <path>$USER_HOME$/.cache/buf/v1/module/data/buf.build/grpc-ecosystem/grpc-gateway/d19475fa22444a289c46af009acce62c</path>
+        <reference>buf.build/grpc-ecosystem/grpc-gateway:d19475fa22444a289c46af009acce62c</reference>
+        <yaml>$USER_HOME$/.cache/buf/v1/module/data/buf.build/grpc-ecosystem/grpc-gateway/d19475fa22444a289c46af009acce62c/buf.yaml</yaml>
+      </module>
+    </libraries>
+  </component>
+</project>
