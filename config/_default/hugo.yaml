@@ -4,7 +4,7 @@
 # This file is formatted using YAML syntax - learn more at https://learnxinyminutes.com/docs/yaml/
 
 title: Danny's IT Shared Blog # Website name
-baseURL: 'https://danny5487401.github.io//' # Website URL
+baseURL: 'https://danny5487401.github.io/' # Website URL
 
 ############################
 ## PAGE OPTIONS
