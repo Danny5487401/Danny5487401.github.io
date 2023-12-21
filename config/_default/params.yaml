@@ -58,3 +58,14 @@ features:
     url: 'https://github.com/Danny5487401/Danny5487401.github.io/'
     content_dir: content
     branch: main
+
+  comment:
+    provider: 'giscus'
+    giscus:
+      repo: 'Danny5487401/Danny5487401.github.io'
+      repo_id: 'R_kgDOK7itBA'
+      category: 'General'
+      category_id: 'DIC_kwDOK7itBM4Cb5Vu'
+      theme: preferred_color_scheme
+      language_code: en
+      mapping: pathname
