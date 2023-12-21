@@ -17,7 +17,7 @@ marketing:
     description: 'A highly-customizable Hugo blog theme powered by Hugo Blox Builder.'
     twitter: 'GetResearchDev'
   analytics:
-    google_analytics: ''
+    google_analytics: 'G-BM6R1NKV1S'
     baidu_tongji: ''
     plausible: ''
     fathom: ''
