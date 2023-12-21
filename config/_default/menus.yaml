@@ -10,6 +10,9 @@ main:
   - name: Topics
     url: tags/
     weight: 20
+  - name: Golang
+    url: golang/
+    weight: 30
   - name: Uses
     url: uses/
     weight: 30
