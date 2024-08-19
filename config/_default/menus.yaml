@@ -13,6 +13,9 @@ main:
   - name: Golang
     url: golang/
     weight: 30
+  - name: Kubernetes
+    url: kubernetes/
+    weight: 30
   - name: Uses
     url: uses/
     weight: 30
