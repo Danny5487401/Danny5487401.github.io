@@ -5,7 +5,7 @@
 https://docs.hugoblox.com/reference/site-structure/
 
 ```shell
-(⎈|prod-ctx:kube-system)➜  Danny5487401.github.io git:(main) tree -L 1 .                
+➜  Danny5487401.github.io git:(main) tree -L 1 .                
 .
 ├── LICENSE.md 
 ├── README.md
@@ -23,7 +23,7 @@ https://docs.hugoblox.com/reference/site-structure/
 
 ### 配置文件
 
-The root configuration keys are build, caches, cascade, deployment, frontmatter, imaging, languages, markup, mediatypes,
+> The root configuration keys are build, caches, cascade, deployment, frontmatter, imaging, languages, markup, mediatypes,
 menus, minify, module, outputformats, outputs, params, permalinks, privacy, related, security, segments, server, services, sitemap, and taxonomies.
 
 
@@ -46,6 +46,15 @@ _index.md索引页面在Hugo内容中是个特殊角色。它允许您在列表�
 {{<figure src="./informer.png#center" width=800px >}}
 ```
 
+### 菜单 menu
+
+3 种方式
+
+- 自动定义
+- 在 front matter 正文区域
+- In site configuration
+
+
 ## 命令使用
 
 ```shell
@@ -63,7 +72,7 @@ hugo v0.120.4-f11bca5fec2ebb3a02727fb2a5cfb08da96fd9df+extended darwin/arm64 Bui
 ### 本地调试
 
 ```shell
-hugo server --minify --buildDrafts
+✗ hugo server --minify --buildDrafts
 ```
 
 
