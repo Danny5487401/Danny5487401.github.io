@@ -1,38 +1,87 @@
-# [Creator's Blog: Hugo Theme](https://github.com/HugoBlox/theme-blog)
+# Danny 博客
 
-[![Screenshot](./.github/preview.png)](https://hugoblox.com/templates/)
+## 站点目录结构
 
-The **Creator's Blog** Hugo Theme empowers you to easily create your own _personal blog_ or _build a business around your content_.
+https://docs.hugoblox.com/reference/site-structure/
 
-️**Trusted by 250,000+ researchers, educators, and students.** Highly customizable via the integrated **no-code, block-based website builder**, making every site truly personalized ⭐⭐⭐⭐⭐
+```shell
+(⎈|prod-ctx:kube-system)➜  Danny5487401.github.io git:(main) tree -L 1 .                
+.
+├── LICENSE.md 
+├── README.md
+├── assets # 图片视频
+├── config # 配置
+├── content # 内容
+├── go.mod
+├── go.sum
+├── hugo_stats.json
+├── netlify.toml
+├── notebooks
+├── resources
+└── static # 可下载文件
+```
 
-[![Get Started](https://img.shields.io/badge/-Get%20started-ff4655?style=for-the-badge)](https://hugoblox.com/templates/)
-[![Discord](https://img.shields.io/discord/722225264733716590?style=for-the-badge)](https://discord.com/channels/722225264733716590/742892432458252370/742895548159492138)  
-[![Twitter Follow](https://img.shields.io/twitter/follow/GetResearchDev?label=Follow%20on%20Twitter)](https://twitter.com/GetResearchDev)
+### 配置文件
 
-Easily write technical content with plain text Markdown, LaTeX math, diagrams, RMarkdown, or Jupyter, and import publications from BibTeX.
+The root configuration keys are build, caches, cascade, deployment, frontmatter, imaging, languages, markup, mediatypes,
+menus, minify, module, outputformats, outputs, params, permalinks, privacy, related, security, segments, server, services, sitemap, and taxonomies.
 
-[Check out the latest demo](https://hugo-blog-theme.netlify.app/) of what you'll get in less than 10 minutes, or [view the showcase](https://hugoblox.com/creators/).
 
-The integrated [**Hugo Blox**](https://hugoblox.com) website builder and CMS makes it easy to create a beautiful website for free. Edit your site in the CMS (or your favorite editor), generate it with [Hugo](https://github.com/gohugoio/hugo), and deploy with GitHub or Netlify. Customize anything on your site with widgets, light/dark themes, and language packs.
 
-- 👉 [**Get Started**](https://hugoblox.com/templates/)
-- 📚 [View the **documentation**](https://docs.hugoblox.com/)
-- 💬 [Chat with the **Hugo Blox Builder community**](https://discord.gg/z8wNYzb) or [**Hugo community**](https://discourse.gohugo.io)
-- ⬇️ **Automatically import citations from BibTeX** with the [Hugo Academic CLI](https://github.com/GetRD/academic-file-converter)
-- 🐦 Share your new site with the community: [@GetResearchDev](https://twitter.com/GetResearchDev) [@GeorgeCushen](https://twitter.com/GeorgeCushen) [#MadeWithHugoBlox](https://twitter.com/search?q=%23MadeWithHugoBlox&src=typed_query)
-- 🗳 [Take the survey and help us improve #OpenSource](https://forms.gle/NioD9VhUg7PNmdCAA)
-- 🚀 [Contribute improvements](https://github.com/HugoBlox/hugo-blox-builder/blob/main/CONTRIBUTING.md) or [suggest improvements](https://github.com/HugoBlox/hugo-blox-builder/issues)
-- ⬆️ **Updating?** View the [Update Guide](https://docs.hugoblox.com/) and [Release Notes](https://github.com/HugoBlox/hugo-blox-builder/releases)
+### 索引页面: _index.md
 
-## We ask you, humbly, to support this open source movement
+_index.md索引页面在Hugo内容中是个特殊角色。它允许您在列表模板中添加前置设置和内容。
+这些列表模板包括区块模板, tag模板,tag列表模板和您的主页模板。
 
-Today we ask you to defend the open source independence of the Hugo Blox Builder and themes 🐧
 
-We're an open source movement that depends on your support to stay online and thriving, but 99.9% of our creators don't give; they simply look the other way.
+### 图片处理
 
-### [❤️ Click here to become a GitHub Sponsor, unlocking awesome perks such as _exclusive academic templates and widgets_](https://hugoblox.com/sponsors/)
 
-## Demo credits
+- 全局资源是位于 assets 目录中或装载到 assets 目录中任意目录中的文件。
+- 页面资源是页面束（page bundle）中的文件。页面束是一个具有根目录下的 index.md 或 _index.md 文件的目录
 
-- [Unsplash](https://unsplash.com/) images
+
+使用 [shortcodes ](https://gohugo.io/content-management/shortcodes/#figure)
+```markdown
+{{<figure src="./informer.png#center" width=800px >}}
+```
+
+## 命令使用
+
+```shell
+✗ hugo version
+hugo v0.120.4-f11bca5fec2ebb3a02727fb2a5cfb08da96fd9df+extended darwin/arm64 BuildDate=2023-11-08T11:18:07Z VendorInfo=brew
+
+```
+
+### 添加内容
+```shell
+✗ hugo new content content/kubernetes/workqueue/index.md
+```
+
+
+### 本地调试
+
+```shell
+hugo server --minify --buildDrafts
+```
+
+
+### 发布
+
+
+实际提交代码触发 GitHub Actions
+
+
+
+
+
+
+
+## 参考
+- [HugoBlox本文模版](https://github.com/HugoBlox/theme-blog)
+- [hugoblox 文档](https://docs.hugoblox.com/)
+- [hugo 官方中文文档](https://hugo.opendocs.io/content-management/)
+- [hugo 官方英文文档](https://gohugo.io/documentation/)
+
+

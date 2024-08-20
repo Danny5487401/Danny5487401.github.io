@@ -17,6 +17,9 @@ sections:
       filters:
         folders:
           - post
+          - kubernetes
+          - security
+          - golang
     design:
       spacing:
         padding: ['3rem', 0, '6rem', 0]

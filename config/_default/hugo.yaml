@@ -3,7 +3,7 @@
 # Hugo Documentation: https://gohugo.io/getting-started/configuration/#all-configuration-settings
 # This file is formatted using YAML syntax - learn more at https://learnxinyminutes.com/docs/yaml/
 
-title: Danny's IT Shared Blog # Website name
+title: Danny's IT Shared Blog # 网站名字
 baseURL: 'https://danny5487401.github.io/' # Website URL
 
 ############################
@@ -14,6 +14,9 @@ cascade:
   # Blog post options
   - _target:
       path: /post/**
+      kind: page
+  - _target:
+      path: /kubernetes/**
       kind: page
     pager: true
     editable: true
