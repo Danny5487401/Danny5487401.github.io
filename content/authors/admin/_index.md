@@ -33,12 +33,6 @@ profiles:
   - icon: at-symbol
     url: '540021730@qq.com'
     label: E-mail Me
-  - icon: brands/x
-    url: https://twitter.com/GetResearchDev
-  - icon: brands/instagram
-    url: https://www.instagram.com/
-  - icon: brands/linkedin
-    url: https://www.linkedin.com/
   # Link to a PDF of your resume/CV - upload it to `static/uploads/resume.pdf`
   - icon: academicons/cv
     url: uploads/resume.pdf
@@ -51,7 +45,7 @@ profiles:
 highlight_name: true
 
 # Author's website URL
-website: ""
+website: "https://danny5487401.github.io/"
 ---
 
-Danny xia 只是一个爱好编程的 devops 工程师。
+人生苦短，把酒倒满。Danny xia 只是一个爱好编程的 devops 工程师。

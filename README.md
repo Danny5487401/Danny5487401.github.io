@@ -88,7 +88,7 @@ hugo v0.120.4-f11bca5fec2ebb3a02727fb2a5cfb08da96fd9df+extended darwin/arm64 Bui
 
 
 ## 参考
-- [HugoBlox本文模版](https://github.com/HugoBlox/theme-blog)
+- [HugoBlox 本文模版](https://github.com/HugoBlox/theme-blog)
 - [hugoblox 文档](https://docs.hugoblox.com/)
 - [hugo 官方中文文档](https://hugo.opendocs.io/content-management/)
 - [hugo 官方英文文档](https://gohugo.io/documentation/)
