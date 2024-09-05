@@ -2,6 +2,8 @@
 title: "资源注册表(scheme)"
 date: 2024-08-26T15:44:47+08:00
 summary: kubernetes 资源管理的核心数据结构schema, 版本转换
+categories:
+  - kubernetes
 ---
 Kubernetes 的 API Schema 是对集群资源的规范定义和元数据的集合，它在 Kubernetes 集群的管理和操作中起着至关重要的作用。简单来说，Schema 可以被理解为一种定义和约束集群资源结构的标准方式。
 通过使用 Schema，Kubernetes 可以确保集群中的各种资源具有一致的结构和属性，从而方便了资源的创建、修改和查询等操作
