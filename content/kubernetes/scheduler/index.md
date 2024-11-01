@@ -725,7 +725,7 @@ func (sched *Scheduler) schedulePod(ctx context.Context, fwk framework.Framework
 
 ```
 
-##### findNodesThatFitPod 预选
+##### findNodesThatFitPod 过滤预选
 
 ```go
 func (sched *Scheduler) findNodesThatFitPod(ctx context.Context, fwk framework.Framework, state *framework.CycleState, pod *v1.Pod) ([]*v1.Node, framework.Diagnosis, error) {
@@ -863,13 +863,31 @@ func (sched *Scheduler) findNodesThatPassFilters(
 	beginCheckNode := time.Now()
 	statusCode := framework.Success
 
-	// // 并发调用 framework 的 Filter 插件的 Filter 方法.
+	// 并发调用 framework 的 Filter 插件的 Filter 方法.
 	fwk.Parallelizer().Until(ctx, numAllNodes, checkNode, metrics.Filter)
 	feasibleNodes = feasibleNodes[:feasibleNodesLen]
     
 	return feasibleNodes, nil
 }
 ```
+
+Predicate有一系列的算法可以使用： 
+- PodToleratesNodeTaints：检查Pod是否容忍Node Taint
+- CheckNodeMemoryPressure:检查Pod是否可以调度到MemoryPressure的节点
+- CheckNodeDiskPressure：检查Pod是否可以调度到DiskPressure的节点
+- NoVolumeNodeConflict：检查节点是否满足Pod所引用的Volume的条
+- PodFitsPorts：同PodFitsHostPort
+- PodFitsHostPorts：检查是否有Host Ports冲
+- PodFitsResources：检查Node的资源是否充足，包括允许的Pod数量、CPU、内存、GPU个数以及其他的OpaqueIntResource
+- HostName: 检查Pod.Spec.NodeName是否与候选节点一
+- MatchNodeSelector：检查候选节点的Pod.Spec.NodeSelector 是否匹
+- NoVolumeZoneConflict：检查 volume zone是否冲
+- MaxEBSVolumeCount：检查AWS EBS Volume数量是否过多（默认不超过 39
+- MaxGCEPDVolumeCount：检查GCE PD Volume数量是否过多（默认不超过 16
+- MaxAzureDiskVolumeCount：检查Azure Disk Volume数量是否过多（默认不超过 16
+- MatchInterPodAffinity：检查是否匹配Pod的亲和性要求
+
+
 
 
 ##### prioritizeNodes 调度器的优选阶段
@@ -942,6 +960,19 @@ type ScorePlugin interface {
 	ScoreExtensions() ScoreExtensions
 }
 ```
+
+Priorities优先级选项包括:
+- LeastRequestedPriority：优先调度到请求资源少的节点
+- NodePreferAvoidPodsPriority: alpha.kubernetes.io/preferAvoidPods 字段判断, 权重为10000，避免其他优先级策略的影
+- NodeAffinityPriority：优先调度到匹配 NodeAffinity 的节点
+- TaintTolerationPriority：优先调度到匹配 TaintToleration 的节点
+- ServiceSpreadingPriority：尽量将同一个 service 的 Pod 分布到不同节点
+- MostRequestedPriority：尽量调度到已经使用过的 Node 上，特别适用
+- SelectorSpreadPriority: 优先减少节点上属于同一个Service或Replication Controller的Pod数
+- InterPodAffinityPriority：优先将 Pod 调度到相同的拓扑上（如同一个节点、Rack、Zone 等
+- BalancedResourceAllocation：优先平衡各节点的资源使用
+
+
 
 
 ##### selectHost 从优选的 nodes 集合里获取分值 score 最高的 node

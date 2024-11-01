@@ -15,6 +15,13 @@ tags:
 
 ## 基本概念
 
+### 异构计算（Heterogeneous Computing）
+异构，就是CPU、DSP、GPU、ASIC、协处理器、FPGA等各种计算单元、使用不同的类型指令集、不同的体系架构的计算单元，组成一个混合的系统，执行计算的特殊方式，就叫做“异构计算”。
+
+异构计算（Heterogeneous Computing），主要指不同类型的指令集和体系架构的计算单元组成的系统的计算方式。
+
+异构计算平台就是“CPU＋GPU”以及“CPU＋FPGA” 架构。这些典型异构计算架构最大的优点是具有比传统CPU并行计算更高效率和低延迟的计算性能.
+
 ### CUDA
 2006年，NVIDIA公司发布了CUDA(Compute Unified Device Architecture)，是一种新的操作GPU计算的硬件和软件架构，是建立在NVIDIA的GPUs上的一个通用并行计算平台和编程模型，它提供了GPU编程的简易接口，基于CUDA编程可以构建基于GPU计算的应用程序，利用GPUs的并行计算引擎来更加高效地解决比较复杂的计算难题。
 
