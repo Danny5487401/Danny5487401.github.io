@@ -91,3 +91,7 @@ security:
   _merge: deep
 sitemap:
   _merge: deep
+
+# 修改时间
+frontmatter:
+  lastmod: [":fileModTime", "lastmod"]
