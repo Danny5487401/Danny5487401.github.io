@@ -1026,6 +1026,143 @@ func (sched *Scheduler) bindingCycle(
 }
 ```
 
+## 插件案例
+
+### 1 NodeResourcesFit
+```go
+noderesources.Name:                   runtime.FactoryAdapter(fts, noderesources.NewFit),
+```
+
+```go
+// ScoringStrategyType the type of scoring strategy used in NodeResourcesFit plugin.
+type ScoringStrategyType string
+
+const (
+	// 空闲资源多的分高 --使的node上的负载比较合理一点！
+	LeastAllocated ScoringStrategyType = "LeastAllocated"
+	// 空闲资源少的分高 – 可以退回Node资源！
+	MostAllocated ScoringStrategyType = "MostAllocated"
+	// RequestedToCapacityRatio strategy allows specifying a custom shape function
+	// to score nodes based on the request to capacity ratio.
+	RequestedToCapacityRatio ScoringStrategyType = "RequestedToCapacityRatio"
+)
+
+//  下面定义了三个 scorer 打分策略.
+var nodeResourceStrategyTypeMap = map[config.ScoringStrategyType]scorer{
+	config.LeastAllocated: func(args *config.NodeResourcesFitArgs) *resourceAllocationScorer {
+		resources := args.ScoringStrategy.Resources
+		return &resourceAllocationScorer{
+			Name:      string(config.LeastAllocated),
+			scorer:    leastResourceScorer(resources),
+			resources: resources,
+		}
+	},
+	config.MostAllocated: func(args *config.NodeResourcesFitArgs) *resourceAllocationScorer {
+		resources := args.ScoringStrategy.Resources
+		return &resourceAllocationScorer{
+			Name:      string(config.MostAllocated),
+			scorer:    mostResourceScorer(resources),
+			resources: resources,
+		}
+	},
+	config.RequestedToCapacityRatio: func(args *config.NodeResourcesFitArgs) *resourceAllocationScorer {
+		resources := args.ScoringStrategy.Resources
+		return &resourceAllocationScorer{
+			Name:      string(config.RequestedToCapacityRatio),
+			scorer:    requestedToCapacityRatioScorer(resources, args.ScoringStrategy.RequestedToCapacityRatio.Shape),
+			resources: resources,
+		}
+	},
+}
+```
+
+scheduler 对 resource 打分内置三种不同策略, 分别是 LeastAllocated / MostAllocated / RequestedToCapacityRatio.
+
+- LeastAllocated 默认策略, 空闲资源多的分高, 优先调度到空闲资源多的节点上, 各个 node 节点负载均衡.
+- MostAllocated 空闲资源少的分高, 优先调度到空闲资源较少的 node 上, 这样 pod 尽量集中起来方便后面资源回收.
+- RequestedToCapacityRatio 请求 request 和 node 资源总量的比率低的分高.
+
+过滤
+
+```go
+func (f *Fit) Filter(ctx context.Context, cycleState *framework.CycleState, pod *v1.Pod, nodeInfo *framework.NodeInfo) *framework.Status {
+	// 获取在 preFilter 阶段写入的 preFilterState
+	s, err := getPreFilterState(cycleState)
+	if err != nil {
+		return framework.AsStatus(err)
+	}
+    // 判断当前的 node 是否满足 pod 的资源请求需求
+	insufficientResources := fitsRequest(s, nodeInfo, f.ignoredResources, f.ignoredResourceGroups)
+	
+	if len(insufficientResources) != 0 {// 存在不足资源
+		// We will keep all failure reasons.
+		failureReasons := make([]string, 0, len(insufficientResources))
+		for i := range insufficientResources {
+			failureReasons = append(failureReasons, insufficientResources[i].Reason)
+		}
+		return framework.NewStatus(framework.Unschedulable, failureReasons...)
+	}
+	return nil
+}
+```
+
+打分
+
+```go
+func (f *Fit) Score(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) (int64, *framework.Status) {
+	nodeInfo, err := f.handle.SnapshotSharedLister().NodeInfos().Get(nodeName)
+	if err != nil {
+		return 0, framework.AsStatus(fmt.Errorf("getting node %q from Snapshot: %w", nodeName, err))
+	}
+
+	s, err := getPreScoreState(state)
+	if err != nil {
+		s = &preScoreState{
+			podRequests: f.calculatePodResourceRequestList(pod, f.resources),
+		}
+	}
+
+	return f.score(pod, nodeInfo, s.podRequests)
+}
+
+
+func (r *resourceAllocationScorer) score(
+	pod *v1.Pod,
+	nodeInfo *framework.NodeInfo,
+	podRequests []int64) (int64, *framework.Status) {
+	node := nodeInfo.Node()
+	if node == nil {
+		return 0, framework.NewStatus(framework.Error, "node not found")
+	}
+	// resources not set, nothing scheduled,
+	if len(r.resources) == 0 {
+		return 0, framework.NewStatus(framework.Error, "resources not found")
+	}
+
+	requested := make([]int64, len(r.resources))
+	allocatable := make([]int64, len(r.resources))
+	// 遍历 resources 累加计算 allocatable 和 requested.
+	for i := range r.resources {
+		// allocatable 是 node 还可以分配的资源
+		// req 是 pod 所需要的资源
+		alloc, req := r.calculateResourceAllocatableRequest(nodeInfo, v1.ResourceName(r.resources[i].Name), podRequests[i])
+		// Only fill the extended resource entry when it's non-zero.
+		if alloc == 0 {
+			continue
+		}
+		allocatable[i] = alloc
+		requested[i] = req
+	}
+
+	score := r.scorer(requested, allocatable)
+
+    // ...
+
+	return score, nil
+}
+```
+
+
 ## 参考 
 
 - [官方调度框架](https://kubernetes.io/zh-cn/docs/concepts/scheduling-eviction/scheduling-framework/)
