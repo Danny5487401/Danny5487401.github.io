@@ -356,7 +356,7 @@ func (kl *Kubelet) SyncPod(_ context.Context, updateType kubetypes.SyncPodType, 
 			}
 		}
 		podKilled := false
-		if !pcm.Exists(pod) && !firstSync {  // 如果该pod 的cgroups不存在，并且不是首次启动，那么kill掉
+		if !pcm.Exists(pod) && !firstSync {  // 如果该 pod 的cgroups不存在，并且不是首次启动，那么kill掉
 			p := kubecontainer.ConvertPodStatusToRunningPod(kl.getRuntime().Type(), podStatus)
 			if err := kl.killPod(ctx, pod, p, nil); err == nil {
 				podKilled = true
@@ -437,32 +437,14 @@ func (kl *Kubelet) SyncPod(_ context.Context, updateType kubetypes.SyncPodType, 
 func (m *kubeGenericRuntimeManager) SyncPod(ctx context.Context, pod *v1.Pod, podStatus *kubecontainer.PodStatus, pullSecrets []v1.Secret, backOff *flowcontrol.Backoff) (result kubecontainer.PodSyncResult) {
     // ...
 
-	// Step 4: 新建sandbox
+	// Step 4: 新建sandbox, 其实就是 pause 容器
 	podSandboxID := podContainerChanges.SandboxID
 	if podContainerChanges.CreateSandbox {
         //...
 
 		podSandboxID, msg, err = m.createPodSandbox(ctx, pod, podContainerChanges.Attempt)
 		if err != nil {
-			// createPodSandbox can return an error from CNI, CSI,
-			// or CRI if the Pod has been deleted while the POD is
-			// being created. If the pod has been deleted then it's
-			// not a real error.
-			//
-			// SyncPod can still be running when we get here, which
-			// means the PodWorker has not acked the deletion.
-			if m.podStateProvider.IsPodTerminationRequested(pod.UID) {
-				klog.V(4).InfoS("Pod was deleted and sandbox failed to be created", "pod", klog.KObj(pod), "podUID", pod.UID)
-				return
-			}
-			metrics.StartedPodsErrorsTotal.Inc()
-			createSandboxResult.Fail(kubecontainer.ErrCreatePodSandbox, msg)
-			klog.ErrorS(err, "CreatePodSandbox for pod failed", "pod", klog.KObj(pod))
-			ref, referr := ref.GetReference(legacyscheme.Scheme, pod)
-			if referr != nil {
-				klog.ErrorS(referr, "Couldn't make a ref to pod", "pod", klog.KObj(pod))
-			}
-			m.recorder.Eventf(ref, v1.EventTypeWarning, events.FailedCreatePodSandBox, "Failed to create pod sandbox: %v", err)
+			// ...
 			return
 		}
 
@@ -502,12 +484,12 @@ func (m *kubeGenericRuntimeManager) SyncPod(ctx context.Context, pod *v1.Pod, po
 		return nil
 	}
 
-	// Step 5: 时容器相关
+	// Step 5: 临时容器相关
 	for _, idx := range podContainerChanges.EphemeralContainersToStart {
 		start(ctx, "ephemeral container", metrics.EphemeralContainer, ephemeralContainerStartSpec(&pod.Spec.EphemeralContainers[idx]))
 	}
 
-	// Step 6: start the init container.
+	// Step 6: 启动 init 容器
 	if container := podContainerChanges.NextInitContainerToStart; container != nil {
 		// Start the next init container.
 		if err := start(ctx, "init container", metrics.InitContainer, containerStartSpec(container)); err != nil {
@@ -525,7 +507,7 @@ func (m *kubeGenericRuntimeManager) SyncPod(ctx context.Context, pod *v1.Pod, po
 		}
 	}
 
-	// Step 8: start containers in podContainerChanges.ContainersToStart.
+	// Step 8: s启动业务容器
 	for _, idx := range podContainerChanges.ContainersToStart {
 		start(ctx, "container", metrics.Container, containerStartSpec(&pod.Spec.Containers[idx]))
 	}
