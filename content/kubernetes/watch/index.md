@@ -1,6 +1,7 @@
 ---
 title: "Watch 实现原理及 etcd 源码分析"
 date: 2024-11-15T10:01:10+08:00
+summary: watch 可靠性实现原理
 categories:
   - kubernetes
   - etcd
@@ -45,11 +46,13 @@ resourceVersion的维护其实是利用了底层存储etcd的Revision机制.
 ETCD共四种version
 
 |   字段    | 作用范围 | 说明 |
-|:-------:|:----:|::|
+| :--: | :--: | :--: |
 | Version | key  |  单个Key的修改次数，单调递增 |
 |    Revision     |  全局  | Key在集群中的全局版本号，全局唯一 |
 |    ModRevision    |  key  | Key 最后一次修改时的 Revision |
 |    CreateRevision     |  全局  | Key 创建时的 Revision |
+
+
 
 > the Revision is the current revision of etcd. It is incremented every time the v3 backed is modified (e.g., Put, Delete, Txn). ModRevision is the etcd revision of the last update to a key. Version is the number of times the key has been modified since it was created. Get(..., WithRev(rev)) will perform a Get as if the etcd store is still at revision rev.
 

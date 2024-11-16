@@ -130,8 +130,6 @@ Kubernetes API Server 从上到下可以分为四层：接口层，访问控制�
 
 
 
-
-
 ## GenericAPIServer 通用配置
 
 ```go
@@ -425,7 +423,7 @@ func (authHandler *unionAuthRequestHandler) AuthenticateRequest(req *http.Reques
 }
 ```
 
-### Authorization
+### Authorization 授权模块
 
 配置初始化
 ```go
@@ -708,15 +706,22 @@ func Run(completeOptions completedServerRunOptions, stopCh <-chan struct{}) erro
 
 
 ### CreateServerChain: API 层 创建 Three Servers
+
+三个 APIServer 通过 delegation 的关系关联
+
+{{<figure src="./api-three_apiserver.png#center" width=800px >}}
 ```go
 func CreateServerChain(completedOptions completedServerRunOptions) (*aggregatorapiserver.APIAggregator, error) {
     // ...
+	
+	//  APIExtensionsServer 的 delegationTarget 是一个空的 Delegate，即什么都不做
 	// API扩展服务，主要针对CRD
 	apiExtensionsServer, err := createAPIExtensionsServer(apiExtensionsConfig, genericapiserver.NewEmptyDelegateWithCustomHandler(notFoundHandler))
 	if err != nil {
 		return nil, err
 	}
 
+	// 将 APIExtensionsServer 的 GenericAPIServer 作为 delegationTarget 传给了 KubeAPIServe
 	// API核心服务，包括常见的Pod/Deployment/Service
 	kubeAPIServer, err := CreateKubeAPIServer(kubeAPIServerConfig, apiExtensionsServer.GenericAPIServer)
 	if err != nil {
@@ -725,6 +730,7 @@ func CreateServerChain(completedOptions completedServerRunOptions) (*aggregatora
 
     // ...
 	
+	// 将 kubeAPIServer 的 GenericAPIServer 作为 delegationTarget 传给了 AggregatorServer，创建出了 AggregatorServer
 	// API聚合服务，将请求转发给 API 对应的用户服务；如果没有命中，转 API核心服务
 	aggregatorServer, err := createAggregatorServer(aggregatorConfig, kubeAPIServer.GenericAPIServer, apiExtensionsServer.Informers, crdAPIEnabled)
 	if err != nil {
@@ -744,11 +750,12 @@ func CreateServerChain(completedOptions completedServerRunOptions) (*aggregatora
 主要处理 CustomResourceDefinition（CRD）和 CustomResource（CR）的 REST 请求，也是 Delegation 的最后一环，如果对应 CR 不能被处理的话则会返回 404
 
 3. Aggregator Server 聚合服务器
-暴露的功能类似于一个七层负载均衡，将来自用户的请求拦截转发给其他服务器，并且负责整个 APIServer 的 Discovery 功能
+暴露的功能类似于一个七层负载均衡，将来自用户的请求拦截转发给其他服务器，并且负责整个 APIServer 的 Discovery 功能 
 
 
 在APIExtensionsServer、KubeAPIServer和AggregatorServer三种Server启动时，我们都能发现这么一个函数 completedConfig.New。
 GenericAPIServer 提供了一个通用的http server，定义了通用的模板，例如地址、端口、认证、授权、健康检查等等通用功能。
+
 ```go
 func (c completedConfig) New(name string, delegationTarget DelegationTarget) (*GenericAPIServer, error) {
     // ..
@@ -1238,7 +1245,23 @@ func NewStorage(optsGetter generic.RESTOptionsGetter, k client.ConnectionInfoGet
 
 ### aggregatorServer 
 
+负责处理  apiregistration.k8s.io 组下的 APIService 资源请求，同时将来自用户的请求拦截转发给 Aggregated APIServer(AA)；
+```yaml
+apiVersion: apiregistration.k8s.io/v1beta1
+kind: APIService
+metadata:
+  name: v1alpha1.custom-metrics.metrics.k8s.io
+spec:
+  insecureSkipTLSVerify: true
+  group: custom-metrics.metrics.k8s.io
+  groupPriorityMinimum: 1000
+  versionPriority: 15
+  service:
+    name: api
+    namespace: custom-metrics
+  version: v1alpha1
 
+```
 
 
 ## 参考
