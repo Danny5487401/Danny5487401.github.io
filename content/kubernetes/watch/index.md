@@ -254,7 +254,7 @@ etcd经历了从滑动窗口到MVCC机制的演变，滑动窗口是仅保存有
 ## 可靠事件推送机制的三个子问题
 
 ### 最新事件
-{{<figure src="./latest_event.png#center" width=800px >}}
+{{<figure src="./featured.png#center" width=800px >}}
 
 当你创建完成 watcher 后，此时你执行 put hello 修改操作时，如上图所示，请求经过 KVServer、Raft 模块后 Apply 到状态机时，在 MVCC 的 put 事务中，它会将本次修改的后的 mvccpb.KeyValue 保存到一个 changes 数组中。
 
