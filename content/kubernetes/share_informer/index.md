@@ -2,12 +2,8 @@
 title: "ShareInformer 模块"
 summary: ShareInformer 
 date: 2024-08-19T14:27:21+08:00
-image:
-    caption: 'Image credit: [**Unsplash**](https://unsplash.com)'
 categories:
   - kubernetes
-authors:
-  - Danny
 
 tags:
   - k8s
