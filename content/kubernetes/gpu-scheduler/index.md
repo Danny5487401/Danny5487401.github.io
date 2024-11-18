@@ -1,7 +1,7 @@
 ---
 title: "Gpu Scheduler"
 date: 2024-10-16T10:37:57+08:00
-summary: "在 Kubernetes 中调度 GPU 资源"
+summary: "在 Kubernetes 中调度 GPU 资源及 Device Plugin "
 categories:
   - kubernetes
 tags:
@@ -112,7 +112,7 @@ $  kubectl create -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/
 ### Device Plugin 原理
 Device Plugin 的工作原理其实不复杂，可以分为 插件注册 和 kubelet 调用插件两部分。
 
-- 插件注册：DevicePlugin 启动时会想节点上的 Kubelet 发起注册，这样 Kubelet就可以感知到该插件的存在了
+- 插件注册：DevicePlugin 启动时会向节点上的 Kubelet 发起注册，这样 Kubelet就可以感知到该插件的存在了
 - kubelet 调用插件：注册完成后，当有 Pod 申请对于资源时，kubelet 就会调用该插件 API 实现具体功能
 
 ```protobuf
