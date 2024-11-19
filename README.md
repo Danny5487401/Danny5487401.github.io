@@ -1,8 +1,22 @@
 # Danny 博客
 
-## 站点目录结构
 
-https://docs.hugoblox.com/reference/site-structure/
+## 基本知识
+
+### Front-matter
+
+[**Front-matter**](https://docs.hugoblox.com/reference/front-matter/) 是 markdown 文件最上方以 --- 分隔的区域，用于指定个别markdown的变量。
+
+```markdown
+---
+title: Blogging Like a Hacker
+lang: en-US
+---
+```
+
+## 配置
+
+[站点目录结构](https://docs.hugoblox.com/reference/site-structure/)
 
 ```shell
 ➜  Danny5487401.github.io git:(main) tree -L 1 .                
@@ -57,10 +71,11 @@ _index.md索引页面在Hugo内容中是个特殊角色。它允许您在列表�
 
 ## 命令使用
 
-```shell
-✗ hugo version
-hugo v0.120.4-f11bca5fec2ebb3a02727fb2a5cfb08da96fd9df+extended darwin/arm64 BuildDate=2023-11-08T11:18:07Z VendorInfo=brew
 
+```shell
+# hugo 版本
+✗ hugo version
+hugo v0.139.0+extended+withdeploy darwin/arm64 BuildDate=2024-11-18T16:17:45Z VendorInfo=brew
 ```
 
 ### 添加内容
@@ -78,17 +93,25 @@ hugo v0.120.4-f11bca5fec2ebb3a02727fb2a5cfb08da96fd9df+extended darwin/arm64 Bui
 
 ### 发布
 
-
 实际提交代码触发 GitHub Actions
 
 
 
+## 升级 Hugo Themes or Plugins
 
+插件当前在单独的文件 config/_default/module.yaml 
+
+1. 更改 go.mod 版本
+```shell
+hugo mod get -u github.com/HugoBlox/hugo-blox-builder/modules/blox-tailwind@v0.3.1
+```
+2. 更改 github 流水线 WC_HUGO_VERSION 兼容版本
+3. 
 
 
 
 ## 参考
-- [HugoBlox 本文模版](https://github.com/HugoBlox/theme-blog)
+- [Hugo Academic Blog Theme 本文采用的模版](https://github.com/HugoBlox/theme-blog)
 - [hugoblox 文档](https://docs.hugoblox.com/)
 - [hugo 官方中文文档](https://hugo.opendocs.io/content-management/)
 - [hugo 官方英文文档](https://gohugo.io/documentation/)

@@ -1,3 +1,3 @@
 ---
-title: 主题自带 blog
+title: original theme blog
 ---
