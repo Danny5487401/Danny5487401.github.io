@@ -442,7 +442,7 @@
       "cfs-调优参数",
       "cgroup-v1-与-cgroup-v2",
       "cgroup-子资源参数详解",
-      "chart-215739648",
+      "chart-628437195",
       "charts",
       "client-go实现一个监听deployments-变化的功能如何判断kubernetes资源的变化",
       "client获取事件的机制etcd是使用轮询模式还是推送模式呢两者各有什么优缺点",

@@ -1,8 +1,29 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [Danny 博客](#danny-%E5%8D%9A%E5%AE%A2)
+  - [基本知识](#%E5%9F%BA%E6%9C%AC%E7%9F%A5%E8%AF%86)
+    - [Front-matter](#front-matter)
+  - [配置](#%E9%85%8D%E7%BD%AE)
+    - [配置文件](#%E9%85%8D%E7%BD%AE%E6%96%87%E4%BB%B6)
+    - [索引页面: _index.md](#%E7%B4%A2%E5%BC%95%E9%A1%B5%E9%9D%A2-_indexmd)
+    - [图片处理](#%E5%9B%BE%E7%89%87%E5%A4%84%E7%90%86)
+    - [菜单 menu](#%E8%8F%9C%E5%8D%95-menu)
+  - [命令使用](#%E5%91%BD%E4%BB%A4%E4%BD%BF%E7%94%A8)
+    - [添加内容](#%E6%B7%BB%E5%8A%A0%E5%86%85%E5%AE%B9)
+    - [本地调试](#%E6%9C%AC%E5%9C%B0%E8%B0%83%E8%AF%95)
+    - [发布](#%E5%8F%91%E5%B8%83)
+  - [升级 Hugo Themes or Plugins](#%E5%8D%87%E7%BA%A7-hugo-themes-or-plugins)
+  - [参考](#%E5%8F%82%E8%80%83)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Danny 博客
 
 
 ## 基本知识
-
+![](.README_images/blog_section.png)
 ### Front-matter
 
 [**Front-matter**](https://docs.hugoblox.com/reference/front-matter/) 是 markdown 文件最上方以 --- 分隔的区域，用于指定个别markdown的变量。
@@ -106,7 +127,6 @@ hugo v0.139.0+extended+withdeploy darwin/arm64 BuildDate=2024-11-18T16:17:45Z Ve
 hugo mod get -u github.com/HugoBlox/hugo-blox-builder/modules/blox-tailwind@v0.3.1
 ```
 2. 更改 github 流水线 WC_HUGO_VERSION 兼容版本
-3. 
 
 
 
