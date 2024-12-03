@@ -1,5 +1,5 @@
 ---
-title: "Kube Apiserver"
+title: "Kube ApiServer"
 date: 2024-09-16T13:33:22+08:00
 summary: "核心功能是提供了kubernetes各类资源对象（pod、RC 、service等）的增、删、改、查以及watch等HTTP Rest接口"
 categories:
@@ -9,7 +9,7 @@ authors:
 
 tags:
   - k8s
-  - Apiserver
+  - api-server
   - 源码
 ---
 
