@@ -48,4 +48,5 @@ highlight_name: true
 website: "https://danny5487401.github.io/"
 ---
 
-人生苦短，把酒倒满。Danny xia 只是一个爱好编程的 devops 工程师。
+人生苦短，把酒倒满。 Danny xia 只是一个热爱 Rust, Golang 编程的 devops 工程师。
+

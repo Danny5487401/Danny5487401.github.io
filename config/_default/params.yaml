@@ -14,7 +14,7 @@ marketing:
     site_type: Person
     local_business_type: ''
     org_name: ''
-    description: 'A highly-customizable Hugo blog theme powered by Hugo Blox Builder.'
+    description: '技术分享博客'
     twitter: 'GetResearchDev'
   analytics:
     google_analytics: 'G-BM6R1NKV1S'

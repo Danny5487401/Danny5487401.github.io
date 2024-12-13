@@ -21,10 +21,9 @@
 
 # Danny 博客
 
-
 ## 基本知识
 ![](.README_images/blog_section.png)
-### Front-matter
+### Front-matter 前言
 
 [**Front-matter**](https://docs.hugoblox.com/reference/front-matter/) 是 markdown 文件最上方以 --- 分隔的区域，用于指定个别markdown的变量。
 
@@ -35,26 +34,57 @@ lang: en-US
 ---
 ```
 
+### page bundle: https://gohugo.io/content-management/page-bundles/
+
+```shell
+# this site has an “about” page and a “privacy” page:
+content/
+├── about/ # 这个是 page bundle 
+│   ├── index.md
+│   └── welcome.jpg
+└── privacy.md
+```
+
+
 ## 配置
 
 [站点目录结构](https://docs.hugoblox.com/reference/site-structure/)
 
 ```shell
-➜  Danny5487401.github.io git:(main) tree -L 1 .                
+$ tree -L 2 .
 .
-├── LICENSE.md 
+├── LICENSE.md
 ├── README.md
-├── assets # 图片视频
-├── config # 配置
-├── content # 内容
-├── go.mod
+├── assets
+│   └── media
+├── config
+│   └── _default
+├── content
+│   ├── _index.md
+│   ├── authors
+│   ├── en
+│   ├── golang
+│   ├── kubernetes
+│   ├── post
+│   ├── security
+│   ├── tags
+│   ├── uses.md
+│   └── zh
+├── go.mod # 升级使用
 ├── go.sum
 ├── hugo_stats.json
 ├── netlify.toml
 ├── notebooks
+│   └── blog-with-jupyter.ipynb
+├ # ...
 ├── resources
-└── static # 可下载文件
+│   └── _gen
+└── static
+    └── uploads # 阅读者可以下载的文件
+
 ```
+
+
 
 ### 配置文件
 
@@ -69,18 +99,6 @@ _index.md索引页面在Hugo内容中是个特殊角色。它允许您在列表�
 这些列表模板包括区块模板, tag模板,tag列表模板和您的主页模板。
 
 
-### 图片处理
-
-
-- 全局资源是位于 assets 目录中或装载到 assets 目录中任意目录中的文件。
-- 页面资源是页面束（page bundle）中的文件。页面束是一个具有根目录下的 index.md 或 _index.md 文件的目录
-
-
-使用 [shortcodes ](https://gohugo.io/content-management/shortcodes/#figure)
-```markdown
-{{<figure src="./informer.png#center" width=800px >}}
-```
-
 ### 菜单 menu
 
 3 种方式
@@ -89,7 +107,26 @@ _index.md索引页面在Hugo内容中是个特殊角色。它允许您在列表�
 - 在 front matter 正文区域
 - In site configuration
 
-### 代码块使用
+
+
+## markdown 使用: https://docs.hugoblox.com/reference/markdown/
+
+
+
+
+### 图片处理
+
+
+- 全局资源是位于 assets 目录中或装载到 assets 目录中任意目录中的文件,这里是 assets/media/
+- 页面资源是页面束（page bundle）中的文件。
+
+
+
+
+使用 [shortcodes](https://gohugo.io/content-management/shortcodes/#figure)
+```markdown
+{{<figure src="informer.png#center" width=800px >}}
+```
 
 
 ## 命令使用
@@ -130,6 +167,8 @@ hugo mod get -u github.com/HugoBlox/hugo-blox-builder/modules/blox-tailwind@v0.3
 ```
 2. 更改 github 流水线 WC_HUGO_VERSION 兼容版本
 
+
+## 扩展:https://docs.hugoblox.com/reference/extend/
 
 
 ## 参考
