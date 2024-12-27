@@ -42,7 +42,7 @@ net.ipv4.tcp_keepalive_probes = 10
 ```
 
 ### net.core.somaxconn 
-![](.index_images/tcp_process.png)
+{{<figure src="tcp_process.png#center" width=800px >}}
 Client在收到Server的SYNACK包后，就会发出ACK，Server收到该ACK后，三次握手就完成了，即产生了一个TCP全连接（complete），它会被添加到全连接队列（accept queue）中。然后Server就会调用accept()来完成TCP连接的建立
 全连接队列（accept queue）的长度有限制，目的就是为了防止Server不能及时调用accept()而浪费太多的系统资源.
 全连接队列（accept queue）的长度是由listen(sockfd, backlog)这个函数里的backlog控制的，而该backlog的最大值则是somaxconn

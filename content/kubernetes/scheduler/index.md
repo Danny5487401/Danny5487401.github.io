@@ -1,5 +1,5 @@
 ---
-title: "Scheduler 及调度框架（scheduling framework）"
+title: "kube-scheduler 及调度框架（scheduling framework）"
 date: 2024-09-15T14:26:42+08:00
 summary: "scheduler是kubernetes的调度器，主要任务是把定义的pod分配到集群的节点上。 基于源码 release-1.27"
 categories:
@@ -56,6 +56,11 @@ type Framework interface {
 }
 ```
 
+
+### 调度框架 Framework 第三方应用
+
+- github.com/koordinator-sh/koordinator
+- github.com/kubernetes-sigs/scheduler-plugins
 
 ## 插件分类
 
