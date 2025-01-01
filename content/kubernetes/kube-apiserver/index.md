@@ -1,7 +1,7 @@
 ---
 title: "Kube ApiServer"
 date: 2024-09-16T13:33:22+08:00
-summary: "核心功能是提供了kubernetes各类资源对象（pod、RC 、service等）的增、删、改、查以及watch等HTTP Rest接口"
+summary: "kube api-server 核心功能是提供了kubernetes各类资源对象（pod、RC 、service等）的增、删、改、查以及watch等HTTP Rest接口."
 categories:
   - kubernetes
 authors:
@@ -21,7 +21,7 @@ apiserver 核心职责
 - 缓存etcd 数据
 
 
-Kubernetes  API是一个HTTP形式的API，JSON格式是它主要的序列化架构。同时它也支持协议缓冲区（Protocol  Buffers）的形式，这种形式主要是用在集群内通信中。
+Kubernetes API是一个HTTP形式的API，JSON格式是它主要的序列化架构。同时它也支持协议缓冲区（Protocol  Buffers）的形式，这种形式主要是用在集群内通信中。
 
 出于可扩展性原因考虑，Kubernetes可支持多个API版本，通过不同的API路径的方式区分。比如/api/v1 和 /apis/extensions/v1beta1，不同的API版本代表了这个API处于不同的版本稳定性阶段。
 
@@ -115,7 +115,6 @@ Kubernetes API Server 从上到下可以分为四层：接口层，访问控制�
 ### API请求流过程
 
 
-
 当API Server接收到一个HTTP的Kubernetes API请求时，它主要处理流程如下所示：
 
 {{<figure src="./api-procedure.png#center" width=800px >}}
@@ -197,7 +196,7 @@ func buildGenericConfig(
 		return
 	}
 
-    // 。.. 
+    // ... 
     // Admission 准入机制
 	err = s.Admission.ApplyTo(
 		genericConfig,
@@ -521,17 +520,17 @@ func (config Config) New() (authorizer.Authorizer, authorizer.RuleResolver, erro
 }
 ```
 
-授权方式
+6 种鉴权机制
 ```go
 
 const (
-	// ModeAlwaysAllow is the mode to set all requests as authorized
+	// 总是允许
 	ModeAlwaysAllow string = "AlwaysAllow"
-	// ModeAlwaysDeny is the mode to set no requests as authorized
+	// 总是拒绝
 	ModeAlwaysDeny string = "AlwaysDeny"
 	// ModeABAC is the mode to use Attribute Based Access Control to authorize
 	ModeABAC string = "ABAC"
-	// ModeWebhook is the mode to make an external webhook call to authorize
+	// 基于 webhook 的一种 HTTP 回调机制，可以进行远程鉴权管理
 	ModeWebhook string = "Webhook"
 	// ModeRBAC is the mode to use Role Based Access Control to authorize
 	ModeRBAC string = "RBAC"
@@ -551,6 +550,31 @@ const (
 * --authorization-mode=Node 节点鉴权是一种特殊用途的鉴权模式，专门对 kubelet 发出的 API 请求执行鉴权。
 * --authorization-mode=AlwaysDeny 该标志阻止所有请求。仅将此标志用于测试。
 * --authorization-mode=AlwaysAllow 此标志允许所有请求。仅在你不需要 API 请求 的鉴权时才使用此标志
+
+鉴权中有三个概念：
+
+- Decision：决策状态
+```go
+type Decision int
+
+const (
+	// DecisionDeny means that an authorizer decided to deny the action.
+	DecisionDeny Decision = iota
+	// 允许该操作
+	DecisionAllow
+	// 表示无明显意见允许或拒绝，继续执行下一个鉴权模块
+    DecisionNoOpinion
+)
+
+```
+- Authorizer：鉴权接口
+```go
+type Authorizer interface {
+	// Attributes 是决定鉴权模块从 HTTP 请求中获取鉴权信息方法的参数，它是一个方法集合的接口， 例如 GetUser、GetVerb、GetNamespace、GetResource 等鉴权信息方法。
+	Authorize(ctx context.Context, a Attributes) (authorized Decision, reason string, err error)
+}
+```
+- RuleResolver：规则解析器
 
 
 #### RBAC鉴权器
@@ -596,9 +620,9 @@ func (r *RBACAuthorizer) Authorize(ctx context.Context, requestAttributes author
 
 rbac鉴权过程如下:
 
-1.取到所有的clusterRoleBinding/roleBindings资源对象，遍历它们对比请求用户
-2.对比roleBindings/clusterRoleBinding指向的用户(主体)与请求用户，相同则选中，不相同continue
-3.对比规则与请求属性，符合则提前结束鉴权
+1. 取到所有的clusterRoleBinding/roleBindings资源对象，遍历它们对比请求用户
+2. 对比roleBindings/clusterRoleBinding指向的用户(主体)与请求用户，相同则选中，不相同continue
+3. 对比规则与请求属性，符合则提前结束鉴权
 ```go
 func (r *DefaultRuleResolver) VisitRulesFor(user user.Info, namespace string, visitor func(source fmt.Stringer, rule *rbacv1.PolicyRule, err error) bool) {
 	// 先拿到所有的ClusterRoleBinding对象
@@ -678,8 +702,151 @@ func (v *authorizingVisitor) visit(source fmt.Stringer, rule *rbacv1.PolicyRule,
 ```
 
 
-### admission 准入机制
+### admission 准入机制: 提供回调钩子，资源持久化前对资源的值做改动或者验证等操作
 
+初始化
+```go
+//	genericconfig.Authorizer
+func (a *AdmissionOptions) ApplyTo(
+	c *server.Config,
+	informers informers.SharedInformerFactory,
+	kubeAPIServerClientConfig *rest.Config,
+	features featuregate.FeatureGate,
+	pluginInitializers ...admission.PluginInitializer,
+) error {
+    // ...
+
+	admissionChain, err := a.Plugins.NewFromPlugins(pluginNames, pluginsConfigProvider, initializersChain, a.Decorators)
+	if err != nil {
+		return err
+	}
+
+	c.AdmissionControl = admissionmetrics.WithStepMetrics(admissionChain)
+	return nil
+}
+```
+
+```go
+func (ps *Plugins) NewFromPlugins(pluginNames []string, configProvider ConfigProvider, pluginInitializer PluginInitializer, decorator Decorator) (Interface, error) {
+	handlers := []Interface{}
+	mutationPlugins := []string{}
+	validationPlugins := []string{}
+	for _, pluginName := range pluginNames {
+		pluginConfig, err := configProvider.ConfigFor(pluginName)
+		if err != nil {
+			return nil, err
+		}
+        // 1. 初始化插件
+		plugin, err := ps.InitPlugin(pluginName, pluginConfig, pluginInitializer)
+		if err != nil {
+			return nil, err
+		}
+		if plugin != nil {
+			if decorator != nil {
+				// 如果有装饰器，则添加经过装饰的admission.Interface
+				handlers = append(handlers, decorator.Decorate(plugin, pluginName))
+			} else {
+				handlers = append(handlers, plugin)
+			}
+
+			// 收集mutation plugin
+			if _, ok := plugin.(MutationInterface); ok {
+				mutationPlugins = append(mutationPlugins, pluginName)
+			}
+			// 收集validation plugin
+			if _, ok := plugin.(ValidationInterface); ok {
+				validationPlugins = append(validationPlugins, pluginName)
+			}
+		}
+	}
+	if len(mutationPlugins) != 0 {
+		klog.Infof("Loaded %d mutating admission controller(s) successfully in the following order: %s.", len(mutationPlugins), strings.Join(mutationPlugins, ","))
+	}
+	if len(validationPlugins) != 0 {
+		klog.Infof("Loaded %d validating admission controller(s) successfully in the following order: %s.", len(validationPlugins), strings.Join(validationPlugins, ","))
+	}
+	return newReinvocationHandler(chainAdmissionHandler(handlers)), nil
+}
+
+```
+
+默认的插件
+```go
+func NewAdmissionOptions() *AdmissionOptions {
+	options := genericoptions.NewAdmissionOptions()
+	// register all admission plugins
+	RegisterAllAdmissionPlugins(options.Plugins)
+	// set RecommendedPluginOrder
+	options.RecommendedPluginOrder = AllOrderedPlugins
+	// set DefaultOffPlugins
+	options.DefaultOffPlugins = DefaultOffAdmissionPlugins()
+
+	return &AdmissionOptions{
+		GenericAdmission: options,
+	}
+}
+```
+
+
+
+接口
+```go
+// staging/src/k8s.io/apiserver/pkg/admission/interfaces.go
+
+// Interface is an abstract, pluggable interface for Admission Control decisions.
+type Interface interface {
+	// Handles returns true if this admission controller can handle the given operation
+	// where operation can be one of CREATE, UPDATE, DELETE, or CONNECT
+	Handles(operation Operation) bool
+}
+
+type MutationInterface interface {
+	Interface
+
+	// Admit makes an admission decision based on the request attributes.
+	// Context is used only for timeout/deadline/cancellation and tracing information.
+	Admit(ctx context.Context, a Attributes, o ObjectInterfaces) (err error)
+}
+
+// ValidationInterface is an abstract, pluggable interface for Admission Control decisions.
+type ValidationInterface interface {
+	Interface
+
+	// 对提交上来的资源进行验证
+	Validate(ctx context.Context, a Attributes, o ObjectInterfaces) (err error)
+}
+```
+
+处理时
+```go
+// https://github.com/kubernetes/kubernetes/blob/5e5b3029f3bbfc93c3569f07ad300a5c6057fc58/staging/src/k8s.io/apiserver/pkg/admission/metrics/metrics.go
+
+// Admit performs a mutating admission control check and emit metrics.
+func (p pluginHandlerWithMetrics) Admit(ctx context.Context, a admission.Attributes, o admission.ObjectInterfaces) error {
+	mutatingHandler, ok := p.Interface.(admission.MutationInterface)
+	if !ok {
+		return nil
+	}
+
+	start := time.Now()
+	err := mutatingHandler.Admit(ctx, a, o)
+	p.observer(ctx, time.Since(start), err != nil, a, stepAdmit, p.extraLabels...)
+	return err
+}
+
+// Validate performs a non-mutating admission control check and emits metrics.
+func (p pluginHandlerWithMetrics) Validate(ctx context.Context, a admission.Attributes, o admission.ObjectInterfaces) error {
+	validatingHandler, ok := p.Interface.(admission.ValidationInterface)
+	if !ok {
+		return nil
+	}
+
+	start := time.Now()
+	err := validatingHandler.Validate(ctx, a, o)
+	p.observer(ctx, time.Since(start), err != nil, a, stepValidate, p.extraLabels...)
+	return err
+}
+```
 
 ## 启动
 
@@ -709,12 +876,12 @@ func Run(completeOptions completedServerRunOptions, stopCh <-chan struct{}) erro
 
 三个 APIServer 通过 delegation 的关系关联
 
-{{<figure src="./api-three_apiserver.png#center" width=800px >}}
+{{<figure src="three_apiserver.png#center" width=800px >}}
 ```go
 func CreateServerChain(completedOptions completedServerRunOptions) (*aggregatorapiserver.APIAggregator, error) {
     // ...
 	
-	//  APIExtensionsServer 的 delegationTarget 是一个空的 Delegate，即什么都不做
+	// APIExtensionsServer 的 delegationTarget 是一个空的 Delegate，即什么都不做
 	// API扩展服务，主要针对CRD
 	apiExtensionsServer, err := createAPIExtensionsServer(apiExtensionsConfig, genericapiserver.NewEmptyDelegateWithCustomHandler(notFoundHandler))
 	if err != nil {
@@ -817,7 +984,7 @@ func (c completedConfig) New(name string, delegationTarget DelegationTarget) (*G
 		}
 	}
 
-    // 。。
+    // ...
 
 	// 安装API相关参数
 	installAPI(s, c.Config)
@@ -1014,7 +1181,7 @@ func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget)
 		return nil, err
 	}
 
-    // 。。
+    // ...
 
 	m := &Instance{
 		GenericAPIServer:          s,
@@ -1025,7 +1192,7 @@ func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget)
 	if err := m.InstallLegacyAPI(&c, c.GenericConfig.RESTOptionsGetter); err != nil {
 		return nil, err
 	}
-    // 。。
+    // ...
 
     // REST接口的存储定义
 	restStorageProviders := []RESTStorageProvider{
@@ -1138,6 +1305,7 @@ func (c LegacyRESTStorageProvider) NewLegacyRESTStorage(apiResourceConfigSource 
 	// resourceQuota资源配额
 	resourceQuotaStorage, resourceQuotaStatusStorage, err := resourcequotastore.NewREST(restOptionsGetter)
     // 等等核心资源，暂不一一列举
+	// ...
 
 	storage := map[string]rest.Storage{}
 
@@ -1177,7 +1345,7 @@ func (c LegacyRESTStorageProvider) NewLegacyRESTStorage(apiResourceConfigSource 
 		storage[resource] = eventStorage
 	}
 
-    // 等等。。
+    // 等等...
 
 	if len(storage) > 0 {
 		apiGroupInfo.VersionedResourcesStorageMap["v1"] = storage
@@ -1241,7 +1409,6 @@ func NewStorage(optsGetter generic.RESTOptionsGetter, k client.ConnectionInfoGet
 	}, nil
 }
 ```
-
 
 ### aggregatorServer 
 
