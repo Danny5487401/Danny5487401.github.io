@@ -507,7 +507,7 @@ func (m *kubeGenericRuntimeManager) SyncPod(ctx context.Context, pod *v1.Pod, po
 		}
 	}
 
-	// Step 8: s启动业务容器
+	// Step 8: 启动业务容器
 	for _, idx := range podContainerChanges.ContainersToStart {
 		start(ctx, "container", metrics.Container, containerStartSpec(&pod.Spec.Containers[idx]))
 	}
@@ -516,14 +516,115 @@ func (m *kubeGenericRuntimeManager) SyncPod(ctx context.Context, pod *v1.Pod, po
 }
 ```
 
+启动容器 startContainer
+```go
+// startContainer starts a container and returns a message indicates why it is failed on error.
+// It starts the container through the following steps:
+// * pull the image
+// * create the container
+// * start the container
+// * run the post start lifecycle hooks (if applicable)
+func (m *kubeGenericRuntimeManager) startContainer(ctx context.Context, podSandboxID string, podSandboxConfig *runtimeapi.PodSandboxConfig, spec *startSpec, pod *v1.Pod, podStatus *kubecontainer.PodStatus, pullSecrets []v1.Secret, podIP string, podIPs []string) (string, error) {
+	container := spec.container
 
-## Sandbox沙箱
+	// Step 1: 拉取镜像
+	imageRef, msg, err := m.imagePuller.EnsureImageExists(ctx, pod, container, pullSecrets, podSandboxConfig)
+    // ...
+
+	// Step 2: create the container.
+	// For a new container, the RestartCount should be 0
+    
+    // 初始化Container config配置
+	containerConfig, cleanupAction, err := m.generateContainerConfig(ctx, container, pod, restartCount, podIP, imageRef, podIPs, target)
+	if cleanupAction != nil {
+		defer cleanupAction()
+	}
+    // .. 
+    // 调用生命周期的钩子，预创建 Pre Create Container
+	err = m.internalLifecycle.PreCreateContainer(pod, container, containerConfig)
+
+    // 调用CRI接口创建Container
+	containerID, err := m.runtimeService.CreateContainer(ctx, podSandboxID, containerConfig, podSandboxConfig)
+
+	// 调用生命周期的钩子，预启动Pre Start Container
+	err = m.internalLifecycle.PreStartContainer(pod, container, containerID)
+
+	// Step 3: 调用CRI接口启动container
+	err = m.runtimeService.StartContainer(ctx, containerID)
+    
+
+	// Step 4: 依然是调用生命周期中设置的钩子 post start
+	if container.Lifecycle != nil && container.Lifecycle.PostStart != nil {
+		kubeContainerID := kubecontainer.ContainerID{
+			Type: m.runtimeName,
+			ID:   containerID,
+		}
+		msg, handlerErr := m.runner.Run(ctx, kubeContainerID, pod, container, container.Lifecycle.PostStart)
+		if handlerErr != nil {
+			klog.ErrorS(handlerErr, "Failed to execute PostStartHook", "pod", klog.KObj(pod),
+				"podUID", pod.UID, "containerName", container.Name, "containerID", kubeContainerID.String())
+			// do not record the message in the event so that secrets won't leak from the server.
+			m.recordContainerEvent(pod, container, kubeContainerID.ID, v1.EventTypeWarning, events.FailedPostStartHook, "PostStartHook failed")
+			if err := m.killContainer(ctx, pod, kubeContainerID, container.Name, "FailedPostStartHook", reasonFailedPostStartHook, nil); err != nil {
+				klog.ErrorS(err, "Failed to kill container", "pod", klog.KObj(pod),
+					"podUID", pod.UID, "containerName", container.Name, "containerID", kubeContainerID.String())
+			}
+			return msg, ErrPostStartHook
+		}
+	}
+
+	return "", nil
+}
+
+```
+
+
+
+## Sandbox 沙箱
 
 Sandbox沙箱是一种程序的隔离运行机制，其目的是限制不可信进程的权限。
-在 Linux CRI 体系里，Pod Sandbox 其实就是 pause 容器，在Kubernetes中，pause容器作为pod中所有容器的“父容器”。pause容器有两个核心职责。首先，它是pod中Linux Namespace共享的基础（network、PID、IPC、UTS）。其次，启用了PID(进程ID)命名空间共享后，它为每个pod充当PID 1，并接收僵尸进程。），当前Pod的所有容器都和Pod对应的sandbox共享同一个namespace从而共享一个namespace里面的资源
+在 Linux CRI 体系里，Pod Sandbox 其实就是 pause 容器，在Kubernetes中，pause容器作为pod中所有容器的“父容器”。pause容器有两个核心职责。
+首先，它是pod中Linux Namespace共享的基础（network、PID、IPC、UTS）。
+其次，启用了PID(进程ID)命名空间共享后，它为每个pod充当PID 1，并接收僵尸进程。当前Pod的所有容器都和Pod对应的sandbox共享同一个namespace从而共享一个namespace里面的资源
 
 {{<figure src="./sandbox.png#center" width=800px >}}
 
+
+```go
+// createPodSandbox creates a pod sandbox and returns (podSandBoxID, message, error).
+func (m *kubeGenericRuntimeManager) createPodSandbox(ctx context.Context, pod *v1.Pod, attempt uint32) (string, string, error) {
+	// 生成pod相关配置数据
+	podSandboxConfig, err := m.generatePodSandboxConfig(pod, attempt)
+	if err != nil {
+		message := fmt.Sprintf("Failed to generate sandbox config for pod %q: %v", format.Pod(pod), err)
+		klog.ErrorS(err, "Failed to generate sandbox config for pod", "pod", klog.KObj(pod))
+		return "", message, err
+	}
+
+	// 这里会在宿主机上创建pod logs目录，在/var/log/pods/{namespace}_{pod_name}_{uid}目录下
+	err = m.osInterface.MkdirAll(podSandboxConfig.LogDirectory, 0755)
+	if err != nil {
+		message := fmt.Sprintf("Failed to create log directory for pod %q: %v", format.Pod(pod), err)
+		klog.ErrorS(err, "Failed to create log directory for pod", "pod", klog.KObj(pod))
+		return "", message, err
+	}
+
+    // ...
+    //  调用容器运行时创建sandbox container
+	podSandBoxID, err := m.runtimeService.RunPodSandbox(ctx, podSandboxConfig, runtimeHandler)
+	if err != nil {
+		message := fmt.Sprintf("Failed to create sandbox for pod %q: %v", format.Pod(pod), err)
+		klog.ErrorS(err, "Failed to create sandbox for pod", "pod", klog.KObj(pod))
+		return "", message, err
+	}
+
+	return podSandBoxID, "", nil
+}
+```
+
+
+
+配置生成
 ```go
 func (m *kubeGenericRuntimeManager) generatePodSandboxConfig(pod *v1.Pod, attempt uint32) (*runtimeapi.PodSandboxConfig, error) {
 	// TODO: deprecating podsandbox resource requirements in favor of the pod level cgroup
@@ -604,67 +705,6 @@ func (m *kubeGenericRuntimeManager) generatePodSandboxConfig(pod *v1.Pod, attemp
 }
 ```
 
-启动容器 startContainer
-```go
-// startContainer starts a container and returns a message indicates why it is failed on error.
-// It starts the container through the following steps:
-// * pull the image
-// * create the container
-// * start the container
-// * run the post start lifecycle hooks (if applicable)
-func (m *kubeGenericRuntimeManager) startContainer(ctx context.Context, podSandboxID string, podSandboxConfig *runtimeapi.PodSandboxConfig, spec *startSpec, pod *v1.Pod, podStatus *kubecontainer.PodStatus, pullSecrets []v1.Secret, podIP string, podIPs []string) (string, error) {
-	container := spec.container
-
-	// Step 1: 拉取镜像
-	imageRef, msg, err := m.imagePuller.EnsureImageExists(ctx, pod, container, pullSecrets, podSandboxConfig)
-    // 。。
-
-	// Step 2: create the container.
-	// For a new container, the RestartCount should be 0
-    
-    // 初始化Container config配置
-	containerConfig, cleanupAction, err := m.generateContainerConfig(ctx, container, pod, restartCount, podIP, imageRef, podIPs, target)
-	if cleanupAction != nil {
-		defer cleanupAction()
-	}
-    // 。。 
-    // 调用生命周期的钩子，预创建 Pre Create Container
-	err = m.internalLifecycle.PreCreateContainer(pod, container, containerConfig)
-
-    // /调用CRI接口创建Container
-	containerID, err := m.runtimeService.CreateContainer(ctx, podSandboxID, containerConfig, podSandboxConfig)
-
-	// 调用生命周期的钩子，预启动Pre Start Container
-	err = m.internalLifecycle.PreStartContainer(pod, container, containerID)
-
-	// Step 3: 调用CRI接口启动container
-	err = m.runtimeService.StartContainer(ctx, containerID)
-    
-
-	// Step 4: 依然是调用生命周期中设置的钩子 post start
-	if container.Lifecycle != nil && container.Lifecycle.PostStart != nil {
-		kubeContainerID := kubecontainer.ContainerID{
-			Type: m.runtimeName,
-			ID:   containerID,
-		}
-		msg, handlerErr := m.runner.Run(ctx, kubeContainerID, pod, container, container.Lifecycle.PostStart)
-		if handlerErr != nil {
-			klog.ErrorS(handlerErr, "Failed to execute PostStartHook", "pod", klog.KObj(pod),
-				"podUID", pod.UID, "containerName", container.Name, "containerID", kubeContainerID.String())
-			// do not record the message in the event so that secrets won't leak from the server.
-			m.recordContainerEvent(pod, container, kubeContainerID.ID, v1.EventTypeWarning, events.FailedPostStartHook, "PostStartHook failed")
-			if err := m.killContainer(ctx, pod, kubeContainerID, container.Name, "FailedPostStartHook", reasonFailedPostStartHook, nil); err != nil {
-				klog.ErrorS(err, "Failed to kill container", "pod", klog.KObj(pod),
-					"podUID", pod.UID, "containerName", container.Name, "containerID", kubeContainerID.String())
-			}
-			return msg, ErrPostStartHook
-		}
-	}
-
-	return "", nil
-}
-
-```
 
 ## 参考
 
