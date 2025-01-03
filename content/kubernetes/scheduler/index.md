@@ -1,5 +1,5 @@
 ---
-title: "kube-scheduler 及调度框架（scheduling framework）"
+title: "kube-scheduler 及 Scheduler 扩展功能推荐方式: 调度框架（scheduling framework）"
 date: 2024-09-15T14:26:42+08:00
 summary: "scheduler是kubernetes的调度器，主要任务是把定义的pod分配到集群的节点上。 基于源码 release-1.27"
 categories:
@@ -12,15 +12,45 @@ tags:
   - 源码
 ---
 
+Scheduler是Kubernetes组件中功能&逻辑相对单一&简单的模块，它主要的作用是：watch kube-apiserver，监听PodSpec.NodeName为空的pod，并利用预选和优选算法为该pod选择一个最佳的调度节点，最终将pod与该节点进行绑定，使pod调度在该节点上运行。
 
-## 调度框架 Framework
+## scheduler扩展方案
+
+目前Kubernetes支持四种方式实现客户自定义的调度算法(预选&优选)，如下：
+
+- default-scheduler recoding: 直接在Kubernetes默认scheduler基础上进行添加，然后重新编译kube-scheduler
+- standalone: 实现一个与kube-scheduler平行的custom scheduler，单独或者和默认kube-scheduler一起运行在集群中
+- scheduler extender: 实现一个"scheduler extender"，kube-scheduler会调用它(http/https)作为默认调度算法(预选&优选&bind)的补充
+- scheduler framework: 实现scheduler framework plugins，重新编译kube-scheduler，类似于第一种方案，但是更加标准化，插件化
+
+### scheduler extender
+
+scheduler extender类似于webhook，kube-scheduler会在默认调度算法执行完成后以http/https的方式调用extender，extender server完成自定义的预选&优选逻辑，并返回规定字段给scheduler，scheduler结合这些信息进行最终的调度裁决，从而完成基于extender实现扩展的逻辑。
+
+优点：
+
+- 可以扩展现有调度器的功能，而无需重新编译二进制文件。
+- 扩展器可以用任何语言编写。
+- 实现后，可用于扩展不同版本的 kube-scheduler
+
+
+### scheduler framework 调度框架
+extender提供了非侵入scheduler core的方式扩展scheduler，但是有如下缺点：
+
+- 缺少灵活性：extender提供的接口只能由scheduler core在固定点调用，比如："Filter" extenders只能在默认预选结束后进行调用；而"Prioritize" extenders只能在默认优选执行后调用
+- 性能差：相比原生调用func来说，走http/https + 加解JSON包开销较大
+- 错误处理困难：scheduler core在调用extender后，如果出现错误，需要中断调用，很难将错误信息传递给extender，终止extender逻辑
+- 无法共享cache：extender是webhook，以单独的server形式与scheduler一起运行，如果scheduler core提供的参数无法满足extender处理需求，同时由于无法共享scheduler core cache，那么extender需要自行与kube-apiserver进行通信，并建立cache
+
+
+为了解决scheduler extender存在的问题，scheduler framework在scheduler core基础上进行了改造和提取，在scheduler几乎所有关键路径上设置了plugins扩展点，用户可以在不修改scheduler core代码的前提下开发plugins，最后与core一起编译打包成二进制包实现扩展.
 
 Kubernetes v1.15版本中引入了可插拔架构的调度框架，使得定制调度器这个任务变得更加的容易。
 
 调度框架（Schedule Framework）定义了一组扩展点，用户可以实现扩展点定义的接口来定义自己的调度逻辑（我们称之为扩展），并将扩展注册到扩展点上，调度框架在执行调度工作流时，遇到对应的扩展点时，将调用用户注册的扩展。
 调度框架在预留扩展点时，都是有特定的目的，有些扩展点上的扩展可以改变调度程序的决策方法，有些扩展点上的扩展只是发送一个通知。
 
-### 扩展点（Extension Points）
+#### Extension Points 扩展点
 
 {{<figure src="./scheduler_framework_extensions.png#center" width=800px >}}
 ```go
@@ -56,8 +86,7 @@ type Framework interface {
 }
 ```
 
-
-### 调度框架 Framework 第三方应用
+#### scheduler framework 调度框架第三方应用
 
 - github.com/koordinator-sh/koordinator
 - github.com/kubernetes-sigs/scheduler-plugins
@@ -1203,3 +1232,4 @@ func (r *resourceAllocationScorer) score(
 
 - [官方调度框架](https://kubernetes.io/zh-cn/docs/concepts/scheduling-eviction/scheduling-framework/)
 - [scheduler 核心调度器的实现原理](https://github.com/rfyiamcool/notes/blob/main/kubernetes_scheduler_code.md)
+- [一篇读懂Kubernetes Scheduler扩展功能](https://mp.weixin.qq.com/s/e4VfnUpEOmVxx_zwXOMCPg)
