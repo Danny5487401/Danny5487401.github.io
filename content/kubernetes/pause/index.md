@@ -1,7 +1,7 @@
 ---
 title: "Pause 容器"
 date: 2024-11-02T21:52:00+08:00
-summary: Pause 容器作用
+summary: Pause 容器作用 及 sandbox 创建流程
 categories:
   - kubernetes
 tags:
@@ -44,10 +44,6 @@ kubelet的配置文件中心都指定了如下参数,这是指定拉取的pause�
 
 
 
-
-
-
-
 ## 功能
 kubernetes中的pause容器主要为每个业务容器提供以下功能：
 
@@ -61,9 +57,9 @@ kubernetes中的pause容器主要为每个业务容器提供以下功能：
 
 pod 默认开启共享了 NETWORK, IPC 和 UTS 命名空间. 其他命名空间 namespace 需要在 pod 配置才可开启. 比如可以通过 shareProcessNamespace = true 开启 PID 命名空间的共享, 共享 pid 命名空间后, 容器内可以互相查看彼此的进程.
 
-## 源码分析
-```cgo
-...
+## pause 源码分析
+```C
+// https://github.com/kubernetes/kubernetes/blob/82ac28cc529c287e0f7e62d44a24ac714e6f42ee/build/pause/linux/pause.c
 
 /* SIGINT, SIGTERM 信号会调用该函数. */
 static void sigdown(int signo) {
@@ -114,6 +110,138 @@ pause 容器主要做两件事情.
 
 1. 注册各种信号处理函数，主要处理两类信息：退出信号和 child 信号. 当收到 SIGINT 或是 SIGTERM 后, pause 进程可直接退出. 收到 SIGCHLD 信号, 则调用 waitpid 进行回收进程.
 2. 主进程 for 循环调用 pause() 函数，使进程陷入休眠状态, 不占用 cpu 资源, 直到被终止或是收到信号.
+
+
+## sandbox 启动流程
+
+```go
+// https://github.com/containerd/containerd/blob/6c6cc5ec107f10ccf4d4acbfe89d572a52d58a92/pkg/cri/server/sandbox_run.go
+
+func (c *criService) RunPodSandbox(ctx context.Context, r *runtime.RunPodSandboxRequest) (_ *runtime.RunPodSandboxResponse, retErr error) {
+	config := r.GetConfig()
+	 //.. 
+	id := util.GenerateID()
+	metadata := config.GetMetadata()
+	if metadata == nil {
+		return nil, errors.New("sandbox config must include metadata")
+	}
+	name := makeSandboxName(metadata)
+    // ..
+	snapshotterOpt := snapshots.WithLabels(snapshots.FilterInheritedLabels(config.Annotations))
+	opts := []containerd.NewContainerOpts{
+		containerd.WithSnapshotter(c.config.ContainerdConfig.Snapshotter),
+		customopts.WithNewSnapshot(id, containerdImage, snapshotterOpt),
+		containerd.WithSpec(spec, specOpts...),
+		containerd.WithContainerLabels(sandboxLabels),
+		containerd.WithContainerExtension(sandboxMetadataExtension, &sandbox.Metadata),
+		containerd.WithRuntime(ociRuntime.Type, runtimeOpts)}
+
+	// 创建 container
+	container, err := c.client.NewContainer(ctx, id, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create containerd container: %w", err)
+	}
+
+	// Add container into sandbox store in INIT state.
+	sandbox.Container = container
+
+    // ..
+
+	if podNetwork { // 为 pod 设置网络
+		netStart := time.Now()
+
+		// If it is not in host network namespace then create a namespace and set the sandbox
+		// handle. NetNSPath in sandbox metadata and NetNS is non empty only for non host network
+		// namespaces. If the pod is in host network namespace then both are empty and should not
+		// be used.
+		var netnsMountDir = "/var/run/netns"
+		if c.config.NetNSMountsUnderStateDir {
+			netnsMountDir = filepath.Join(c.config.StateDir, "netns")
+		}
+		sandbox.NetNS, err = netns.NewNetNS(netnsMountDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create network namespace for sandbox %q: %w", id, err)
+		}
+		sandbox.NetNSPath = sandbox.NetNS.GetPath()
+
+        // ..
+
+		// Update network namespace in the container's spec
+		c.updateNetNamespacePath(spec, sandbox.NetNSPath)
+
+		if err := container.Update(ctx,
+			// Update spec of the container
+			containerd.UpdateContainerOpts(containerd.WithSpec(spec)),
+			// Update sandbox metadata to include NetNS info
+			containerd.UpdateContainerOpts(containerd.WithContainerExtension(sandboxMetadataExtension, &sandbox.Metadata)),
+		); err != nil {
+			return nil, fmt.Errorf("failed to update the network namespace for the sandbox container %q: %w", id, err)
+		}
+
+		// ..
+		
+		// 整理传给 CNI 插件的配置，包括 sandbox ID，网络 namespace，以及基本配置，如果包括 bandwidth，dns.
+		if err := c.setupPodNetwork(ctx, &sandbox); err != nil {
+			return nil, fmt.Errorf("failed to setup network for sandbox %q: %w", id, err)
+		}
+
+		// Update metadata here to save CNI result and pod IPs to disk.
+		if err := container.Update(ctx,
+			// Update sandbox metadata to include NetNS info
+			containerd.UpdateContainerOpts(containerd.WithContainerExtension(sandboxMetadataExtension, &sandbox.Metadata)),
+		); err != nil {
+			return nil, fmt.Errorf("failed to update the network namespace for the sandbox container %q: %w", id, err)
+		}
+
+		sandboxCreateNetworkTimer.UpdateSince(netStart)
+	}
+
+
+	taskOpts := c.taskOpts(ociRuntime.Type)
+	if ociRuntime.Path != "" {
+		taskOpts = append(taskOpts, containerd.WithRuntimePath(ociRuntime.Path))
+	}
+	// 创建 sandbox 任务: 发送 task 请求，分别为 CreateTaskRequest，StartRequest，创建以及启动任务
+	task, err := container.NewTask(ctx, containerdio.NullIO, taskOpts...)
+    // ..
+
+	// wait is a long running background request, no timeout needed.
+	exitCh, err := task.Wait(ctrdutil.NamespacedContext())
+	if err != nil {
+		return nil, fmt.Errorf("failed to wait for sandbox container task: %w", err)
+	}
+    // NRI（Node Resource Interface）节点资源接口
+	nric, err := nri.New()
+	if err != nil {
+		return nil, fmt.Errorf("unable to create nri client: %w", err)
+	}
+    // ...
+
+	if err := task.Start(ctx); err != nil {
+		return nil, fmt.Errorf("failed to start sandbox container task %q: %w", id, err)
+	}
+
+	if err := sandbox.Status.Update(func(status sandboxstore.Status) (sandboxstore.Status, error) {
+		// Set the pod sandbox as ready after successfully start sandbox container.
+		status.Pid = task.Pid()
+		status.State = sandboxstore.StateReady
+		status.CreatedAt = info.CreatedAt
+		return status, nil
+	}); err != nil {
+		return nil, fmt.Errorf("failed to update sandbox status: %w", err)
+	}
+
+	if err := c.sandboxStore.Add(sandbox); err != nil {
+		return nil, fmt.Errorf("failed to add sandbox %+v into store: %w", sandbox, err)
+	}
+
+    // ...
+
+	return &runtime.RunPodSandboxResponse{PodSandboxId: id}, nil
+}
+
+```
+
 
 ## 参考
 - [docker 容器基础技术：linux namespace 简介](https://cizixs.com/2017/08/29/linux-namespace/)
