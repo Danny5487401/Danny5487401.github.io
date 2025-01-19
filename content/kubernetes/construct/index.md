@@ -11,7 +11,7 @@ tags:
 
 
 ## 部署工具
-https://github.com/kubernetes-sigs/kubespray/blob/master/docs/getting_started/comparisons.md
+[部署工具对比](https://github.com/kubernetes-sigs/kubespray/blob/master/docs/getting_started/comparisons.md)
 
 - github.com/kubernetes-sigs/kubespray: 使用 ansible 作为配置和编排的基础
 - github.com/kubernetes/kops: 与云平台绑定深,比如 AWS (Amazon Web Services) and GCP (Google Cloud Platform)
@@ -50,6 +50,16 @@ Client在收到Server的SYNACK包后，就会发出ACK，Server收到该ACK后�
 somaxconn在5.4之前的内核中，默认都是128（5.4开始调整为了默认4096）.
 
 当服务器中积压的全连接个数超过该值后，新的全连接就会被丢弃掉。Server在将新连接丢弃时，有的时候需要发送reset来通知Client，这样Client就不会再次重试了。不过，默认行为是直接丢弃不去通知Client。至于是否需要给Client发送reset，是由tcp_abort_on_overflow这个配置项来控制的，该值默认为0，即不发送reset给Client。
+
+
+
+## kubeasz 使用
+
+[AllinOne部署](https://github.com/easzlab/kubeasz/blob/master/docs/setup/quickStart.md),然后再添加 master,node.
+
+
+
+
 
 
 ## 参考

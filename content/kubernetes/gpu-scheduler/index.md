@@ -189,6 +189,122 @@ device plugin 插件需要实现以下接口：
 
 
 
+### kubelet 注册 device plugin
+```go
+// https://github.com/kubernetes/kubernetes/blob/40741681a24a5acf9361ec74b97e887a9da3e3e4/pkg/kubelet/cm/devicemanager/plugin/v1beta1/server.go
+func (s *server) Register(ctx context.Context, r *api.RegisterRequest) (*api.Empty, error) {
+	klog.InfoS("Got registration request from device plugin with resource", "resourceName", r.ResourceName)
+
+	if !s.isVersionCompatibleWithPlugin(r.Version) {
+        // ..
+	}
+
+	if !v1helper.IsExtendedResourceName(core.ResourceName(r.ResourceName)) {
+        // ..
+	}
+    // 注册资源名
+	if err := s.connectClient(r.ResourceName, filepath.Join(s.socketDir, r.Endpoint)); err != nil {
+        // ..
+	}
+
+	return &api.Empty{}, nil
+}
+
+func (s *server) connectClient(name string, socketPath string) error {
+	c := NewPluginClient(name, socketPath, s.chandler)
+
+	s.registerClient(name, c)
+	if err := c.Connect(); err != nil {
+		s.deregisterClient(name)
+		klog.ErrorS(err, "Failed to connect to new client", "resource", name)
+		return err
+	}
+
+	go func() {
+		// 调用list-watch 资源的最新信息
+		s.runClient(name, c)
+	}()
+
+	return nil
+}
+
+
+func (s *server) runClient(name string, c Client) {
+	c.Run()
+
+	c = s.getClient(name)
+	if c == nil {
+		return
+	}
+
+	if err := s.disconnectClient(name, c); err != nil {
+		klog.V(2).InfoS("Unable to disconnect client", "resource", name, "client", c, "err", err)
+	}
+}
+```
+
+kubelet 请求分配资源
+```go
+// https://github.com/kubernetes/kubernetes/blob/e5512149e209453fe24b666c8a48fbc4dc96f05b/pkg/kubelet/cm/devicemanager/manager.go
+func (m *ManagerImpl) allocateContainerResources(pod *v1.Pod, container *v1.Container, devicesToReuse map[string]sets.String) error {
+	podUID := string(pod.UID)
+	contName := container.Name
+	allocatedDevicesUpdated := false
+	needsUpdateCheckpoint := false
+	// Extended resources are not allowed to be overcommitted.
+	// Since device plugin advertises extended resources,
+	// therefore Requests must be equal to Limits and iterating
+	// over the Limits should be sufficient.
+	for k, v := range container.Resources.Limits {
+		resource := string(k)
+		needed := int(v.Value())
+        // ...
+		allocDevices, err := m.devicesToAllocate(podUID, contName, resource, needed, devicesToReuse[resource])
+        // ...
+
+        // 打乱顺序
+		devs := allocDevices.UnsortedList()
+        
+		// 分配资源
+		resp, err := eI.e.allocate(devs)
+        // ...
+
+		allocDevicesWithNUMA := checkpoint.NewDevicesPerNUMA()
+		// Update internal cached podDevices state.
+		m.mutex.Lock()
+		for dev := range allocDevices {
+			if m.allDevices[resource][dev].Topology == nil || len(m.allDevices[resource][dev].Topology.Nodes) == 0 {
+				allocDevicesWithNUMA[nodeWithoutTopology] = append(allocDevicesWithNUMA[nodeWithoutTopology], dev)
+				continue
+			}
+			for idx := range m.allDevices[resource][dev].Topology.Nodes {
+				node := m.allDevices[resource][dev].Topology.Nodes[idx]
+				allocDevicesWithNUMA[node.ID] = append(allocDevicesWithNUMA[node.ID], dev)
+			}
+		}
+		m.mutex.Unlock()
+		m.podDevices.insert(podUID, contName, resource, allocDevicesWithNUMA, resp.ContainerResponses[0])
+	}
+
+	if needsUpdateCheckpoint {
+		return m.writeCheckpoint()
+	}
+
+	return nil
+}
+
+```
+```go
+func (e *endpointImpl) allocate(devs []string) (*pluginapi.AllocateResponse, error) {
+    // ...
+	// 调用 Allocate
+	return e.api.Allocate(context.Background(), &pluginapi.AllocateRequest{
+		ContainerRequests: []*pluginapi.ContainerAllocateRequest{
+			{DevicesIDs: devs},
+		},
+	})
+}
+```
 
 
 ## 基于 K8S 的 GPU 虚拟化框架
