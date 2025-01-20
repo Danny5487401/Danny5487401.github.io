@@ -37,10 +37,8 @@ var (
 ## 存储架构和csi架构
 
 
-
-
-- PV Controller：负责 PV/PVC 的绑定，并根据需求进行数据卷的 Provision/Delete 操作
-- AD Controller：负责存储设备的 Attach/Detach 操作，将设备挂载到目标节点
+- PersistentVolumeController：负责 PV/PVC 的绑定，并根据需求进行数据卷的 Provision/Delete 操作
+- attachDetachController：主要负责创建、删除VolumeAttachment对象，并调用volume plugin来做存储设备的Attach/Detach操作（将数据卷挂载到特定node节点上/从特定node节点上解除挂载），以及更新node.Status.VolumesAttached等
 - Volume Manager：管理卷的 Mount/Unmount 操作、卷设备的格式化等操作
 - Volume Plugin：扩展各种存储类型的卷管理能力，实现第三方存储的各种操作能力和 Kubernetes 存储系统结合
 
@@ -126,7 +124,7 @@ spec:
 
 
 
-### PV controller
+### PersistentVolumeController
 
 pv 的状态
 ```go
@@ -221,6 +219,36 @@ func ProbeControllerVolumePlugins(logger klog.Logger, cloud cloudprovider.Interf
 - hostPath类型则是映射node文件系统中的文件或者目录到pod里
 - Local volume 允许用户通过标准PVC接口以简单且可移植的方式访问node节点的本地存储。
 
+
+### attachDetachController
+{{<figure src="./attach_detach_controller.png#center" width=800px >}}
+
+AD Controller与kubelet中的volume manager逻辑相似，都可以做Attach/Detach操作，但是kube-controller-manager与kubelet中，只会有一个组件做Attach/Detach操作，通过kubelet启动参数--enable-controller-attach-detach设置。
+设置为 true 表示启用kube-controller-manager的AD controller来做Attach/Detach操作，同时禁用 kubelet 执行 Attach/Detach 操作（默认值为 true）
+
+```go
+// https://github.com/kubernetes/kubernetes/blob/6a111bebe2a609589c560ef1ce5431e3f04ac945/pkg/controller/volume/attachdetach/attach_detach_controller.go
+func (adc *attachDetachController) Run(ctx context.Context) {
+    // ..
+	// 初始化实际状态
+	err := adc.populateActualStateOfWorld(logger)
+	if err != nil {
+	    logger.Error(err, "Error populating the actual state of world")
+	}
+	// 初始化期望状态
+	err = adc.populateDesiredStateOfWorld(logger)
+	if err != nil {
+	    logger.Error(err, "Error populating the desired state of world")
+	}
+	go adc.reconciler.Run(ctx)
+	// 启动更新pod信息的goroutine
+	go adc.desiredStateOfWorldPopulator.Run(ctx)
+	//  从pvcQueue队列中获取pvc对象
+	go wait.UntilWithContext(ctx, adc.pvcWorker, time.Second)
+    // ..
+}
+
+```
 
 ## 第三方插件
 
@@ -509,6 +537,205 @@ func (ctrl *ProvisionController) provisionClaimOperation(ctx context.Context, cl
 3. External Attacher 观察到该 VolumeAttachment 对象，并调用外部 CSI插件的ControllerPublish 函数以将卷挂接到对应节点上。当外部 CSI 插件挂载成功后，External Attacher会更新相关 VolumeAttachment 对象的 .Status.Attached 为 true；
 
 4. AD 控制器内部 in-tree CSI 插件（csiAttacher）观察到 VolumeAttachment 对象的 .Status.Attached 设置为 true，于是更新AD 控制器内部状态（ActualStateOfWorld），该状态会显示在 Node 资源的 .Status.VolumesAttached 上；
+
+
+
+
+```go
+// https://github.com/kubernetes/kubernetes/blob/1972dd10058702a13911a9fb76e38b58dcca8c8d/pkg/controller/volume/attachdetach/reconciler/reconciler.go
+func (rc *reconciler) Run(ctx context.Context) {
+	wait.UntilWithContext(ctx, rc.reconciliationLoopFunc(ctx), rc.loopPeriod)
+}
+
+
+func (rc *reconciler) reconciliationLoopFunc(ctx context.Context) func(context.Context) {
+	return func(ctx context.Context) {
+
+		rc.reconcile(ctx)
+        // ..
+	}
+}
+
+
+func (rc *reconciler) reconcile(ctx context.Context) {
+    
+	logger := klog.FromContext(ctx)
+	// 首先执行detach操作 以便腾出空余的位置给attach操作
+	for _, attachedVolume := range rc.actualStateOfWorld.GetAttachedVolumes() {
+		if !rc.desiredStateOfWorld.VolumeExists(
+			attachedVolume.VolumeName, attachedVolume.NodeName) {
+
+            // 判断当前的volume是否支持多重挂载
+            // 多重挂载是由spec.AccessModes决定
+            // 由对应csi验证的
+            // AccessModes为空或者包含ReadWriteMany/ReadOnlyMany为支持
+            // 即使支持多重Attach， 也需要进行排他性的操作
+			if util.IsMultiAttachAllowed(attachedVolume.VolumeSpec) {
+				if !rc.attacherDetacher.IsOperationSafeToRetry(attachedVolume.VolumeName, "" /* podName */, attachedVolume.NodeName, operationexecutor.DetachOperationName) {
+					logger.V(10).Info("Operation for volume is already running or still in exponential backoff for node. Can't start detach", "node", klog.KRef("", string(attachedVolume.NodeName)), "volumeName", attachedVolume.VolumeName)
+					continue
+				}
+			} else {
+				if !rc.attacherDetacher.IsOperationSafeToRetry(attachedVolume.VolumeName, "" /* podName */, "" /* nodeName */, operationexecutor.DetachOperationName) {
+					logger.V(10).Info("Operation for volume is already running or still in exponential backoff in the cluster. Can't start detach for node", "node", klog.KRef("", string(attachedVolume.NodeName)), "volumeName", attachedVolume.VolumeName)
+					continue
+				}
+			}
+
+			// 获取状态并检查， 如果为Detached则跳过
+			attachState := rc.actualStateOfWorld.GetAttachState(attachedVolume.VolumeName, attachedVolume.NodeName)
+			if attachState == cache.AttachStateDetached {
+				logger.V(5).Info("Volume detached--skipping", "volume", attachedVolume)
+				continue
+			}
+
+			// 设置或获取detach请求时间
+			elapsedTime, err := rc.actualStateOfWorld.SetDetachRequestTime(logger, attachedVolume.VolumeName, attachedVolume.NodeName)
+			if err != nil {
+				logger.Error(err, "Cannot trigger detach because it fails to set detach request time with error")
+				continue
+			}
+			// 判断是否超时
+			timeout := elapsedTime > rc.maxWaitForUnmountDuration
+
+			// 获取节点是否健康
+			isHealthy, err := rc.nodeIsHealthy(attachedVolume.NodeName)
+			if err != nil {
+				logger.Error(err, "Failed to get health of node", "node", klog.KRef("", string(attachedVolume.NodeName)))
+			}
+
+			// Force detach volumes from unhealthy nodes after maxWaitForUnmountDuration.
+			forceDetach := !isHealthy && timeout
+
+			// 判断节点是否有out-of-service taint
+			hasOutOfServiceTaint, err := rc.hasOutOfServiceTaint(attachedVolume.NodeName)
+			if err != nil {
+				logger.Error(err, "Failed to get taint specs for node", "node", klog.KRef("", string(attachedVolume.NodeName)))
+			}
+
+			// Check whether volume is still mounted. Skip detach if it is still mounted unless force detach timeout
+			// or the node has `node.kubernetes.io/out-of-service` taint.
+			if attachedVolume.MountedByNode && !forceDetach && !hasOutOfServiceTaint {
+				logger.V(5).Info("Cannot detach volume because it is still mounted", "volume", attachedVolume)
+				continue
+			}
+
+			// 在执行detach操作前，先将volume从实际状态中删除
+			err = rc.actualStateOfWorld.RemoveVolumeFromReportAsAttached(attachedVolume.VolumeName, attachedVolume.NodeName)
+			if err != nil {
+                // ...
+			}
+
+			// 更新节点状态
+			err = rc.nodeStatusUpdater.UpdateNodeStatusForNode(logger, attachedVolume.NodeName)
+			if err != nil {
+				// 
+			}
+
+			// Trigger detach volume which requires verifying safe to detach step
+			// If timeout is true, skip verifySafeToDetach check
+			// If the node has node.kubernetes.io/out-of-service taint with NoExecute effect, skip verifySafeToDetach check
+			logger.V(5).Info("Starting attacherDetacher.DetachVolume", "volume", attachedVolume)
+			if hasOutOfServiceTaint {
+				logger.V(4).Info("node has out-of-service taint", "node", klog.KRef("", string(attachedVolume.NodeName)))
+			}
+			verifySafeToDetach := !(timeout || hasOutOfServiceTaint)
+			err = rc.attacherDetacher.DetachVolume(logger, attachedVolume.AttachedVolume, verifySafeToDetach, rc.actualStateOfWorld)
+			if err == nil {
+				if !timeout {
+					logger.Info("attacherDetacher.DetachVolume started", "volume", attachedVolume)
+				} else {
+					metrics.RecordForcedDetachMetric()
+					logger.Info("attacherDetacher.DetachVolume started: this volume is not safe to detach, but maxWaitForUnmountDuration expired, force detaching", "duration", rc.maxWaitForUnmountDuration, "volume", attachedVolume)
+				}
+			}
+            // ..
+		}
+	}
+
+	// 执行attach操作
+	rc.attachDesiredVolumes(logger)
+
+	// 更新node状态
+	err := rc.nodeStatusUpdater.UpdateNodeStatuses(logger)
+	if err != nil {
+		logger.Info("UpdateNodeStatuses failed", "err", err)
+	}
+}
+```
+
+最终的操作会由对应的attacher执行， 这里以csi为例
+```go
+func (c *csiAttacher) Attach(spec *volume.Spec, nodeName types.NodeName) (string, error) {
+	_, ok := c.plugin.host.(volume.KubeletVolumeHost)
+	if ok {
+		return "", errors.New("attaching volumes from the kubelet is not supported")
+	}
+
+    // ...
+
+	pvSrc, err := getPVSourceFromSpec(spec)
+	if err != nil {
+		return "", errors.New(log("attacher.Attach failed to get CSIPersistentVolumeSource: %v", err))
+	}
+
+	node := string(nodeName)
+	attachID := getAttachmentName(pvSrc.VolumeHandle, pvSrc.Driver, node)
+
+	attachment, err := c.plugin.volumeAttachmentLister.Get(attachID)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return "", errors.New(log("failed to get volume attachment from lister: %v", err))
+	}
+
+	// 如果不存在则创建
+	if attachment == nil {
+		var vaSrc storage.VolumeAttachmentSource
+		if spec.InlineVolumeSpecForCSIMigration {
+			// inline PV scenario - use PV spec to populate VA source.
+			// The volume spec will be populated by CSI translation API
+			// for inline volumes. This allows fields required by the CSI
+			// attacher such as AccessMode and MountOptions (in addition to
+			// fields in the CSI persistent volume source) to be populated
+			// as part of CSI translation for inline volumes.
+			vaSrc = storage.VolumeAttachmentSource{
+				InlineVolumeSpec: &spec.PersistentVolume.Spec,
+			}
+		} else {
+			// regular PV scenario - use PV name to populate VA source
+			pvName := spec.PersistentVolume.GetName()
+			vaSrc = storage.VolumeAttachmentSource{
+				PersistentVolumeName: &pvName,
+			}
+		}
+
+		attachment := &storage.VolumeAttachment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: attachID,
+			},
+			Spec: storage.VolumeAttachmentSpec{
+				NodeName: node,
+				Attacher: pvSrc.Driver,
+				Source:   vaSrc,
+			},
+		}
+
+		_, err = c.k8s.StorageV1().VolumeAttachments().Create(context.TODO(), attachment, metav1.CreateOptions{})
+        // ..
+	}
+
+	// Attach and detach functionality is exclusive to the CSI plugin that runs in the AttachDetachController,
+	// and has access to a VolumeAttachment lister that can be polled for the current status.
+	if err := c.waitForVolumeAttachmentWithLister(spec, pvSrc.VolumeHandle, attachID, c.watchTimeout); err != nil {
+		return "", err
+	}
+
+    // ...
+
+	// Don't return attachID as a devicePath. We can reconstruct the attachID using getAttachmentName()
+	return "", nil
+}
+```
+
 
 ### Mounting 将 volume 挂载到 pod 里
 
