@@ -132,6 +132,63 @@ Kubernetes API Server 从上到下可以分为四层：接口层，访问控制�
 ## GenericAPIServer 通用配置
 
 ```go
+func CreateKubeAPIServerConfig(s completedServerRunOptions) (
+	*controlplane.Config,
+	aggregatorapiserver.ServiceResolver,
+	[]admission.PluginInitializer,
+	error,
+) {
+	proxyTransport := CreateProxyTransport()
+    // 1、构建 genericConfig
+	genericConfig, versionedInformers, serviceResolver, pluginInitializers, admissionPostStartHook, storageFactory, err := buildGenericConfig(s.ServerRunOptions, proxyTransport)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+    // 2、初始化所支持的 capabilities
+	capabilities.Setup(s.AllowPrivileged, s.MaxConnectionBytesPerSec)
+
+    // ...
+    
+	config := &controlplane.Config{
+		GenericConfig: genericConfig, // 通用配置
+		// 额外配置
+		ExtraConfig: controlplane.ExtraConfig{
+			APIResourceConfigSource: storageFactory.APIResourceConfigSource,
+			StorageFactory:          storageFactory,
+			EventTTL:                s.EventTTL,
+			KubeletClientConfig:     s.KubeletConfig,
+			EnableLogsSupport:       s.EnableLogsHandler,
+			ProxyTransport:          proxyTransport,
+
+			ServiceIPRange:          s.PrimaryServiceClusterIPRange,// service ip range
+			APIServerServiceIP:      s.APIServerServiceIP, //  api server service IP
+			SecondaryServiceIPRange: s.SecondaryServiceClusterIPRange,
+
+			APIServerServicePort: 443,
+
+			ServiceNodePortRange:      s.ServiceNodePortRange,
+			KubernetesServiceNodePort: s.KubernetesServiceNodePort,
+
+			EndpointReconcilerType: reconcilers.Type(s.EndpointReconcilerType),
+			MasterCount:            s.MasterCount,
+
+			ServiceAccountIssuer:        s.ServiceAccountIssuer,
+			ServiceAccountMaxExpiration: s.ServiceAccountTokenMaxExpiration,
+			ExtendExpiration:            s.Authentication.ServiceAccounts.ExtendExpiration,
+
+			VersionedInformers: versionedInformers,
+		},
+	}
+
+	// ...
+
+
+	return config, serviceResolver, pluginInitializers, nil
+}
+```
+
+生成默认的 genericConfig，genericConfig 中主要配置了 DefaultBuildHandlerChain，DefaultBuildHandlerChain 中包含了认证、鉴权等一系列 http filter chain；
+```go
 func buildGenericConfig(
 	s *options.ServerRunOptions,
 	proxyTransport *http.Transport,
@@ -152,7 +209,7 @@ func buildGenericConfig(
 		return
 	}
 
-    // ..
+    // ...
 	// 对外提供的API文档
 	getOpenAPIDefinitions := openapi.GetOpenAPIDefinitionsWithoutDisabledFeatures(generatedopenapi.GetOpenAPIDefinitions)
 	namer := openapinamer.NewDefinitionNamer(legacyscheme.Scheme, extensionsapiserver.Scheme, aggregatorscheme.Scheme)
@@ -186,13 +243,7 @@ func buildGenericConfig(
     // 授权配置
     // k8e提供6种授权机制，每种授权机制被实例化后都成为授权器
 	genericConfig.Authorization.Authorizer, genericConfig.RuleResolver, err = BuildAuthorizer(s, genericConfig.EgressSelector, versionedInformers)
-	if err != nil {
-		lastErr = fmt.Errorf("invalid authorization config: %v", err)
-		return
-	}
-	if !sets.NewString(s.Authorization.Modes...).Has(modes.ModeRBAC) {
-		genericConfig.DisabledPostStartHooks.Insert(rbacrest.PostStartHookName)
-	}
+    // ...
 
 	// 审计相关
 	lastErr = s.Audit.ApplyTo(genericConfig)
@@ -862,14 +913,14 @@ func (p pluginHandlerWithMetrics) Validate(ctx context.Context, a admission.Attr
 启动的代码逻辑可以分为9个步骤：
 
 1. 资源注册
-1. Cobra命令行参数解析
-1. 创建apiserver通用配置
-1. 创建APIExtensionsServer
-1. 创建KubeAPIServer
-1. 创建AggregatorServer
-1. 创建GenericAPIServer
-1. 启动http服务
-1. 启动https服务
+2. Cobra命令行参数解析
+3. 创建apiserver通用配置
+4. 创建APIExtensionsServer
+5. 创建KubeAPIServer
+6. 创建AggregatorServer
+7. 创建GenericAPIServer
+8. 启动http服务
+9. 启动https服务
 
 ```go
 // https://github.com/kubernetes/kubernetes/blob/3d2f5d27f80b8eb00e908e85978c97a1fb28f9e8/cmd/kube-apiserver/app/server.go
@@ -880,7 +931,7 @@ func Run(completeOptions completedServerRunOptions, stopCh <-chan struct{}) erro
 	if err != nil {
 		return err
 	}
-    // 预运行
+    // 预运行: 主要完成了健康检查、存活检查和OpenAPI路由的注册工作
 	prepared, err := server.PrepareRun()
 	if err != nil {
 		return err
@@ -889,7 +940,6 @@ func Run(completeOptions completedServerRunOptions, stopCh <-chan struct{}) erro
 	return prepared.Run(stopCh)
 }
 ```
-
 
 
 
@@ -1077,6 +1127,101 @@ func installAPI(s *GenericAPIServer, c *Config) {
 }
 ```
 
+
+### prepared.Run
+
+```go
+func (s preparedGenericAPIServer) Run(stopCh <-chan struct{}) error {
+	delayedStopCh := s.lifecycleSignals.AfterShutdownDelayDuration
+	shutdownInitiatedCh := s.lifecycleSignals.ShutdownInitiated
+
+	// Clean up resources on shutdown.
+	defer s.Destroy()
+
+    // ...
+	
+	
+
+	// 判断是否要启动审计日志
+	if s.AuditBackend != nil {
+		if err := s.AuditBackend.Run(drainedCh.Signaled()); err != nil {
+			return fmt.Errorf("failed to run the audit backend: %v", err)
+		}
+	}
+    
+	// 调用 s.NonBlockingRun 完成启动流程
+	stoppedCh, listenerStoppedCh, err := s.NonBlockingRun(stopHttpServerCh, shutdownTimeout)
+	if err != nil {
+		return err
+	}
+
+    // ...
+	
+	<-stopCh
+
+	//当收到退出信号后完成一些收尾工作
+	func() {
+		defer func() {
+			preShutdownHooksHasStoppedCh.Signal()
+			klog.V(1).InfoS("[graceful-termination] pre-shutdown hooks completed", "name", preShutdownHooksHasStoppedCh.Name())
+		}()
+		err = s.RunPreShutdownHooks()
+	}()
+	if err != nil {
+		return err
+	}
+
+	// Wait for all requests in flight to drain, bounded by the RequestTimeout variable.
+	<-drainedCh.Signaled()
+
+	if s.AuditBackend != nil {
+		s.AuditBackend.Shutdown()
+		klog.V(1).InfoS("[graceful-termination] audit backend shutdown completed")
+	}
+
+	// wait for stoppedCh that is closed when the graceful termination (server.Shutdown) is finished.
+	<-listenerStoppedCh
+	<-stoppedCh
+
+	klog.V(1).Info("[graceful-termination] apiserver is exiting")
+	return nil
+}
+
+
+func (s preparedGenericAPIServer) NonBlockingRun(stopCh <-chan struct{}, shutdownTimeout time.Duration) (<-chan struct{}, <-chan struct{}, error) {
+	// Use an internal stop channel to allow cleanup of the listeners on error.
+	internalStopCh := make(chan struct{})
+	var stoppedCh <-chan struct{}
+	var listenerStoppedCh <-chan struct{}
+	if s.SecureServingInfo != nil && s.Handler != nil { 
+		var err error
+		// 启动 https server
+		stoppedCh, listenerStoppedCh, err = s.SecureServingInfo.Serve(s.Handler, shutdownTimeout, internalStopCh)
+		if err != nil {
+			close(internalStopCh)
+			return nil, nil, err
+		}
+	}
+
+	// Now that listener have bound successfully, it is the
+	// responsibility of the caller to close the provided channel to
+	// ensure cleanup.
+	go func() {
+		<-stopCh
+		close(internalStopCh)
+	}()
+    // 执行 postStartHooks
+	s.RunPostStartHooks(stopCh)
+
+	// 向 systemd 发送 ready 信号
+	if _, err := systemd.SdNotify(true, "READY=1\n"); err != nil {
+		klog.Errorf("Unable to send systemd daemon successful start message: %v\n", err)
+	}
+
+	return stoppedCh, listenerStoppedCh, nil
+}
+```
+
 ### apiExtensionsServer
 
 apiExtensionsServer主要负责CustomResourceDefinition（CRD）apiResources以及apiVersions的注册，同时处理CRD以及相应CustomResource（CR）的REST请求(如果对应CR不能被处理的话则会返回404)，也是apiserver Delegation的最后一环
@@ -1217,8 +1362,6 @@ func NewDefaultAPIGroupInfo(group string, scheme *runtime.Scheme, parameterCodec
 }
 ```
 
-
-
 ### kubeAPIServer
 
 KubeAPIServer主要提供对内建API Resources的操作请求，为Kubernetes中各API Resources注册路由信息，同时暴露RESTFul API，使集群中以及集群外的服务都可以通过RESTful API操作Kubernetes中的资源
@@ -1345,12 +1488,12 @@ func (c LegacyRESTStorageProvider) NewLegacyRESTStorage(apiResourceConfigSource 
 		return LegacyRESTStorage{}, genericapiserver.APIGroupInfo{}, err
 	}
 	restStorage := LegacyRESTStorage{}
-    // pod 模板
+    //  PodTemplate 资源的 RESTStorage 初始化
 	podTemplateStorage, err := podtemplatestore.NewREST(restOptionsGetter)
 	if err != nil {
 		return LegacyRESTStorage{}, genericapiserver.APIGroupInfo{}, err
 	}
-    //  event事件
+    // event事件
 	eventStorage, err := eventstore.NewREST(restOptionsGetter, uint64(c.EventTTL.Seconds()))
 	if err != nil {
 		return LegacyRESTStorage{}, genericapiserver.APIGroupInfo{}, err
@@ -1365,7 +1508,23 @@ func (c LegacyRESTStorageProvider) NewLegacyRESTStorage(apiResourceConfigSource 
     // 等等核心资源，暂不一一列举
 	// ...
 
+	// 将资源和对应的 RESTStorage 进行绑定
 	storage := map[string]rest.Storage{}
+    if resource := "pods"; apiResourceConfigSource.ResourceEnabled(corev1.SchemeGroupVersion.WithResource(resource)) {
+        storage[resource] = podStorage.Pod
+        storage[resource+"/attach"] = podStorage.Attach
+        storage[resource+"/status"] = podStorage.Status
+        storage[resource+"/log"] = podStorage.Log
+        storage[resource+"/exec"] = podStorage.Exec
+        storage[resource+"/portforward"] = podStorage.PortForward
+        storage[resource+"/proxy"] = podStorage.Proxy
+        storage[resource+"/binding"] = podStorage.Binding
+        if podStorage.Eviction != nil {
+            storage[resource+"/eviction"] = podStorage.Eviction
+        }
+        storage[resource+"/ephemeralcontainers"] = podStorage.EphemeralContainers
+    
+    }
 
 	if resource := "bindings"; apiResourceConfigSource.ResourceEnabled(corev1.SchemeGroupVersion.WithResource(resource)) {
 		storage[resource] = podStorage.LegacyBinding
@@ -1414,20 +1573,20 @@ func (c LegacyRESTStorageProvider) NewLegacyRESTStorage(apiResourceConfigSource 
 
 ```
 
+{{<figure src="./rest_storage.png#center" width=800px >}}
 这里拿 pod 作为案例
 
 ```go
 // https://github.com/kubernetes/kubernetes/blob/62889f416cb60f66b3f04810ef2475c425b8394a/pkg/registry/core/pod/storage/storage.go
 func NewStorage(optsGetter generic.RESTOptionsGetter, k client.ConnectionInfoGetter, proxyTransport http.RoundTripper, podDisruptionBudgetClient policyclient.PodDisruptionBudgetsGetter) (PodStorage, error) {
-
 	store := &genericregistry.Store{
-		NewFunc:                   func() runtime.Object { return &api.Pod{} },
-		NewListFunc:               func() runtime.Object { return &api.PodList{} },
+		NewFunc:                   func() runtime.Object { return &api.Pod{} }, //返回特定资源信息
+		NewListFunc:               func() runtime.Object { return &api.PodList{} }, //返回特定资源列表
 		PredicateFunc:             registrypod.MatchPod,
 		DefaultQualifiedResource:  api.Resource("pods"),
 		SingularQualifiedResource: api.Resource("pod"),
         // 增改删的策略
-		CreateStrategy:      registrypod.Strategy,
+		CreateStrategy:      registrypod.Strategy, // 特定资源创建时的策略
 		UpdateStrategy:      registrypod.Strategy,
 		DeleteStrategy:      registrypod.Strategy,
 		ResetFieldsStrategy: registrypod.Strategy,
@@ -1435,6 +1594,7 @@ func NewStorage(optsGetter generic.RESTOptionsGetter, k client.ConnectionInfoGet
 
 		TableConvertor: printerstorage.TableConvertor{TableGenerator: printers.NewTableGenerator().With(printersinternal.AddHandlers)},
 	}
+	// Store 配置
 	options := &generic.StoreOptions{
 		RESTOptions: optsGetter,
 		AttrFunc:    registrypod.GetAttrs,
@@ -1466,6 +1626,39 @@ func NewStorage(optsGetter generic.RESTOptionsGetter, k client.ConnectionInfoGet
 		PortForward:         &podrest.PortForwardREST{Store: store, KubeletConn: k},
 	}, nil
 }
+```
+
+```go
+func (e *Store) CompleteWithOptions(options *generic.StoreOptions) error {
+    // 相关校验
+	// ...
+	opts, err := options.RESTOptions.GetRESTOptions(e.DefaultQualifiedResource)
+    
+	// 存储
+	if e.Storage.Storage == nil {
+		e.Storage.Codec = opts.StorageConfig.Codec
+		var err error
+		e.Storage.Storage, e.DestroyFunc, err = opts.Decorator(
+			opts.StorageConfig,
+			prefix,
+			keyFunc,
+			e.NewFunc,
+			e.NewListFunc,
+			attrFunc,
+			options.TriggerFunc,
+			options.Indexers,
+		)
+		if err != nil {
+			return err
+		}
+		e.StorageVersioner = opts.StorageConfig.EncodeVersioner
+
+        // ...
+	}
+
+	return nil
+}
+
 ```
 
 ### aggregatorServer 
