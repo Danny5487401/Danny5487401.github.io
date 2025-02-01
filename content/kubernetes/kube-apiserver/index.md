@@ -9,7 +9,7 @@ authors:
 
 tags:
   - k8s
-  - api-server
+  - kube-apiserver
   - 源码
 ---
 
@@ -176,11 +176,15 @@ func buildGenericConfig(
 
     // ...
 
-	// 认证相关
+	// 认证配置
+    // 内部调用 authenticatorConfig.New()
+    // k8s提供9种认证机制，每种认证机制被实例化后都成为认证器
 	if lastErr = s.Authentication.ApplyTo(&genericConfig.Authentication, genericConfig.SecureServing, genericConfig.EgressSelector, genericConfig.OpenAPIConfig, genericConfig.OpenAPIV3Config, clientgoExternalClient, versionedInformers); lastErr != nil {
 		return
 	}
-    // 授权相关
+	
+    // 授权配置
+    // k8e提供6种授权机制，每种授权机制被实例化后都成为授权器
 	genericConfig.Authorization.Authorizer, genericConfig.RuleResolver, err = BuildAuthorizer(s, genericConfig.EgressSelector, versionedInformers)
 	if err != nil {
 		lastErr = fmt.Errorf("invalid authorization config: %v", err)
@@ -197,7 +201,11 @@ func buildGenericConfig(
 	}
 
     // ... 
-    // Admission 准入机制
+    // 准入器admission配置
+    // k8s资源在认证和授权通过，被持久化到etcd之前进入准入控制逻辑
+    // 准入控制包括：对请求的资源进行自定义操作（校验、修改、拒绝）
+    // k8s支持31 种准入控制
+    // 准入控制器通过Plugins数据结构统一注册、存放、管理
 	err = s.Admission.ApplyTo(
 		genericConfig,
 		versionedInformers,
@@ -272,7 +280,7 @@ func (config Config) New() (authenticator.Request, *spec.SecurityDefinitions, er
 		}
 		tokenAuthenticators = append(tokenAuthenticators, authenticator.WrapAudienceAgnosticToken(config.APIAudiences, tokenAuth))
 	}
-	// token 添加 service account
+	// 4 ServiceAccountAuth认证器
 	if len(config.ServiceAccountKeyFiles) > 0 {
 		serviceAccountAuth, err := newLegacyServiceAccountAuthenticator(config.ServiceAccountKeyFiles, config.ServiceAccountLookup, config.APIAudiences, config.ServiceAccountTokenGetter, config.SecretsWriter)
 		if err != nil {
@@ -287,14 +295,14 @@ func (config Config) New() (authenticator.Request, *spec.SecurityDefinitions, er
 		}
 		tokenAuthenticators = append(tokenAuthenticators, serviceAccountAuth)
 	}
-	// token 添加 bootstrap  用于集群初始化阶段
+	// 5 BootstrapToken认证器  用于集群初始化阶段
 	if config.BootstrapToken {
 		if config.BootstrapTokenAuthenticator != nil {
 			// TODO: This can sometimes be nil because of
 			tokenAuthenticators = append(tokenAuthenticators, authenticator.WrapAudienceAgnosticToken(config.APIAudiences, config.BootstrapTokenAuthenticator))
 		}
 	}
-    // 添加 oidc OAuth2 认证
+    // 6 添加 oidc OAuth2 认证
 	if len(config.OIDCIssuerURL) > 0 && len(config.OIDCClientID) > 0 {
 		// TODO(enj): wire up the Notifier and ControllerRunner bits when OIDC supports CA reload
 		var oidcCAContent oidc.CAContentProvider
@@ -322,7 +330,7 @@ func (config Config) New() (authenticator.Request, *spec.SecurityDefinitions, er
 		}
 		tokenAuthenticators = append(tokenAuthenticators, authenticator.WrapAudienceAgnosticToken(config.APIAudiences, oidcAuth))
 	}
-	// 添加 webhook
+	// 7 WebhookTokenAuth认证器
 	if len(config.WebhookTokenAuthnConfigFile) > 0 {
 		webhookTokenAuth, err := newWebhookTokenAuthenticator(config)
 		if err != nil {
@@ -332,7 +340,7 @@ func (config Config) New() (authenticator.Request, *spec.SecurityDefinitions, er
 		tokenAuthenticators = append(tokenAuthenticators, webhookTokenAuth)
 	}
 
-	// tokenAuthenticators
+	// 8 tokenAuthenticators
 	if len(tokenAuthenticators) > 0 {
 		// Union the token authenticators
 		tokenAuth := tokenunion.New(tokenAuthenticators...)
@@ -352,6 +360,7 @@ func (config Config) New() (authenticator.Request, *spec.SecurityDefinitions, er
 	}
 
 	if len(authenticators) == 0 {
+        // 9 匿名认证器
 		if config.Anonymous {
 			return anonymous.NewAuthenticator(), &securityDefinitions, nil
 		}
@@ -452,7 +461,7 @@ func (config Config) New() (authorizer.Authorizer, authorizer.RuleResolver, erro
 	for _, authorizationMode := range config.AuthorizationModes {
 		// Keep cases in sync with constant list in k8s.io/kubernetes/pkg/kubeapiserver/authorizer/modes/modes.go.
 		switch authorizationMode {
-		case modes.ModeNode:
+		case modes.ModeNode: // Node授权器
 			node.RegisterMetrics()
 			graph := node.NewGraph()
 			node.AddGraphEventHandlers(
@@ -466,23 +475,23 @@ func (config Config) New() (authorizer.Authorizer, authorizer.RuleResolver, erro
 			authorizers = append(authorizers, nodeAuthorizer)
 			ruleResolvers = append(ruleResolvers, nodeAuthorizer)
 
-		case modes.ModeAlwaysAllow:
+		case modes.ModeAlwaysAllow: // AlwaysAllow授权器
 			alwaysAllowAuthorizer := authorizerfactory.NewAlwaysAllowAuthorizer()
 			authorizers = append(authorizers, alwaysAllowAuthorizer)
 			ruleResolvers = append(ruleResolvers, alwaysAllowAuthorizer)
-		case modes.ModeAlwaysDeny:
+		case modes.ModeAlwaysDeny: // AlwaysDeny授权器
 			alwaysDenyAuthorizer := authorizerfactory.NewAlwaysDenyAuthorizer()
 			authorizers = append(authorizers, alwaysDenyAuthorizer)
 			ruleResolvers = append(ruleResolvers, alwaysDenyAuthorizer)
-		case modes.ModeABAC:
-			// ABAC
+		case modes.ModeABAC: // ABAC
+			
 			abacAuthorizer, err := abac.NewFromFile(config.PolicyFile)
 			if err != nil {
 				return nil, nil, err
 			}
 			authorizers = append(authorizers, abacAuthorizer)
 			ruleResolvers = append(ruleResolvers, abacAuthorizer)
-		case modes.ModeWebhook:
+		case modes.ModeWebhook: // Webhook授权器
 			if config.WebhookRetryBackoff == nil {
 				return nil, nil, errors.New("retry backoff parameters for authorization webhook has not been specified")
 			}
@@ -501,8 +510,8 @@ func (config Config) New() (authorizer.Authorizer, authorizer.RuleResolver, erro
 			}
 			authorizers = append(authorizers, webhookAuthorizer)
 			ruleResolvers = append(ruleResolvers, webhookAuthorizer)
-		case modes.ModeRBAC:
-			// RBAC
+		case modes.ModeRBAC: // RBAC
+			
 			rbacAuthorizer := rbac.New(
 				&rbac.RoleGetter{Lister: config.VersionedInformerFactory.Rbac().V1().Roles().Lister()},
 				&rbac.RoleBindingLister{Lister: config.VersionedInformerFactory.Rbac().V1().RoleBindings().Lister()},
@@ -850,21 +859,33 @@ func (p pluginHandlerWithMetrics) Validate(ctx context.Context, a admission.Attr
 
 ## 启动
 
+启动的代码逻辑可以分为9个步骤：
+
+1. 资源注册
+1. Cobra命令行参数解析
+1. 创建apiserver通用配置
+1. 创建APIExtensionsServer
+1. 创建KubeAPIServer
+1. 创建AggregatorServer
+1. 创建GenericAPIServer
+1. 启动http服务
+1. 启动https服务
+
 ```go
 // https://github.com/kubernetes/kubernetes/blob/3d2f5d27f80b8eb00e908e85978c97a1fb28f9e8/cmd/kube-apiserver/app/server.go
 func Run(completeOptions completedServerRunOptions, stopCh <-chan struct{}) error {
     // ...
-
+    // 创建服务链
 	server, err := CreateServerChain(completeOptions)
 	if err != nil {
 		return err
 	}
-
+    // 预运行
 	prepared, err := server.PrepareRun()
 	if err != nil {
 		return err
 	}
-
+    // 正式运行
 	return prepared.Run(stopCh)
 }
 ```
@@ -874,10 +895,28 @@ func Run(completeOptions completedServerRunOptions, stopCh <-chan struct{}) erro
 
 ### CreateServerChain: API 层 创建 Three Servers
 
-三个 APIServer 通过 delegation 的关系关联
+| 服务名 |                                                     概述                                                      | 对象管理 |资源注册表 |
+| :--: |:-----------------------------------------------------------------------------------------------------------:| :--: |:--: |
+| APIExtensionsServer | 主要处理 CustomResourceDefinition（CRD）和 CustomResource（CR）的 REST 请求，也是 Delegation 的最后一环，如果对应 CR 不能被处理的话则会返回 404 | CustomResourceDefinitions |extensionsapiserver.Scheme |
+| KubeAPIServer |                                核心服务，提供k8s内置核心资源服务，不允许开发者随意修改，如：Pod，Service等                                 | Master |Legacyscheme.Scheme |
+| AggregatorServer|                                              API聚合服务，提供了聚合服务,功能类似于一个七层负载均衡，将来自用户的请求拦截转发给其他服务器，并且负责整个 APIServer 的 Discovery 功能                                               | APIAggregator |aggregatorscheme.Scheme |
+
+
+
+三个 APIServer 通过 delegation 委托模式 的关系关联,初始化的过程都是类似的，包括：
+
+- 首先为每个server创建对应的config
+- 然后初始化http server，具体包括：
+  - 初始化GoRestfulContainer
+  - 安装server所包含的api，细节有：
+    - 为每个api-resource创建对应的后端存储RESTStorage
+    - 为每个api-resource所支持的verbs添加对应的handler
+    - 将handler注册到router中
+    - 将router注册到webservice
 
 {{<figure src="three_apiserver.png#center" width=800px >}}
 ```go
+// 创建服务链
 func CreateServerChain(completedOptions completedServerRunOptions) (*aggregatorapiserver.APIAggregator, error) {
     // ...
 	
@@ -910,16 +949,6 @@ func CreateServerChain(completedOptions completedServerRunOptions) (*aggregatora
 ```
 
 
-1. Kube Core API Server 核心接口服务器  
-负责对请求的一些通用处理，认证、鉴权等，以及处理各个内建资源的 REST 服务
-
-2. API Extensions Server 可扩展接口服务器
-主要处理 CustomResourceDefinition（CRD）和 CustomResource（CR）的 REST 请求，也是 Delegation 的最后一环，如果对应 CR 不能被处理的话则会返回 404
-
-3. Aggregator Server 聚合服务器
-暴露的功能类似于一个七层负载均衡，将来自用户的请求拦截转发给其他服务器，并且负责整个 APIServer 的 Discovery 功能 
-
-
 在APIExtensionsServer、KubeAPIServer和AggregatorServer三种Server启动时，我们都能发现这么一个函数 completedConfig.New。
 GenericAPIServer 提供了一个通用的http server，定义了通用的模板，例如地址、端口、认证、授权、健康检查等等通用功能。
 
@@ -932,7 +961,7 @@ func (c completedConfig) New(name string, delegationTarget DelegationTarget) (*G
 		return c.BuildHandlerChainFunc(handler, c.Config)
 	}
 
-    // 。。
+    // ...
 	
     // 新建Handler
 	apiServerHandler := NewAPIServerHandler(name, c.Serializer, handlerChainBuilder, delegationTarget.UnprotectedHandler())
@@ -1061,23 +1090,26 @@ func createAPIExtensionsServer(apiextensionsConfig *apiextensionsapiserver.Confi
 
 ```go
 func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget) (*CustomResourceDefinitions, error) {
+    // APIExtensionsServer依赖GenericAPIServer
+    // 通过GenericConfig创建一个名为apiextensions-apiserver的服务
 	genericServer, err := c.GenericConfig.New("apiextensions-apiserver", delegationTarget)
 	if err != nil {
 		return nil, err
 	}
 
     // ..
-
+    // APIExtensionsServer通过CustomResourceDefinitions对象进行管理
+    // 实例化该对象后才能注册APIExtensionsServer下的资源
 	s := &CustomResourceDefinitions{
 		GenericAPIServer: genericServer,
 	}
 
 	apiResourceConfig := c.GenericConfig.MergedResourceConfig
-	// apiextensions.k8s.io group 
+	// apiextensions.k8s.io // 实例化APIGroupInfo，该对象用于描述资源组信息
 	apiGroupInfo := genericapiserver.NewDefaultAPIGroupInfo(apiextensions.GroupName, Scheme, metav1.ParameterCodec, Codecs)
 	storage := map[string]rest.Storage{}
 	// customresourcedefinitions
-	if resource := "customresourcedefinitions"; apiResourceConfig.ResourceEnabled(v1.SchemeGroupVersion.WithResource(resource)) {
+	if resource := "customresourcedefinitions"; apiResourceConfig.ResourceEnabled(v1.SchemeGroupVersion.WithResource(resource)) { // 如果开启了v1资源版本，将资源版本、资源、资源存储存放到APIGroupInfo的map中
 		// 生成CRD对应的RESTStorage
 		customResourceDefinitionStorage, err := customresourcedefinition.NewREST(Scheme, c.GenericConfig.RESTOptionsGetter)
         // ...
@@ -1090,7 +1122,7 @@ func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget)
 		// 将apiGroupInfo和RESTStorage关联起来，下一步注册apiGroupInfo会用到
 		apiGroupInfo.VersionedResourcesStorageMap[v1.SchemeGroupVersion.Version] = storage
 	}
-
+    // 注册api
 	if err := s.GenericAPIServer.InstallAPIGroup(&apiGroupInfo); err != nil {
 		return nil, err
 	}
@@ -1116,7 +1148,9 @@ func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget)
 		discovery: map[string]*discovery.APIGroupHandler{},
 		delegate:  delegateHandler,
 	}
+	// 初始化主controller
 	establishingController := establish.NewEstablishingController(s.Informers.Apiextensions().V1().CustomResourceDefinitions(), crdClient.ApiextensionsV1())
+	// 申明handler
 	crdHandler, err := NewCustomResourceDefinitionHandler(
 		versionDiscoveryHandler,
 		groupDiscoveryHandler,
@@ -1137,6 +1171,7 @@ func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget)
 	if err != nil {
 		return nil, err
 	}
+	// 添加handler函数
 	s.GenericAPIServer.Handler.NonGoRestfulMux.Handle("/apis", crdHandler)
 	s.GenericAPIServer.Handler.NonGoRestfulMux.HandlePrefix("/apis/", crdHandler)
 	s.GenericAPIServer.RegisterDestroyFunc(crdHandler.destroy)
@@ -1146,9 +1181,11 @@ func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget)
 		aggregatedDiscoveryManager = aggregatedDiscoveryManager.WithSource(aggregated.CRDSource)
 	}
 	discoveryController := NewDiscoveryController(s.Informers.Apiextensions().V1().CustomResourceDefinitions(), versionDiscoveryHandler, groupDiscoveryHandler, aggregatedDiscoveryManager)
+	// 初始化namingController
 	namingController := status.NewNamingConditionController(s.Informers.Apiextensions().V1().CustomResourceDefinitions(), crdClient.ApiextensionsV1())
 	nonStructuralSchemaController := nonstructuralschema.NewConditionController(s.Informers.Apiextensions().V1().CustomResourceDefinitions(), crdClient.ApiextensionsV1())
 	apiApprovalController := apiapproval.NewKubernetesAPIApprovalPolicyConformantConditionController(s.Informers.Apiextensions().V1().CustomResourceDefinitions(), crdClient.ApiextensionsV1())
+	// 初始化finalizingController
 	finalizingController := finalizer.NewCRDFinalizer(
 		s.Informers.Apiextensions().V1().CustomResourceDefinitions(),
 		crdClient.ApiextensionsV1(),
@@ -1161,9 +1198,30 @@ func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget)
 }
 ```
 
+APIGroupInfo用于描述资源组信息，一个资源对应一个APIGroupInfo对象，每个资源对应一个资源存储对象
+```go
+func NewDefaultAPIGroupInfo(group string, scheme *runtime.Scheme, parameterCodec runtime.ParameterCodec, codecs serializer.CodecFactory) APIGroupInfo {
+	return APIGroupInfo{
+		PrioritizedVersions:          scheme.PrioritizedVersionsForGroup(group),
+		// 这个map用于存储资源、资源存储对象的映射关系
+        // 格式：资源版本/资源/资源存储对象
+        // 资源存储对象RESTStorage，负责资源的增删改查
+        // 后续会将RESTStorage转换为http的handler函数
+		VersionedResourcesStorageMap: map[string]map[string]rest.Storage{},
+		// TODO unhardcode this.  It was hardcoded before, but we need to re-evaluate
+		OptionsExternalVersion: &schema.GroupVersion{Version: "v1"},
+		Scheme:                 scheme,
+		ParameterCodec:         parameterCodec,
+		NegotiatedSerializer:   codecs,
+	}
+}
+```
+
+
+
 ### kubeAPIServer
 
-KubeAPIServer主要提供对内建API Resources的操作请求，为Kubernetes中各API Resources注册路由信息，同时暴露RESTful API，使集群中以及集群外的服务都可以通过RESTful API操作Kubernetes中的资源
+KubeAPIServer主要提供对内建API Resources的操作请求，为Kubernetes中各API Resources注册路由信息，同时暴露RESTFul API，使集群中以及集群外的服务都可以通过RESTful API操作Kubernetes中的资源
 
 ```go
 func CreateKubeAPIServer(kubeAPIServerConfig *controlplane.Config, delegateAPIServer genericapiserver.DelegationTarget) (*controlplane.Instance, error) {
@@ -1430,9 +1488,77 @@ spec:
 
 ```
 
+```go
+func createAggregatorServer(aggregatorConfig *aggregatorapiserver.Config, delegateAPIServer genericapiserver.DelegationTarget, apiExtensionInformers apiextensionsinformers.SharedInformerFactory, crdAPIEnabled bool) (*aggregatorapiserver.APIAggregator, error) {
+	// 初始化delegate
+	aggregatorServer, err := aggregatorConfig.Complete().NewWithDelegate(delegateAPIServer)
+	if err != nil {
+		return nil, err
+	}
+
+	// 创建autoRegistrationController
+	apiRegistrationClient, err := apiregistrationclient.NewForConfig(aggregatorConfig.GenericConfig.LoopbackClientConfig)
+	if err != nil {
+		return nil, err
+	}
+	autoRegistrationController := autoregister.NewAutoRegisterController(aggregatorServer.APIRegistrationInformers.Apiregistration().V1().APIServices(), apiRegistrationClient)
+	// apiService
+	apiServices := apiServicesToRegister(delegateAPIServer, autoRegistrationController)
+	// 创建crdRegistrationController
+	crdRegistrationController := crdregistration.NewCRDRegistrationController(
+		apiExtensionInformers.Apiextensions().V1().CustomResourceDefinitions(),
+		autoRegistrationController)
+
+	// Imbue all builtin group-priorities onto the aggregated discovery
+	if aggregatorConfig.GenericConfig.AggregatedDiscoveryGroupManager != nil {
+		for gv, entry := range apiVersionPriorities {
+			aggregatorConfig.GenericConfig.AggregatedDiscoveryGroupManager.SetGroupVersionPriority(metav1.GroupVersion(gv), int(entry.group), int(entry.version))
+		}
+	}
+
+	err = aggregatorServer.GenericAPIServer.AddPostStartHook("kube-apiserver-autoregistration", func(context genericapiserver.PostStartHookContext) error {
+		// 启动crdRegistrationController
+		go crdRegistrationController.Run(5, context.StopCh)
+		go func() {
+			// let the CRD controller process the initial set of CRDs before starting the autoregistration controller.
+			// this prevents the autoregistration controller's initial sync from deleting APIServices for CRDs that still exist.
+			// we only need to do this if CRDs are enabled on this server.  We can't use discovery because we are the source for discovery.
+			if crdAPIEnabled {
+				klog.Infof("waiting for initial CRD sync...")
+				crdRegistrationController.WaitForInitialSync()
+				klog.Infof("initial CRD sync complete...")
+			} else {
+				klog.Infof("CRD API not enabled, starting APIService registration without waiting for initial CRD sync")
+			}
+			// 启动autoRegistrationController
+			autoRegistrationController.Run(5, context.StopCh)
+		}()
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	err = aggregatorServer.GenericAPIServer.AddBootSequenceHealthChecks(
+		makeAPIServiceAvailableHealthCheck(
+			"autoregister-completion",
+			apiServices,
+			aggregatorServer.APIRegistrationInformers.Apiregistration().V1().APIServices(),
+		),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return aggregatorServer, nil
+}
+
+```
+
 
 ## 参考
 
 - [APIServer的认证机制](https://github.com/yinwenqin/kubeSourceCodeNote/blob/master/apiServer/Kubernetes%E6%BA%90%E7%A0%81%E5%AD%A6%E4%B9%A0-APIServer-P3-APIServer%E7%9A%84%E8%AE%A4%E8%AF%81%E6%9C%BA%E5%88%B6.md)
 - [APIServer的鉴权机制](https://github.com/yinwenqin/kubeSourceCodeNote/blob/master/apiServer/Kubernetes%E6%BA%90%E7%A0%81%E5%AD%A6%E4%B9%A0-APIServer-P4-APIServer%E7%9A%84%E9%89%B4%E6%9D%83%E6%9C%BA%E5%88%B6.md)
 - [ApiServer之三大server及权限与数据存储](https://juejin.cn/post/7154591873066565668#heading-8)
+- [k8s源码分析（2）- kube-apiserver](https://cloud.tencent.com/developer/article/1717417)
