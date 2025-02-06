@@ -1,5 +1,5 @@
 ---
-title: "kube-apiserver API Priority and Fairness 优先级和公平性 "
+title: "kube-apiserver APF(API Priority and Fairness 优先级和公平性)"
 date: 2024-11-18T10:32:16+08:00
 summary: "kube-apiserver Flowcontrol 流量控制及 API Priority and Fairness 实现原理"
 categories:
@@ -7,6 +7,7 @@ categories:
 tags:
   - kube-apiserver
   - k8s
+  - apf 
 ---
 
 
@@ -14,8 +15,17 @@ tags:
 
 API 优先级和公平性（APF）是一种替代方案，可提升上述最大并发限制。 APF 以更细粒度的方式对请求进行分类和隔离。 它还引入了空间有限的排队机制，因此在非常短暂的突发情况下，API 服务器不会拒绝任何请求。 通过使用公平排队技术从队列中分发请求，这样， 一个行为不佳的控制器就不会饿死其他控制器 （即使优先级相同）
 
+以下代码证基于版本 release-1.27
 
-以下基于版本 release-1.27
+## 传统限流方法的缺点
+
+比如突然有一个人发起无数请求，这些请求一个人就可以将apiserver打死，然后它阻塞了其他的所有的请求。
+因为是一个共享集群，这个共享集群里面有无数的用户，然后无数的组件，如果有一个组件出现了问题，比如他发了1w个请求到apiserver，这些请求就将apiserver堵死了，请求请求只能在后面排队
+
+
+
+
+## 开启配置
 
 ```go
 // staging/src/k8s.io/apiserver/pkg/server/options/recommended.go
@@ -61,10 +71,8 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
 }
 ```
 
-
-## 传统限流方法的缺点
-
-比如突然有一个人发起无数请求，这些请求一个人就可以将apiserver打死，然后它阻塞了其他的所有的请求。因为是一个共享集群，这个共享集群里面有无数的用户，然后无数的组件，如果有一个组件出现了问题，比如他发了1w个请求到apiserver，这些请求就将apiserver堵死了，请求请求只能在后面排队
+## 混洗分片（Shuffle-Sharding）
+shuffle sharding用到了虚拟分片(shuffle shard)的概念，这里将不会直接对workers进行分片，而是按照"用户"进行分片，目的是尽量将用户打散分布到不同的worker上
 
 
 ## API Priority and Fairness
@@ -85,6 +93,50 @@ prioritylevelconfigurations                    flowcontrol.apiserver.k8s.io/v1be
 
 ```
 APF限流通过两种资源
+```go
+// k8s.io/apiserver/pkg/apis/flowcontrol/bootstrap/default.go
+
+// The objects that define the current suggested additional configuration
+var (
+	SuggestedPriorityLevelConfigurations = []*flowcontrol.PriorityLevelConfiguration{
+		// "system" priority-level is for the system components that affects self-maintenance of the
+		// cluster and the availability of those running pods in the cluster, including kubelet and
+		// kube-proxy.
+		SuggestedPriorityLevelConfigurationSystem,
+		// "node-high" priority-level is for the node health reporting. It is separated from "system"
+		// to make sure that nodes are able to report their health even if kube-apiserver is not capable of
+		// handling load caused by pod startup (fetching secrets, events etc).
+		// NOTE: In large clusters 50% - 90% of all API calls use this priority-level.
+		SuggestedPriorityLevelConfigurationNodeHigh,
+		// "leader-election" is dedicated for controllers' leader-election, which majorly affects the
+		// availability of any controller runs in the cluster.
+		SuggestedPriorityLevelConfigurationLeaderElection,
+		// "workload-high" is used by those workloads with higher priority but their failure won't directly
+		// impact the existing running pods in the cluster, which includes kube-scheduler, and those well-known
+		// built-in workloads such as "deployments", "replicasets" and other low-level custom workload which
+		// is important for the cluster.
+		SuggestedPriorityLevelConfigurationWorkloadHigh,
+		// "workload-low" is used by those workloads with lower priority which availability only has a
+		// minor impact on the cluster.
+		SuggestedPriorityLevelConfigurationWorkloadLow,
+		// "global-default" serves the rest traffic not handled by the other suggested flow-schemas above.
+		SuggestedPriorityLevelConfigurationGlobalDefault,
+	}
+	SuggestedFlowSchemas = []*flowcontrol.FlowSchema{
+		SuggestedFlowSchemaSystemNodes,               // references "system" priority-level
+		SuggestedFlowSchemaSystemNodeHigh,            // references "node-high" priority-level
+		SuggestedFlowSchemaProbes,                    // （豁免）
+		SuggestedFlowSchemaSystemLeaderElection,      // references "leader-election" priority-level
+		SuggestedFlowSchemaWorkloadLeaderElection,    // references "leader-election" priority-level
+		SuggestedFlowSchemaEndpointsController,       // references "workload-high" priority-level
+		SuggestedFlowSchemaKubeControllerManager,     // references "workload-high" priority-level
+		SuggestedFlowSchemaKubeScheduler,             // references "workload-high" priority-level
+		SuggestedFlowSchemaKubeSystemServiceAccounts, // references "workload-high" priority-level
+		SuggestedFlowSchemaServiceAccounts,           // references "workload-low" priority-level
+		SuggestedFlowSchemaGlobalDefault,             // references "global-default" priority-level
+	}
+)
+```
 - PriorityLevelConfigurations 定义隔离类型和可处理的并发预算量，还可以调整排队行为。 
 ```shell
 (⎈|kind-kind:N/A)➜  ~ kg prioritylevelconfigurations
@@ -103,20 +155,20 @@ kind: PriorityLevelConfiguration
 metadata:
   name: global-default
 spec:
-  limited:
+  limited: #限制策略
     lendablePercent: 50
     limitResponse:
       queuing:
-        handSize: 6
-        queueLengthLimit: 50
-        queues: 128
-      type: Queue
+        handSize: 6 #队列
+        queueLengthLimit: 50 #队列长度
+        queues: 128 #队列数
+      type: Queue #Queue或者Reject，Reject直接返回429，Queue将请求加入队列
     nominalConcurrencyShares: 20
-  type: Limited
+  type: Limited #类型，Limited或Exempt， Exempt即不限制
 ```
-- FlowSchemas用于对每个入站请求进行分类，并与一个 PriorityLevelConfigurations相匹配
+- FlowSchemas 用于对每个入站请求进行分类，并与一个 PriorityLevelConfigurations相匹配
 ```shell
-(⎈|kind-kind:N/A)➜  ~ kubectl get  flowschemas
+(⎈|kind-kind:N/A)➜  ~ kubectl get flowschemas
 NAME                           PRIORITYLEVEL     MATCHINGPRECEDENCE   DISTINGUISHERMETHOD   AGE   MISSINGPL
 exempt                         exempt            1                    <none>                37h   False
 probes                         exempt            2                    <none>                37h   False
@@ -131,13 +183,236 @@ kube-system-service-accounts   workload-high     900                  ByNamespac
 service-accounts               workload-low      9000                 ByUser                37h   False
 global-default                 global-default    9900                 ByUser                37h   False
 catch-all                      catch-all         10000                ByUser                37h   False
+
+(⎈|kind-danny-test:N/A)➜  ~ kubectl get flowschema global-default -o yaml
+apiVersion: flowcontrol.apiserver.k8s.io/v1beta3
+kind: FlowSchema
+metadata:
+  generation: 1
+  name: global-default
+spec:
+  distinguisherMethod:
+    type: ByUser
+  matchingPrecedence: 9900 #匹配优先级，1~1000，越小优先级越高
+  priorityLevelConfiguration:
+    name: global-default
+  rules:
+  - nonResourceRules:
+    - nonResourceURLs:
+      - '*'
+      verbs:
+      - '*'
+    resourceRules:
+    - apiGroups:
+      - '*'
+      clusterScope: true
+      namespaces:
+      - '*'
+      resources:
+      - '*'
+      verbs:
+      - '*'
+    subjects:
+    - group:
+        name: system:unauthenticated
+      kind: Group
+    - group:
+        name: system:authenticated
+      kind: Group
 ```
 
 每个flowschemas都有其对应的优先级，所以任何请求过来之后它都会从上到下去匹配，优先级数字越小的越优先匹配（第三列），它就通过优先级来决定它的限流策略是什么
 
 
+### prioritylevelconfigurations 配置使用
+- 增大 plc 的 queues 参数值，会减少不同 flow 之间冲突的可能性，但是会增加内存负担，如果其值为 1， 则会禁掉 fair-queueing 逻辑，但是请求还是会被排队处理；
+- 增大 plc 的 queueLengthLimit 的参数值，可以应对突发的流量，不丢弃相关的请求，但会增大延迟和内存占用；
+- 增大 plc 的 handsize 的参数值，可调节不同flow冲突的概率【增加公平度，防止某些 flow 饥饿】，以及总体并发度；但也可能导致某些类型的 flow 霸占住 as，且导致请求处理延迟增大；单 个 flow 上能处理的最大请求的数目可能的值为 handSize * queueLengthLimit
+
+配置初始化
+```go
+func queueSetCompleterForPL(qsf fq.QueueSetFactory, queues fq.QueueSet, pl *flowcontrol.PriorityLevelConfiguration, requestWaitLimit time.Duration, reqsIntPair metrics.RatioedGaugePair, execSeatsObs metrics.RatioedGauge, seatDemandGauge metrics.Gauge) (fq.QueueSetCompleter, error) {
+    // ...
+	qcAPI := pl.Spec.Limited.LimitResponse.Queuing
+	qcQS := fq.QueuingConfig{Name: pl.Name}
+	if qcAPI != nil {
+		qcQS = fq.QueuingConfig{Name: pl.Name,
+			DesiredNumQueues: int(qcAPI.Queues),
+			QueueLengthLimit: int(qcAPI.QueueLengthLimit),
+			HandSize:         int(qcAPI.HandSize),
+			RequestWaitLimit: requestWaitLimit,
+		}
+	}
+	var qsc fq.QueueSetCompleter
+	var err error
+	if queues != nil {
+		qsc, err = queues.BeginConfigChange(qcQS)
+	} else {
+		qsc, err = qsf.BeginConstruction(qcQS, reqsIntPair, execSeatsObs, seatDemandGauge)
+	}
+    //.. 
+	return qsc, err
+}
+```
+配置创建 dealer 
+
+```go
+func (qsf *queueSetFactory) BeginConstruction(qCfg fq.QueuingConfig, reqsGaugePair metrics.RatioedGaugePair, execSeatsGauge metrics.RatioedGauge, seatDemandIntegrator metrics.Gauge) (fq.QueueSetCompleter, error) {
+	// 初始化一个实例
+	dealer, err := checkConfig(qCfg)
+    //...
+	return &queueSetCompleter{
+		factory:              qsf,
+		reqsGaugePair:        reqsGaugePair,
+		execSeatsGauge:       execSeatsGauge,
+		seatDemandIntegrator: seatDemandIntegrator,
+		qCfg:                 qCfg,
+		dealer:               dealer}, nil
+}
+
+
+func checkConfig(qCfg fq.QueuingConfig) (*shufflesharding.Dealer, error) {
+    // ...
+	// deckSize为队列数，handSize表示为一条流分配的队列数量
+	dealer, err := shufflesharding.NewDealer(qCfg.DesiredNumQueues, qCfg.HandSize)
+	if err != nil {
+		err = fmt.Errorf("the QueueSetConfig implies an invalid shuffle sharding config (DesiredNumQueues is deckSize): %w", err)
+	}
+	return dealer, err
+}
+```
+
+```go
+// 返回为流选择的队列ID
+func (d *Dealer) DealIntoHand(hashValue uint64, hand []int) []int {
+	h := hand[:0]
+	d.Deal(hashValue, func(card int) { h = append(h, card) })
+	return h
+}
+
+func (d *Dealer) Deal(hashValue uint64, pick func(int)) {
+	// 15 is the largest possible value of handSize
+	var remainders [15]int
+
+	// 这个for循环用于生成[0,deckSize)范围内的随机数。
+	for i := 0; i < d.handSize; i++ {
+		hashValueNext := hashValue / uint64(d.deckSize-i)
+		remainders[i] = int(hashValue - uint64(d.deckSize-i)*hashValueNext)
+		hashValue = hashValueNext
+	}
+
+	for i := 0; i < d.handSize; i++ {
+		card := remainders[i]
+		for j := i; j > 0; j-- {
+			if card >= remainders[j-1] {
+				card++
+			}
+		}
+		pick(card)
+	}
+}
+```
+
+
+### FlowSchemas 配置使用
+
+
+
 ## 处理流程
 
+```go
+func WithPriorityAndFairness(
+	handler http.Handler,
+	longRunningRequestCheck apirequest.LongRunningRequestCheck,
+	fcIfc utilflowcontrol.Interface,
+	workEstimator flowcontrolrequest.WorkEstimatorFunc,
+) http.Handler {
+    // ...
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		requestInfo, ok := apirequest.RequestInfoFrom(ctx)
+		if !ok {
+			handleError(w, r, fmt.Errorf("no RequestInfo found in context"))
+			return
+		}
+		user, ok := apirequest.UserFrom(ctx)
+		if !ok {
+			handleError(w, r, fmt.Errorf("no User found in context"))
+			return
+		}
+
+		isWatchRequest := watchVerbs.Has(requestInfo.Verb)
+
+		// Skip tracking long running non-watch requests.
+		if longRunningRequestCheck != nil && longRunningRequestCheck(r, requestInfo) && !isWatchRequest {
+			klog.V(6).Infof("Serving RequestInfo=%#+v, user.Info=%#+v as longrunning\n", requestInfo, user)
+			handler.ServeHTTP(w, r)
+			return
+		}
+
+		var classification *PriorityAndFairnessClassification
+		noteFn := func(fs *flowcontrol.FlowSchema, pl *flowcontrol.PriorityLevelConfiguration, flowDistinguisher string) {
+			classification = &PriorityAndFairnessClassification{
+				FlowSchemaName:    fs.Name,
+				FlowSchemaUID:     fs.UID,
+				PriorityLevelName: pl.Name,
+				PriorityLevelUID:  pl.UID}
+
+			httplog.AddKeyValue(ctx, "apf_pl", truncateLogField(pl.Name))
+			httplog.AddKeyValue(ctx, "apf_fs", truncateLogField(fs.Name))
+		}
+        // ...
+
+		var served bool
+		isMutatingRequest := !nonMutatingRequestVerbs.Has(requestInfo.Verb)
+		noteExecutingDelta := func(delta int32) {
+			if isMutatingRequest {
+				watermark.recordMutating(int(atomic.AddInt32(&atomicMutatingExecuting, delta)))
+			} else {
+				watermark.recordReadOnly(int(atomic.AddInt32(&atomicReadOnlyExecuting, delta)))
+			}
+		}
+		noteWaitingDelta := func(delta int32) {
+			if isMutatingRequest {
+				waitingMark.recordMutating(int(atomic.AddInt32(&atomicMutatingWaiting, delta)))
+			} else {
+				waitingMark.recordReadOnly(int(atomic.AddInt32(&atomicReadOnlyWaiting, delta)))
+			}
+		}
+		queueNote := func(inQueue bool) {
+			if inQueue {
+				noteWaitingDelta(1)
+			} else {
+				noteWaitingDelta(-1)
+			}
+		}
+
+		digest := utilflowcontrol.RequestDigest{
+			RequestInfo: requestInfo,
+			User:        user,
+		}
+
+		if isWatchRequest { // watch 请求处理
+            // ...
+		} else {
+			execute := func() {
+				noteExecutingDelta(1)
+				defer noteExecutingDelta(-1)
+				served = true
+				setResponseHeaders(classification, w)
+
+				handler.ServeHTTP(w, r)
+			}
+
+			fcIfc.Handle(ctx, digest, noteFn, estimateWork, queueNote, execute)
+		}
+
+        // ...
+	})
+}
+```
+
+具体的 handle 
 ```go
 func (cfgCtlr *configController) Handle(ctx context.Context, requestDigest RequestDigest,
 	noteFn func(fs *flowcontrol.FlowSchema, pl *flowcontrol.PriorityLevelConfiguration, flowDistinguisher string),
@@ -146,12 +421,12 @@ func (cfgCtlr *configController) Handle(ctx context.Context, requestDigest Reque
 	execFn func()) {
 	// 对请求进行分类
 	fs, pl, isExempt, req, startWaitingTime := cfgCtlr.startRequest(ctx, requestDigest, noteFn, workEstimator, queueNoteFn)
-    // ..
+    // ...
 	// 执行
 	idle = req.Finish(func() {
         // ...
 		executed = true
-        // ...
+		// 请求执行
 		execFn()
 	})
     /// ...
@@ -172,11 +447,7 @@ func (cfgCtlr *configController) startRequest(ctx context.Context, rd RequestDig
 	var selectedFlowSchema, catchAllFlowSchema *flowcontrol.FlowSchema
 	// 可以根据请求的主体 (User, Group, ServiceAccount)、动作 (Get, List, Create, Delete …)、资源类型 (pod, deployment …)、namespace、url 对请求进行分类
 	for _, fs := range cfgCtlr.flowSchemas {
-		/*
-		1. 匹配请求主体 subject
-		2. 对资源的请求，匹配 ResourceRules 中任意一条规则
-		3. 对非资源的请求， 匹配 NonResourceRules 中任意一条规则
-		 */
+        // 匹配
 		if matchesFlowSchema(rd, fs) {
 			selectedFlowSchema = fs
 			break
@@ -200,8 +471,9 @@ func (cfgCtlr *configController) startRequest(ctx context.Context, rd RequestDig
 	var flowDistinguisher string
 	var hashValue uint64
 	if numQueues > 1 {
-        // APF 利用 FS 的 name 和请求的 userName 或 namespace 计算一个 hashFlowID 标识 Flow
+        //根据 DistinguisherMethod 判断获取 userName 或 namespace 
 		flowDistinguisher = computeFlowDistinguisher(rd, selectedFlowSchema.Spec.DistinguisherMethod)
+        // APF 利用 FS 的 name 和 计算一个 hashFlowID 标识 Flow
 		hashValue = hashFlowID(selectedFlowSchema.Name, flowDistinguisher) 
 	}
 
@@ -219,7 +491,26 @@ func (cfgCtlr *configController) startRequest(ctx context.Context, rd RequestDig
 }
 
 ```
+```go
 
+func matchesPolicyRule(digest RequestDigest, policyRule *flowcontrol.PolicyRulesWithSubjects) bool {
+/*
+	1. 匹配请求主体 subject
+	2. 对资源的请求，匹配 ResourceRules 中任意一条规则
+	3. 对非资源的请求， 匹配 NonResourceRules 中任意一条规则
+*/
+	if !matchesASubject(digest.User, policyRule.Subjects) {
+		return false
+	}
+	if digest.RequestInfo.IsResourceRequest {
+		return matchesAResourceRule(digest.RequestInfo, policyRule.ResourceRules)
+	}
+	return matchesANonResourceRule(digest.RequestInfo, policyRule.NonResourceRules)
+}
+
+```
+
+处理请求
 ```go
 // staging/src/k8s.io/apiserver/pkg/util/flowcontrol/fairqueuing/queueset/queueset.go
 func (qs *queueSet) StartRequest(ctx context.Context, workEstimate *fqrequest.WorkEstimate, hashValue uint64, flowDistinguisher, fsName string, descr1, descr2 interface{}, queueNoteFn fq.QueueNoteFn) (fq.Request, bool) {
@@ -272,7 +563,89 @@ func (qs *queueSet) StartRequest(ctx context.Context, workEstimate *fqrequest.Wo
 	return req, false
 }
 
+
+func (qs *queueSet) dispatchAsMuchAsPossibleLocked() {
+	for qs.totRequestsWaiting != 0 && qs.totSeatsInUse < qs.dCfg.ConcurrencyLimit && qs.dispatchLocked() {
+	}
+}
+
+
+func (qs *queueSet) timeoutOldRequestsAndRejectOrEnqueueLocked(ctx context.Context, workEstimate *fqrequest.WorkEstimate, hashValue uint64, flowDistinguisher, fsName string, descr1, descr2 interface{}, queueNoteFn fq.QueueNoteFn) *request {
+	// 开始 shuffle sharding 选择队列 
+	queueIdx := qs.shuffleShardLocked(hashValue, descr1, descr2)
+	queue := qs.queues[queueIdx]
+	// The next step is the logic to reject requests that have been waiting too long
+	qs.removeTimedOutRequestsFromQueueToBoundLocked(queue, fsName)
+
+
+	defer qs.boundNextDispatchLocked(queue)
+
+	// Create a request and enqueue
+	req := &request{
+		qs:                qs,
+		fsName:            fsName,
+		flowDistinguisher: flowDistinguisher,
+		ctx:               ctx,
+		decision:          qs.promiseFactory(nil, ctx.Done(), decisionCancel),
+		arrivalTime:       qs.clock.Now(),
+		arrivalR:          qs.currentR,
+		queue:             queue,
+		descr1:            descr1,
+		descr2:            descr2,
+		queueNoteFn:       queueNoteFn,
+		workEstimate:      qs.completeWorkEstimate(workEstimate),
+	}
+	if ok := qs.rejectOrEnqueueToBoundLocked(req); !ok {
+		return nil
+	}
+    // ...
+	return req
+}
+
+
+func (qs *queueSet) shuffleShardLocked(hashValue uint64, descr1, descr2 interface{}) int {
+	var backHand [8]int
+	// 获取本条流的队列列表
+	hand := qs.dealer.DealIntoHand(hashValue, backHand[:])
+	handSize := len(hand)
+	// qs.enqueues表示队列中的请求总数，这里第一次哈希取模算出队列的起始偏移量
+	offset := qs.enqueues % handSize
+	qs.enqueues++
+	bestQueueIdx := -1
+	minQueueSeatSeconds := fqrequest.MaxSeatSeconds
+	for i := 0; i < handSize; i++ {
+		queueIdx := hand[(offset+i)%handSize]
+		queue := qs.queues[queueIdx]
+		queueSum := queue.requests.QueueSum()
+
+		// this is the total amount of work in seat-seconds for requests
+		// waiting in this queue, we will select the queue with the minimum.
+		thisQueueSeatSeconds := queueSum.TotalWorkSum
+		klog.V(7).Infof("QS(%s): For request %#+v %#+v considering queue %d with sum: %#v and %d seats in use, nextDispatchR=%v", qs.qCfg.Name, descr1, descr2, queueIdx, queueSum, queue.seatsInUse, queue.nextDispatchR)
+		if thisQueueSeatSeconds < minQueueSeatSeconds {
+			minQueueSeatSeconds = thisQueueSeatSeconds
+			bestQueueIdx = queueIdx
+		}
+	}
+    // ..
+	return bestQueueIdx
+}
+
 ```
+
+
+
+
+## 指标说明
+|                    metrics                    | 解释 |                                                                   备注                                                                    |
+|:---------------------------------------------:|:--:|:---------------------------------------------------------------------------------------------------------------------------------------:|
+| apiserver_flowcontrol_rejected_requests_total |  apf 拒绝的 request 数目  | 按照 pl 的名称以及 fs 的名称以及 rejection 原因进行排序，拒绝掉的原因可能值有 queue-full【队列中已经有太多的请求在排队】、concurrency-limit【根据 plc 拒掉请求】、 time-out【请求还在队列中排队的时候就超时了】  |
+|                      apiserver_flowcontrol_dispatched_requests_total                       | 已经处理的请求总数 |                                                                   内容                                                                    |
+|                      apiserver_flowcontrol_current_inqueue_requests                        | 还在队列中有待处理的请求总数 |                                                                   内容                                                                    |
+|                      apiserver_flowcontrol_request_queue_length_after_enqueue                      | 实时队列中数据数目。这个值是抽样获取到的 |                                                                   内容                                                                    |
+|                      apiserver_flowcontrol_request_concurrency_limit                     | 每个 plc 的并行上限 |                                                                   内容                                                                    |
+|                      apiserver_flowcontrol_request_wait_duration_seconds                       | 请求处理过程中排队的时长，以及请求处理失败量|                                                                   内容                                                                    |
+|                      apiserver_flowcontrol_request_execution_seconds                       | 请求执行花费时间|                                                                   内容                                                                    |
 
 
 
@@ -282,3 +655,4 @@ func (qs *queueSet) StartRequest(ctx context.Context, workEstimate *fqrequest.Wo
 - [官方文档: API 优先级和公平性](https://kubernetes.io/zh-cn/docs/concepts/cluster-administration/flow-control/)
 - [Kubernetes APIServer 限流策略](https://blog.csdn.net/qq_34556414/article/details/125828537)
 - [源码分析API 优先级和公平性](https://blog.csdn.net/qq_21127151/article/details/129997719)
+- [使用shuffle sharding增加容错性](https://www.cnblogs.com/charlieroro/p/17703031.html)
