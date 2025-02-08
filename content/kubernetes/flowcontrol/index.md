@@ -65,7 +65,7 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
 		handler = genericfilters.WithPriorityAndFairness(handler, c.LongRunningFunc, c.FlowControl, requestWorkEstimator)
 		handler = filterlatency.TrackStarted(handler, c.TracerProvider, "priorityandfairness")
 	} else {
-		// 旧版本
+		// 旧版本: 基于并发连接数的限流
 		handler = genericfilters.WithMaxInFlightLimit(handler, c.MaxRequestsInFlight, c.MaxMutatingRequestsInFlight, c.LongRunningFunc)
 	}
 }
@@ -316,7 +316,34 @@ func (d *Dealer) Deal(hashValue uint64, pick func(int)) {
 
 ### FlowSchemas 配置使用
 
+- matchingPrecedence：定义 FlowSchema 的应用顺序，数字越低，优先级越高。
+- rules：定义请求过滤规则，格式与 Kubernetes RBAC 中的格式相同。
+- distinguisherMethod：指定一个参数（用户或命名空间），用于在将请求转发到优先级时将请求分离到流中，如果省略该参数，所有请求将分配给同一流（flow）。
 
+### 查看效果
+```shell
+TOKEN=$(kubectl -n d8-cni-cilium get secrets agent-token-45s7n -o json | jq -r .data.token | base64 -d)
+
+curl https://127.0.0.1:6445/apis/cilium.io/v2/ciliumclusterwidenetworkpolicies?limit=500  -X GET --header "Authorization: Bearer $TOKEN" -k -I
+HTTP/2 200
+audit-id: 4f647505-8581-4a99-8e4c-f3f4322f79fe
+cache-control: no-cache, private
+content-type: application/json
+x-kubernetes-pf-flowschema-uid: 7f0afa35-07c3-4601-b92c-dfe7e74780f8
+x-kubernetes-pf-prioritylevel-uid: df8f409a-ebe7-4d54-9f21-1f2a6bee2e81
+content-length: 173
+date: Sun, 26 Mar 2023 17:45:02 GMT
+
+kubectl get flowschemas -o custom-columns="uid:{metadata.uid},name:{metadata.name}" | grep 7f0afa35-07c3-4601-b92c-dfe7e74780f8
+7f0afa35-07c3-4601-b92c-dfe7e74780f8   d8-serviceaccounts
+
+kubectl get prioritylevelconfiguration -o custom-columns="uid:{metadata.uid},name:{metadata.name}" | grep df8f409a-ebe7-4d54-9f21-1f2a6bee2e81
+df8f409a-ebe7-4d54-9f21-1f2a6bee2e81   d8-serviceaccounts
+```
+
+在响应时，APIServer 会提供特殊的 Header X-Kubernetes-PF-FlowSchema-UID 和X-Kubernetes-PF-PriorityLevel-UID，你可以使用它们来查看请求的去向。
+
+输出显示该请求属于 d8-serviceaccounts 的 FlowSchema 和 d8-serviceaccounts 的 PriorityLevelConfiguration
 
 ## 处理流程
 
@@ -342,8 +369,7 @@ func WithPriorityAndFairness(
 		}
 
 		isWatchRequest := watchVerbs.Has(requestInfo.Verb)
-
-		// Skip tracking long running non-watch requests.
+		
 		if longRunningRequestCheck != nil && longRunningRequestCheck(r, requestInfo) && !isWatchRequest {
 			klog.V(6).Infof("Serving RequestInfo=%#+v, user.Info=%#+v as longrunning\n", requestInfo, user)
 			handler.ServeHTTP(w, r)
@@ -411,6 +437,10 @@ func WithPriorityAndFairness(
 	})
 }
 ```
+
+
+- Long-running 运行的 API 请求（例如，在 pod 中查看日志或执行命令）不受 APF 限制，WATCH 请求也不受限制。
+- 还有一个特殊的预定义优先级称为 exempt，该级别的请求会立即得到处理
 
 具体的 handle 
 ```go
@@ -636,16 +666,16 @@ func (qs *queueSet) shuffleShardLocked(hashValue uint64, descr1, descr2 interfac
 
 
 
-## 指标说明
-|                    metrics                    | 解释 |                                                                   备注                                                                    |
-|:---------------------------------------------:|:--:|:---------------------------------------------------------------------------------------------------------------------------------------:|
-| apiserver_flowcontrol_rejected_requests_total |  apf 拒绝的 request 数目  | 按照 pl 的名称以及 fs 的名称以及 rejection 原因进行排序，拒绝掉的原因可能值有 queue-full【队列中已经有太多的请求在排队】、concurrency-limit【根据 plc 拒掉请求】、 time-out【请求还在队列中排队的时候就超时了】  |
-|                      apiserver_flowcontrol_dispatched_requests_total                       | 已经处理的请求总数 |                                                                   内容                                                                    |
-|                      apiserver_flowcontrol_current_inqueue_requests                        | 还在队列中有待处理的请求总数 |                                                                   内容                                                                    |
-|                      apiserver_flowcontrol_request_queue_length_after_enqueue                      | 实时队列中数据数目。这个值是抽样获取到的 |                                                                   内容                                                                    |
-|                      apiserver_flowcontrol_request_concurrency_limit                     | 每个 plc 的并行上限 |                                                                   内容                                                                    |
-|                      apiserver_flowcontrol_request_wait_duration_seconds                       | 请求处理过程中排队的时长，以及请求处理失败量|                                                                   内容                                                                    |
-|                      apiserver_flowcontrol_request_execution_seconds                       | 请求执行花费时间|                                                                   内容                                                                    |
+## 指标
+|                    metrics                    | 解释 |                                                                   备注                                                                   |
+|:---------------------------------------------:|:--:|:--------------------------------------------------------------------------------------------------------------------------------------:|
+| apiserver_flowcontrol_rejected_requests_total |  apf 拒绝的 request 数目  | 按照 pl 的名称以及 fs 的名称以及 rejection 原因进行排序，<br/>拒绝掉的原因可能值有 queue-full【队列中已经有太多的请求在排队】、concurrency-limit【根据 plc 拒掉请求】、 time-out【请求还在队列中排队的时候就超时了】 |
+|                      apiserver_flowcontrol_dispatched_requests_total                       | 已经处理的请求总数 |                                                                   -                                                                    |
+|                      apiserver_flowcontrol_current_inqueue_requests                        | 还在队列中有待处理的请求总数 |                                                                   -                                                                    |
+|                      apiserver_flowcontrol_request_queue_length_after_enqueue                      | 实时队列中数据数目。这个值是抽样获取到的 |                                                                   -                                                                    |
+|                      apiserver_flowcontrol_request_concurrency_limit                     | 每个 plc 的并行上限 |                                                                   -                                                                    |
+|                      apiserver_flowcontrol_request_wait_duration_seconds                       | 请求处理过程中排队的时长，以及请求处理失败量|                                                                   -                                                                    |
+|                      apiserver_flowcontrol_request_execution_seconds                       | 请求执行花费时间|                                                                   -                                                                    |
 
 
 

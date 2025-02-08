@@ -1,14 +1,21 @@
 ---
 title: "Workqueue"
 date: 2024-08-20T13:43:28+08:00
-summary: workqueue 三大实现及源码分析
+summary: 源码分析 workqueue 三大实现:common queue,delaying queue,rate limiters queue
+categories:
+  - kubernetes
+  - workqueue
+
+tags:
+  - k8s
+  - 源码
 ---
 
-# workqueue
+# workqueue 工作队列
 
 
 在 kubernetes 中，使用 go 的 channel 无法满足 kubernetes 的应用场景，如延迟、限速等；
-
+在kubernetes中存在三种队列通用队列 common queue，延迟队列 delaying queue ，和限速队列 rate limiters queue
 
 
 主要功能在于标记和去重，并支持如下特性。
@@ -89,7 +96,6 @@ type set map[t]empty
 
 
 #### 并发场景描述及源码解释
-
 
 
 
@@ -410,11 +416,121 @@ type RateLimiter interface {
 
 
 
-抽象限速器的实现，有 BucketRateLimiter , ItemBucketRateLimiter , ItemExponentialFailureRateLimiter , ItemFastSlowRateLimiter ,  MaxOfRateLimiter 混合模式
+抽象限速器的实现，有 BucketRateLimiter , ItemBucketRateLimiter , ItemExponentialFailureRateLimiter , ItemFastSlowRateLimiter,  MaxOfRateLimiter 混合模式
 
 
+
+```go
+// https://github.com/openebs/lvm-localpv/blob/45ebdf6dd387307652c2c9cacbbe4aa4ede87030/pkg/mgmt/lvmnode/builder.go
+func newNodeController(kubeClient kubernetes.Interface, client dynamic.Interface,
+	dynInformer dynamicinformer.DynamicSharedInformerFactory, ownerRef metav1.OwnerReference,
+	pollInterval int) (*NodeController, error) {
+    // ...
+	nodeContrller := &NodeController{
+        // ...
+		workqueue: workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(),
+			workqueue.RateLimitingQueueConfig{
+				Name: "Node",
+			}),
+        // ...
+	}
+
+    // ...
+	return nodeContrller, nil
+}
+
+```
+同时使用排队指数和令牌桶算法
+```go
+func DefaultControllerRateLimiter() RateLimiter {
+	return NewMaxOfRateLimiter( // 混合模式
+		NewItemExponentialFailureRateLimiter(5*time.Millisecond, 1000*time.Second),
+		// 10 qps, 100 bucket size.  This is only for retry speed and its only the overall factor (not per item)
+		&BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
+	)
+}
+```
+
+令牌桶算法 BucketRateLimiter: 基于 golang.org/x/time@v0.3.0/rate 实现
+```go
+func (r *BucketRateLimiter) When(item interface{}) time.Duration {
+	return r.Limiter.Reserve().Delay()
+}
+
+```
+
+
+计数器算法 ItemFastSlowRateLimiter: 限速器先快速重试一定次数，然后慢速重试
+```go
+// https://github.com/openebs/lvm-localpv/blob/6ee366ce5f49514f0d16697e438a9da17aa346a6/pkg/mgmt/volume/builder.go
+func newVolController(kubeClient kubernetes.Interface, client dynamic.Interface,
+dynInformer dynamicinformer.DynamicSharedInformerFactory) (*VolController, error) {
+    //This ratelimiter requeues failed items after 5 secs for first 12 attempts. Then objects are requeued after 30 secs.
+	rateLimiter := workqueue.NewItemFastSlowRateLimiter(5*time.Second, 30*time.Second, 12)
+	// ...
+}
+```
+
+```go
+func NewItemFastSlowRateLimiter(fastDelay, slowDelay time.Duration, maxFastAttempts int) RateLimiter {
+	return &ItemFastSlowRateLimiter{
+		failures:        map[interface{}]int{},
+		fastDelay:       fastDelay, // 快的速度
+		slowDelay:       slowDelay, // 慢的速度
+		maxFastAttempts: maxFastAttempts, // 最大尝试次数
+	}
+}
+
+
+func (r *ItemFastSlowRateLimiter) When(item interface{}) time.Duration {
+	r.failuresLock.Lock()
+	defer r.failuresLock.Unlock()
+
+	r.failures[item] = r.failures[item] + 1
+
+	// 当错误次数没超过快速的阈值使用快速，否则使用慢速
+	if r.failures[item] <= r.maxFastAttempts {
+		return r.fastDelay
+	}
+
+	return r.slowDelay
+}
+```
+
+排队指数算法 ItemExponentialFailureRateLimiter
+```go
+func NewItemExponentialFailureRateLimiter(baseDelay time.Duration, maxDelay time.Duration) RateLimiter {
+	return &ItemExponentialFailureRateLimiter{
+		failures:  map[interface{}]int{},
+		baseDelay: baseDelay, // 最初限速单位
+		maxDelay:  maxDelay, // 最大限速单位
+	}
+}
+
+func (r *ItemExponentialFailureRateLimiter) When(item interface{}) time.Duration {
+	r.failuresLock.Lock()
+	defer r.failuresLock.Unlock()
+
+	exp := r.failures[item]
+	r.failures[item] = r.failures[item] + 1
+
+	// The backoff is capped such that 'calculated' value never overflows.
+	backoff := float64(r.baseDelay.Nanoseconds()) * math.Pow(2, float64(exp))
+	if backoff > math.MaxInt64 {
+		return r.maxDelay
+	}
+
+	calculated := time.Duration(backoff)
+	if calculated > r.maxDelay {
+		return r.maxDelay
+	}
+
+	return calculated
+}
+```
 
 ## 参考
 
 - [Kubernetes 架构之 workqueue 原理解析](https://mp.weixin.qq.com/s/pkyBuTLtmKKWCBHSQ82d9g)
 - [深入浅出 kubernetes 之 WorkQueue 详解](https://xie.infoq.cn/article/63258ead84821bc3e276de1f7)
+- [浅析Kubernetes架构之workqueue](https://juejin.cn/post/7112055064096833566#heading-13)
