@@ -2,9 +2,17 @@
 title: "Linux cgroups"
 date: 2024-10-23T22:24:23+08:00
 summary: " Cgroup（control group 控制组群）是内核提供的一种资源隔离的机制，可以实现对进程所使用的cpu、内存物理资源、及网络带宽等进行限制。还可以通过分配的CPU时间片数量及磁盘IO宽带大小控制任务运行的优先"
+categories:
+  - kubernetes
+  - cgroup
+tags:
+  - cgroup
 ---
 
-cgroups（Control Groups）最初叫 Process Container，由 Google 工程师（Paul Menage 和 Rohit Seth）于 2006 年提出，后来因为 Container 有多重含义容易引起误解，就在 2007 年更名为 Control Groups，并被整合进 Linux 内核。顾名思义就是把进程放到一个组里面统一加以控制
+cgroups（Control Groups）最初叫 Process Container，由 Google 工程师（Paul Menage 和 Rohit Seth）于 2006 年提出，后来因为 Container 有多重含义容易引起误解，就在 2007 年更名为 Control Groups，并被整合进 Linux 内核。
+顾名思义就是把进程放到一个组里面统一加以控制.
+
+cgroup 是一种以 hierarchical（树形层级）方式组织进程的机制（a mechanism to organize processes hierarchically），以及在层级中以受控和 可配置的方式（controlled and configurable manner）分发系统资源 （distribute system resources）
 
 
 ## 基本概念
@@ -12,6 +20,14 @@ cgroups（Control Groups）最初叫 Process Container，由 Google 工程师（
 - 任务/控制组： 资源控制是以控制组的方式实现的，进程可以加入到指定的控制组中，类似于Linux中user和group的关系。控制组为树状结构的上下父子关系，子节点控制组会继承父节点控制组的属性，如资源配额等
 - 层级（hierarchy）： 一个大的控制组群树，归属于一个层级中，不同的控制组以层级区分开
 - 子系统（subsystem）： 一个的资源控制器，比如cpu子系统可以控制进程的cpu使用率，子系统需要附加（attach）到某个层级，然后该层级的所有控制组，均受到该子系统的控制
+
+## 组成
+
+
+cgroup 主要由两部分组成：
+
+- 核心（core）：主要负责层级化地组织进程；
+- 控制器（controllers）：大部分控制器负责 cgroup 层级中 特定类型的系统资源的分配，少部分 utility 控制器用于其他目的。
 
 ### 常见的子系统（subsystem）
 ```shell
@@ -50,22 +66,119 @@ cgroup 主要限制的资源是：
 4)进程控制：cgroups可以对进程组执行挂起、恢复等操作
 
 
-## 组成
 
-
-cgroup 主要有两个组成部分：
-
-- core - 负责分层组织过程；
-- controller - 通常负责沿层次结构分配特定类型的系统资源。
 
 ## cgroup 子资源参数详解
 
 ### blkio：限制设备 IO 访问
+![](.index_images/page_cache_io.png)
+blkio是cgroup中的一个子系统，可以用于限制及监控磁盘读写io
+blkio控制子系统可以限制进程读写的 IOPS 和吞吐量，但它只能对 Direct I/O 的文件读写进行限速，对 Buffered I/O 的文件读写无法限制
+Buffered I/O 指会经过 PageCache 然后再写入到存储设备中。
+
+
 限制磁盘 IO 有两种方式：权重（weight）和上限（limit）。权重是给不同的应用（或者 cgroup）一个权重值，各个应用按照百分比来使用 IO 资源；上限是直接写死应用读写速率的最大值。
 
 1. 设置 cgroup 访问设备的权重
 2. 设置 cgroup 访问设备的限制
 
+```shell
+root@node197:~# ll /sys/fs/cgroup/blkio/
+-rw-r--r--   1 root root   0 Mar  4 03:00 blkio.throttle.read_bps_device
+-rw-r--r--   1 root root   0 Mar  4 03:00 blkio.throttle.read_iops_device
+-rw-r--r--   1 root root   0 Mar  4 06:21 blkio.throttle.write_bps_device
+-rw-r--r--   1 root root   0 Mar  4 03:00 blkio.throttle.write_iops_device
+
+```
+```shell
+# 通用格式
+echo "<disk-number> <io-value>"  > /sys/fs/cgroup/blkio/<io-type>
+
+# 查看sdb磁盘对应编号为8:16
+[root@node189 ~]# ll /dev/block/ | grep sdb
+lrwxrwxrwx 1 root root 6 Mar  4 14:29 8:16 -> ../sdb
+
+# 限制sdb磁盘写入带宽为1MB/s
+echo "8:16 1048576" >> /sys/fs/cgroup/blkio/blkio.throttle.write_bps_device
+# 解除sdb磁盘写入限制
+echo "8:16 0" >> /sys/fs/cgroup/blkio/blkio.throttle.write_bps_device
+
+```
+- disk-number：指定需要限制的磁盘编号，可通过ll /dev/block/ | grep sdb查看对应磁盘编号，如8:16
+- io-value：指定需要限制的io数值（数值为0表示不限制），当指定的文件名称为blkio.throttle.write_bps_device，则表示限制写入带宽，单位为B/s
+- io-type：指定需要限制的io类型
+- blkio.throttle.write_bps_device：磁盘写入带宽限制
+- blkio.throttle.write_iops_device：磁盘写入IOPS限制
+- blkio.throttle.read_bps_device：磁盘读取带宽限制
+- blkio.throttle.read_iops_device：磁盘读取IOPS限制
+
+```go
+// github.com/openebs/lib-csi@v0.8.2/pkg/device/iolimit/utils.go
+func SetIOLimits(request *Request) error {
+	if !helpers.DirExists(baseCgroupPath) {
+		return errors.New(baseCgroupPath + " does not exist")
+	}
+	// 确认是 cgroup V2
+	if err := checkCgroupV2(); err != nil {
+		return err
+	}
+	validRequest, err := validate(request)
+	if err != nil {
+		return err
+	}
+	err = setIOLimits(validRequest)
+	return err
+}
+
+
+func getIOLimitsStr(deviceNumber *DeviceNumber, ioMax *IOMax) string {
+	line := strconv.FormatUint(deviceNumber.Major, 10) + ":" + strconv.FormatUint(deviceNumber.Minor, 10)
+	if ioMax.Riops != 0 {
+		line += " riops=" + strconv.FormatUint(ioMax.Riops, 10)
+	}
+	if ioMax.Wiops != 0 {
+		line += " wiops=" + strconv.FormatUint(ioMax.Wiops, 10)
+	}
+	if ioMax.Rbps != 0 {
+		line += " rbps=" + strconv.FormatUint(ioMax.Rbps, 10)
+	}
+	if ioMax.Wbps != 0 {
+		line += " wbps=" + strconv.FormatUint(ioMax.Wbps, 10)
+	}
+	return line
+}
+
+func setIOLimits(request *ValidRequest) error {
+	line := getIOLimitsStr(request.DeviceNumber, request.IOMax)
+	err := os.WriteFile(request.FilePath, []byte(line), 0600)
+	return err
+}
+
+
+func validate(request *Request) (*ValidRequest, error) {
+	if !helpers.IsValidUUID(request.PodUid) {
+		return nil, errors.New("Expected PodUid in UUID format, Got " + request.PodUid)
+	}
+	podCGPath, err := getPodCGroupPath(request.PodUid, request.ContainerRuntime)
+	if err != nil {
+		return nil, err
+	}
+	// io限制路径
+	ioMaxFile := podCGPath + "/io.max"
+	if !helpers.FileExists(ioMaxFile) {
+		return nil, errors.New("io.max file is not present in pod CGroup")
+	}
+	deviceNumber, err := getDeviceNumber(request.DeviceName)
+	if err != nil {
+		return nil, errors.New("Device Major:Minor numbers could not be obtained")
+	}
+	return &ValidRequest{
+		FilePath:     ioMaxFile,
+		DeviceNumber: deviceNumber,
+		IOMax:        request.IOLimit,
+	}, nil
+}
+```
 
 ### cpu：限制进程组 CPU 使用
 
@@ -85,7 +198,6 @@ cgroup 主要有两个组成部分：
 
 - cpu.rt_period_us：设置一个周期时间，表示多久 cgroup 能够重新分配 CPU 资源
 - cpu.rt_runtime_us：设置运行时间，表示在周期时间内 cgroup 中任务能访问 CPU 的时间。这个限制是针对单个 CPU 核数的，如果是多核，需要乘以对应的核数
-
 
 
 ### memory：限制内存使用
@@ -143,13 +255,12 @@ $ ls -l /sys/fs/cgroup/memory/kubepods/burstable/podfbc202d3-da21-11e8-ab5e-4201
 
 ## cgroup v1 与 cgroup v2
 
-最初 cgroups 的版本被称为 v1，这个版本的 cgroups 设计并不友好，理解起来非常困难。后续的开发工作由 Tejun Heo 接管，他重新设计并重写了 cgroups，新版本被称为 v2，并首次出现在 kernel 4.5 版本。
+最初 cgroups 的版本被称为 v1，这个版本的 cgroups 设计并不友好，理解起来非常困难。
+后续的开发工作由 Tejun Heo 接管，他重新设计并重写了 cgroups，新版本被称为 v2，并首次出现在 kernel 4.5 版本。
 
 
 ```shell
-# 查看 cgroup 版本
-
-# v1 版本
+# 系统同时挂载了 cgroup 和 cgroup2
 ubuntu@VM-16-12-ubuntu:/sys/fs/cgroup$ mount |grep cgroup
 tmpfs on /sys/fs/cgroup type tmpfs (ro,nosuid,nodev,noexec,mode=755)
 cgroup2 on /sys/fs/cgroup/unified type cgroup2 (rw,nosuid,nodev,noexec,relatime,nsdelegate)
@@ -166,15 +277,30 @@ cgroup on /sys/fs/cgroup/freezer type cgroup (rw,nosuid,nodev,noexec,relatime,fr
 cgroup on /sys/fs/cgroup/memory type cgroup (rw,nosuid,nodev,noexec,relatime,memory)
 cgroup on /sys/fs/cgroup/rdma type cgroup (rw,nosuid,nodev,noexec,relatime,rdma)
 
-# v2 版本
-$ mount|grep cgroup
-cgroup2 on /sys/fs/cgroup type cgroup2 (rw,nosuid,nodev,noexec,relatime,nsdelegate)
-
+# 只有 cpu/io/memory 等少量控制器（大部分还在 cgroup v1 中，系统默认使用 v1）
+$ ls -ahlp /sys/fs/cgroup/unified/
+total 0
+-r--r--r--   1 root root   0 cgroup.controllers
+-rw-r--r--   1 root root   0 cgroup.max.depth
+-rw-r--r--   1 root root   0 cgroup.max.descendants
+-rw-r--r--   1 root root   0 cgroup.procs
+-r--r--r--   1 root root   0 cgroup.stat
+-rw-r--r--   1 root root   0 cgroup.subtree_control
+-rw-r--r--   1 root root   0 cgroup.threads
+-rw-r--r--   1 root root   0 cpu.pressure
+-r--r--r--   1 root root   0 cpu.stat
+drwxr-xr-x   2 root root   0 init.scope/
+-rw-r--r--   1 root root   0 io.pressure
+-rw-r--r--   1 root root   0 memory.pressure
+drwxr-xr-x 121 root root   0 system.slice/
+drwxr-xr-x   3 root root   0 user.slice/
 ```
+- cgroup v2 是单一层级树，因此只有一个挂载点（第二行）/sys/fs/cgroup/unified
+- cgroup v1 根据控制器类型（cpuset/cpu,cpuacct/hugetlb/...），挂载到不同位置
 
+内核提供了 cgroup_no_v1=allows 配置， 可完全禁用 v1 控制器（强制使用 v2）
 
-
-Kubernetes 自 v1.25 起 cgroup2 特性正式 stable
+Kubernetes 自 v1.25 起 cgroup2 特性正式 stable.
 
 
 
@@ -194,3 +320,4 @@ $ sudo apt-get install cgroup-tools
 - [一篇搞懂容器技术的基石： cgroup](https://zhuanlan.zhihu.com/p/434731896)
 - [docker 容器基础技术：linux cgroup 简介](https://cizixs.com/2017/08/25/linux-cgroup/)
 - [详解Cgroup V2](https://zorrozou.github.io/docs/%E8%AF%A6%E8%A7%A3Cgroup%20V2.html)
+- https://www.kernel.org/doc/html/v5.10/admin-guide/cgroup-v2.html
