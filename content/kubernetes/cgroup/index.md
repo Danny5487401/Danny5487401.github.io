@@ -72,7 +72,7 @@ cgroup 主要限制的资源是：
 
 ### blkio: 限制设备 IO 访问
 
-{{<figure src="./k8s-page_cache_io.png#center" width=800px >}}
+{{<figure src="./page_cache_io.png#center" width=800px >}}
 
 blkio是cgroup中的一个子系统，可以用于限制及监控磁盘读写io
 blkio控制子系统可以限制进程读写的 IOPS 和吞吐量，但它只能对 Direct I/O 的文件读写进行限速，对 Buffered I/O 的文件读写无法限制
@@ -184,8 +184,43 @@ func validate(request *Request) (*ValidRequest, error) {
 
 ### cpu：限制进程组 CPU 使用
 
-任务使用 CPU 资源有两种调度方式：完全公平调度（CFS，Completely Fair Scheduler）和 实时调度（RT，Real-Time Scheduler）。前者可以根据权重为任务分配响应的 CPU 时间片，后者能够限制使用 CPU 的核数。
+任务使用 CPU 资源有两种调度方式：完全公平调度（CFS，Completely Fair Scheduler）和 实时调度（RT，Real-Time Scheduler）。
+前者可以根据权重为任务分配响应的 CPU 时间片，后者能够限制使用 CPU 的核数。
 
+```go
+// https://github.com/koordinator-sh/koordinator/blob/632ef287e881ea0a2097e04cef108e46f290258e/pkg/koordlet/util/system/cgroup_resource.go
+const (
+	CFSBasePeriodValue int64 = 100000
+	CFSQuotaMinValue   int64 = 1000 // min value except `-1`
+	CPUSharesMinValue  int64 = 2
+	CPUSharesMaxValue  int64 = 262144
+	CPUWeightMinValue  int64 = 1
+	CPUWeightMaxValue  int64 = 10000
+
+	CPUStatName      = "cpu.stat" // CPU 使用的统计数据
+	CPUSharesName    = "cpu.shares" // cgroup 使用 CPU 时间的权重值
+	CPUCFSQuotaName  = "cpu.cfs_quota_us"
+	CPUCFSPeriodName = "cpu.cfs_period_us"
+	CPUBVTWarpNsName = "cpu.bvt_warp_ns"
+	CPUBurstName     = "cpu.cfs_burst_us"
+	CPUTasksName     = "tasks"
+	CPUProcsName     = "cgroup.procs"
+	CPUThreadsName   = "cgroup.threads"
+	CPUMaxName       = "cpu.max"
+	CPUMaxBurstName  = "cpu.max.burst"
+	CPUWeightName    = "cpu.weight"
+	CPUIdleName      = "cpu.idle"
+
+	CPUSetCPUSName          = "cpuset.cpus"
+	CPUSetCPUSEffectiveName = "cpuset.cpus.effective"
+
+	CPUAcctStatName           = "cpuacct.stat"
+	CPUAcctUsageName          = "cpuacct.usage"
+	CPUAcctCPUPressureName    = "cpu.pressure"
+	CPUAcctMemoryPressureName = "memory.pressure"
+	CPUAcctIOPressureName     = "io.pressure"
+)
+```
 
 #### CFS 调优参数
 
@@ -319,7 +354,7 @@ $ sudo apt-get install cgroup-tools
 
 ## 参考
 
-- [一篇搞懂容器技术的基石： cgroup](https://zhuanlan.zhihu.com/p/434731896)
+- [一篇搞懂容器技术的基石: cgroup](https://zhuanlan.zhihu.com/p/434731896)
 - [docker 容器基础技术：linux cgroup 简介](https://cizixs.com/2017/08/25/linux-cgroup/)
 - [详解Cgroup V2](https://zorrozou.github.io/docs/%E8%AF%A6%E8%A7%A3Cgroup%20V2.html)
 - https://www.kernel.org/doc/html/v5.10/admin-guide/cgroup-v2.html
