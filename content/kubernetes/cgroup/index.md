@@ -70,8 +70,10 @@ cgroup 主要限制的资源是：
 
 ## cgroup 子资源参数详解
 
-### blkio：限制设备 IO 访问
-![](.index_images/page_cache_io.png)
+### blkio: 限制设备 IO 访问
+
+{{<figure src="./k8s-page_cache_io.png#center" width=800px >}}
+
 blkio是cgroup中的一个子系统，可以用于限制及监控磁盘读写io
 blkio控制子系统可以限制进程读写的 IOPS 和吞吐量，但它只能对 Direct I/O 的文件读写进行限速，对 Buffered I/O 的文件读写无法限制
 Buffered I/O 指会经过 PageCache 然后再写入到存储设备中。
