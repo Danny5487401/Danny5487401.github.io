@@ -119,14 +119,81 @@ Kubernetes API Server 从上到下可以分为四层：接口层，访问控制�
 
 {{<figure src="./api-procedure.png#center" width=800px >}}
 
-1.HTTP 请求通过一组定义在DefaultBuildHandlerChain()（config.go）函数中的过滤处理函数处理，并进行相关操作（相关过滤处理函数如下图所示）。这些过滤处理函数将HTTP请求处理后存到中ctx.RequestInfo，比如用户的相关认证信息，或者相应的HTTP请求返回码。
+1. HTTP 请求通过一组定义在DefaultBuildHandlerChain()（config.go）函数中的过滤处理函数处理，并进行相关操作。
+这些过滤处理函数将HTTP请求处理后存到中ctx.RequestInfo，比如用户的相关认证信息，或者相应的HTTP请求返回码。
+```go
+func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
+	handler := filterlatency.TrackCompleted(apiHandler)
+	handler = genericapifilters.WithAuthorization(handler, c.Authorization.Authorizer, c.Serializer)
+	handler = filterlatency.TrackStarted(handler, c.TracerProvider, "authorization")
 
-2.接着multiplexer （container.go）基于HTTP路径会将HTTP请求发给对应的各自的处理handlers。
+	if c.FlowControl != nil {
+		workEstimatorCfg := flowcontrolrequest.DefaultWorkEstimatorConfig()
+		requestWorkEstimator := flowcontrolrequest.NewWorkEstimator(
+			c.StorageObjectCountTracker.Get, c.FlowControl.GetInterestedWatchCount, workEstimatorCfg, c.FlowControl.GetMaxSeats)
+		handler = filterlatency.TrackCompleted(handler)
+		handler = genericfilters.WithPriorityAndFairness(handler, c.LongRunningFunc, c.FlowControl, requestWorkEstimator)
+		handler = filterlatency.TrackStarted(handler, c.TracerProvider, "priorityandfairness")
+	} else {
+		handler = genericfilters.WithMaxInFlightLimit(handler, c.MaxRequestsInFlight, c.MaxMutatingRequestsInFlight, c.LongRunningFunc)
+	}
 
-3.routes （在routes/*定义）路由将HTTP路径与handlers处理器关联。
+	handler = filterlatency.TrackCompleted(handler)
+	handler = genericapifilters.WithImpersonation(handler, c.Authorization.Authorizer, c.Serializer)
+	handler = filterlatency.TrackStarted(handler, c.TracerProvider, "impersonation")
 
-4.根据每个API Group注册的处理程序获取HTTP请求相关内容对象（比如用户，权限等），并将请求的内容对象存入存储中
+	handler = filterlatency.TrackCompleted(handler)
+	handler = genericapifilters.WithAudit(handler, c.AuditBackend, c.AuditPolicyRuleEvaluator, c.LongRunningFunc)
+	handler = filterlatency.TrackStarted(handler, c.TracerProvider, "audit")
 
+	failedHandler := genericapifilters.Unauthorized(c.Serializer)
+	failedHandler = genericapifilters.WithFailedAuthenticationAudit(failedHandler, c.AuditBackend, c.AuditPolicyRuleEvaluator)
+
+	failedHandler = filterlatency.TrackCompleted(failedHandler)
+	handler = filterlatency.TrackCompleted(handler)
+	handler = genericapifilters.WithAuthentication(handler, c.Authentication.Authenticator, failedHandler, c.Authentication.APIAudiences, c.Authentication.RequestHeaderConfig)
+	handler = filterlatency.TrackStarted(handler, c.TracerProvider, "authentication")
+
+	handler = genericfilters.WithCORS(handler, c.CorsAllowedOriginList, nil, nil, nil, "true")
+
+	// WithTimeoutForNonLongRunningRequests will call the rest of the request handling in a go-routine with the
+	// context with deadline. The go-routine can keep running, while the timeout logic will return a timeout to the client.
+	handler = genericfilters.WithTimeoutForNonLongRunningRequests(handler, c.LongRunningFunc)
+
+	handler = genericapifilters.WithRequestDeadline(handler, c.AuditBackend, c.AuditPolicyRuleEvaluator,
+		c.LongRunningFunc, c.Serializer, c.RequestTimeout)
+	handler = genericfilters.WithWaitGroup(handler, c.LongRunningFunc, c.NonLongRunningRequestWaitGroup)
+	if c.ShutdownWatchTerminationGracePeriod > 0 {
+		handler = genericfilters.WithWatchTerminationDuringShutdown(handler, c.lifecycleSignals, c.WatchRequestWaitGroup)
+	}
+	if c.SecureServing != nil && !c.SecureServing.DisableHTTP2 && c.GoawayChance > 0 {
+		handler = genericfilters.WithProbabilisticGoaway(handler, c.GoawayChance)
+	}
+	handler = genericapifilters.WithWarningRecorder(handler)
+	handler = genericapifilters.WithCacheControl(handler)
+	handler = genericfilters.WithHSTS(handler, c.HSTSDirectives)
+	if c.ShutdownSendRetryAfter {
+		handler = genericfilters.WithRetryAfter(handler, c.lifecycleSignals.NotAcceptingNewRequest.Signaled())
+	}
+	handler = genericfilters.WithHTTPLogging(handler)
+	if utilfeature.DefaultFeatureGate.Enabled(genericfeatures.APIServerTracing) {
+		handler = genericapifilters.WithTracing(handler, c.TracerProvider)
+	}
+	handler = genericapifilters.WithLatencyTrackers(handler)
+	handler = genericapifilters.WithRequestInfo(handler, c.RequestInfoResolver)
+	handler = genericapifilters.WithRequestReceivedTimestamp(handler)
+	handler = genericapifilters.WithMuxAndDiscoveryComplete(handler, c.lifecycleSignals.MuxAndDiscoveryComplete.Signaled())
+	handler = genericfilters.WithPanicRecovery(handler, c.RequestInfoResolver)
+	handler = genericapifilters.WithAuditInit(handler)
+	return handler
+}
+```
+
+2. 接着multiplexer （container.go）基于HTTP路径会将HTTP请求发给对应的各自的处理handlers。
+
+3. routes （在routes/*定义）路由将HTTP路径与handlers处理器关联。
+
+4. 根据每个API Group注册的处理程序获取HTTP请求相关内容对象（比如用户，权限等），并将请求的内容对象存入存储中
 
 
 ## GenericAPIServer 通用配置
@@ -272,7 +339,6 @@ func buildGenericConfig(
 	return
 }
 ```
-
 
 
 
@@ -761,8 +827,89 @@ func (v *authorizingVisitor) visit(source fmt.Stringer, rule *rbacv1.PolicyRule,
 }
 ```
 
-
 ### admission 准入机制: 提供回调钩子，资源持久化前对资源的值做改动或者验证等操作
+准入控制器是kubernetes 的API Server上的一个链式Filter，它根据一定的规则决定是否允许当前的请求生效，并且有可能会改写资源声明
+
+{{<figure src="./apiserver_admission_register.png#center" width=800px >}}
+
+{{<figure src="./admission_process.png#center" width=800px >}}
+
+
+
+```go
+func NewAdmissionOptions() *AdmissionOptions {
+	options := genericoptions.NewAdmissionOptions()
+	// 注册 all admission plugins
+	RegisterAllAdmissionPlugins(options.Plugins)
+	// set RecommendedPluginOrder
+	options.RecommendedPluginOrder = AllOrderedPlugins
+	// set DefaultOffPlugins
+	options.DefaultOffPlugins = DefaultOffAdmissionPlugins()
+
+	return &AdmissionOptions{
+		GenericAdmission: options,
+	}
+}
+```
+默认的插件
+```go
+// AllOrderedPlugins is the list of all the plugins in order.
+var AllOrderedPlugins = []string{
+	admit.PluginName,                        // AlwaysAdmit
+	autoprovision.PluginName,                // NamespaceAutoProvision
+	lifecycle.PluginName,                    // NamespaceLifecycle
+	exists.PluginName,                       // NamespaceExists
+	scdeny.PluginName,                       // SecurityContextDeny
+	antiaffinity.PluginName,                 // LimitPodHardAntiAffinityTopology
+	limitranger.PluginName,                  // LimitRanger
+	serviceaccount.PluginName,               // ServiceAccount
+	noderestriction.PluginName,              // NodeRestriction
+	nodetaint.PluginName,                    // TaintNodesByCondition
+	alwayspullimages.PluginName,             // AlwaysPullImages
+	imagepolicy.PluginName,                  // ImagePolicyWebhook
+	podsecurity.PluginName,                  // PodSecurity
+	podnodeselector.PluginName,              // PodNodeSelector
+	podpriority.PluginName,                  // Priority
+	defaulttolerationseconds.PluginName,     // DefaultTolerationSeconds
+	podtolerationrestriction.PluginName,     // PodTolerationRestriction
+	eventratelimit.PluginName,               // EventRateLimit
+	extendedresourcetoleration.PluginName,   // ExtendedResourceToleration
+	label.PluginName,                        // PersistentVolumeLabel
+	setdefault.PluginName,                   // DefaultStorageClass
+	storageobjectinuseprotection.PluginName, // StorageObjectInUseProtection
+	gc.PluginName,                           // OwnerReferencesPermissionEnforcement
+	resize.PluginName,                       // PersistentVolumeClaimResize
+	runtimeclass.PluginName,                 // RuntimeClass
+	certapproval.PluginName,                 // CertificateApproval
+	certsigning.PluginName,                  // CertificateSigning
+	ctbattest.PluginName,                    // ClusterTrustBundleAttest
+	certsubjectrestriction.PluginName,       // CertificateSubjectRestriction
+	defaultingressclass.PluginName,          // DefaultIngressClass
+	denyserviceexternalips.PluginName,       // DenyServiceExternalIPs
+
+	// new admission plugins should generally be inserted above here
+	// webhook, resourcequota, and deny plugins must go at the end
+
+	mutatingwebhook.PluginName,           // MutatingAdmissionWebhook
+	validatingadmissionpolicy.PluginName, // ValidatingAdmissionPolicy
+	validatingwebhook.PluginName,         // ValidatingAdmissionWebhook
+	resourcequota.PluginName,             // ResourceQuota
+	deny.PluginName,                      // AlwaysDeny
+}
+
+```
+根据准入控制器执行的操作类型，它可以分为 3 种类型：
+
+
+Mutating：这种控制器可以解析请求，并在请求向下发送之前对请求进行更改（变更请求）。 例如：AlwaysPullImages
+
+Validating：这种控制器可以解析请求并根据特定数据进行验证。 例如：NamespaceExists
+
+Both：这种控制器可以执行变更和验证两种操作。 例如：CertificateSigning
+
+
+其中有三个特殊的Admission Plugin：ImagePolicyWebhook、MutatingAdmissionWebhook、ValidatingAdmissionWebhook，它们会根据设置去调用使用者自己写的Web服务，传入请求的目标Object，让该服务判断是否需要拒绝、允许或进行修改
+
 
 初始化
 ```go
@@ -775,7 +922,8 @@ func (a *AdmissionOptions) ApplyTo(
 	pluginInitializers ...admission.PluginInitializer,
 ) error {
     // ...
-
+    
+	// 初始化链
 	admissionChain, err := a.Plugins.NewFromPlugins(pluginNames, pluginsConfigProvider, initializersChain, a.Decorators)
 	if err != nil {
 		return err
@@ -819,32 +967,10 @@ func (ps *Plugins) NewFromPlugins(pluginNames []string, configProvider ConfigPro
 			}
 		}
 	}
-	if len(mutationPlugins) != 0 {
-		klog.Infof("Loaded %d mutating admission controller(s) successfully in the following order: %s.", len(mutationPlugins), strings.Join(mutationPlugins, ","))
-	}
-	if len(validationPlugins) != 0 {
-		klog.Infof("Loaded %d validating admission controller(s) successfully in the following order: %s.", len(validationPlugins), strings.Join(validationPlugins, ","))
-	}
+    // ...
 	return newReinvocationHandler(chainAdmissionHandler(handlers)), nil
 }
 
-```
-
-默认的插件
-```go
-func NewAdmissionOptions() *AdmissionOptions {
-	options := genericoptions.NewAdmissionOptions()
-	// register all admission plugins
-	RegisterAllAdmissionPlugins(options.Plugins)
-	// set RecommendedPluginOrder
-	options.RecommendedPluginOrder = AllOrderedPlugins
-	// set DefaultOffPlugins
-	options.DefaultOffPlugins = DefaultOffAdmissionPlugins()
-
-	return &AdmissionOptions{
-		GenericAdmission: options,
-	}
-}
 ```
 
 
@@ -905,6 +1031,118 @@ func (p pluginHandlerWithMetrics) Validate(ctx context.Context, a admission.Attr
 	err := validatingHandler.Validate(ctx, a, o)
 	p.observer(ctx, time.Since(start), err != nil, a, stepValidate, p.extraLabels...)
 	return err
+}
+```
+
+
+
+请求 post 校验过程
+```go
+func (a *APIInstaller) registerResourceHandlers(path string, storage rest.Storage, ws *restful.WebService) (*metav1.APIResource, *storageversion.ResourceInfo, error) {
+	admit := a.group.Admit
+
+    // ..
+
+	for _, action := range actions {
+        // ..
+
+		switch action.Verb {
+        // ...
+		case "POST": // Create a resource.
+			var handler restful.RouteFunction
+			if isNamedCreater {
+				handler = restfulCreateNamedResource(namedCreater, reqScope, admit)
+			} else {
+				handler = restfulCreateResource(creater, reqScope, admit)
+			}
+			// 可观测处理
+			handler = metrics.InstrumentRouteFunc(action.Verb, group, version, resource, subresource, requestScope, metrics.APIServerComponent, deprecated, removedRelease, handler)
+			handler = utilwarning.AddWarningsHandler(handler, warnings)
+			article := GetArticleForNoun(kind, " ")
+			doc := "create" + article + kind
+			if isSubresource {
+				doc = "create " + subresource + " of" + article + kind
+			}
+			route := ws.POST(action.Path).To(handler).
+				Doc(doc).
+				Param(ws.QueryParameter("pretty", "If 'true', then the output is pretty printed.")).
+				Operation("create"+namespaced+kind+strings.Title(subresource)+operationSuffix).
+				Produces(append(storageMeta.ProducesMIMETypes(action.Verb), mediaTypes...)...).
+				Returns(http.StatusOK, "OK", producedObject).
+				// TODO: in some cases, the API may return a v1.Status instead of the versioned object
+				// but currently go-restful can't handle multiple different objects being returned.
+				Returns(http.StatusCreated, "Created", producedObject).
+				Returns(http.StatusAccepted, "Accepted", producedObject).
+				Reads(defaultVersionedObject).
+				Writes(producedObject)
+			if err := AddObjectParams(ws, route, versionedCreateOptions); err != nil {
+				return nil, nil, err
+			}
+			addParams(route, action.Params)
+			routes = append(routes, route)
+
+        // ..
+		default:
+			return nil, nil, fmt.Errorf("unrecognized action verb: %s", action.Verb)
+		}
+		for _, route := range routes {
+			route.Metadata(ROUTE_META_GVK, metav1.GroupVersionKind{
+				Group:   reqScope.Kind.Group,
+				Version: reqScope.Kind.Version,
+				Kind:    reqScope.Kind.Kind,
+			})
+			route.Metadata(ROUTE_META_ACTION, strings.ToLower(action.Verb))
+			ws.Route(route)
+		}
+		// Note: update GetAuthorizerAttributes() when adding a custom handler.
+	}
+
+    // ....
+	return &apiResource, resourceInfo, nil
+}
+
+```
+
+最终调用
+```go
+func createHandler(r rest.NamedCreater, scope *RequestScope, admit admission.Interface, includeName bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		ctx := req.Context()
+        // ...
+
+		requestFunc := func() (runtime.Object, error) {
+			return r.Create(
+				ctx,
+				name,
+				obj,
+				rest.AdmissionToValidateObjectFunc(admit, admissionAttributes, scope),  // 校验
+				options,
+			)
+		}
+		// Dedup owner references before updating managed fields
+		dedupOwnerReferencesAndAddWarning(obj, req.Context(), false)
+		result, err := finisher.FinishRequest(ctx, func() (runtime.Object, error) {
+			liveObj, err := scope.Creater.New(scope.Kind)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create new object (Create for %v): %v", scope.Kind, err)
+			}
+			obj = scope.FieldManager.UpdateNoErrors(liveObj, obj, managerOrUserAgent(options.FieldManager, req.UserAgent()))
+			admit = fieldmanager.NewManagedFieldsValidatingAdmissionController(admit)
+
+			// mutating 曹祖平
+			if mutatingAdmission, ok := admit.(admission.MutationInterface); ok && mutatingAdmission.Handles(admission.Create) {
+				if err := mutatingAdmission.Admit(ctx, admissionAttributes, scope); err != nil {
+					return nil, err
+				}
+			}
+			// Dedup owner references again after mutating admission happens
+			dedupOwnerReferencesAndAddWarning(obj, req.Context(), true)
+			result, err := requestFunc()
+             // ...
+			return result, err
+		})
+        // ...
+	}
 }
 ```
 
@@ -1372,6 +1610,7 @@ func CreateKubeAPIServer(kubeAPIServerConfig *controlplane.Config, delegateAPISe
 }
 
 ```
+
 ```go
 func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget) (*Instance, error) {
     // ...
@@ -1562,7 +1801,7 @@ func (c LegacyRESTStorageProvider) NewLegacyRESTStorage(apiResourceConfigSource 
 		storage[resource] = eventStorage
 	}
 
-    // 等等...
+    // 等等其他资源...
 
 	if len(storage) > 0 {
 		apiGroupInfo.VersionedResourcesStorageMap["v1"] = storage
@@ -1574,6 +1813,7 @@ func (c LegacyRESTStorageProvider) NewLegacyRESTStorage(apiResourceConfigSource 
 ```
 
 {{<figure src="./rest_storage.png#center" width=800px >}}
+
 这里拿 pod 作为案例
 
 ```go
@@ -1664,6 +1904,7 @@ func (e *Store) CompleteWithOptions(options *generic.StoreOptions) error {
 ### aggregatorServer 
 
 负责处理  apiregistration.k8s.io 组下的 APIService 资源请求，同时将来自用户的请求拦截转发给 Aggregated APIServer(AA)；
+
 ```yaml
 apiVersion: apiregistration.k8s.io/v1beta1
 kind: APIService

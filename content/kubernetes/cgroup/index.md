@@ -358,3 +358,4 @@ $ sudo apt-get install cgroup-tools
 - [docker 容器基础技术：linux cgroup 简介](https://cizixs.com/2017/08/25/linux-cgroup/)
 - [详解Cgroup V2](https://zorrozou.github.io/docs/%E8%AF%A6%E8%A7%A3Cgroup%20V2.html)
 - https://www.kernel.org/doc/html/v5.10/admin-guide/cgroup-v2.html
+- [cgroup v1与cgroup v2的区别](https://www.alibabacloud.com/help/zh/alinux/support/differences-between-cgroup-v1-and-cgroup-v2#921d08df2c654)

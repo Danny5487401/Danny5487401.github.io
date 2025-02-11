@@ -377,16 +377,6 @@ func WithPriorityAndFairness(
 		}
 
 		var classification *PriorityAndFairnessClassification
-		noteFn := func(fs *flowcontrol.FlowSchema, pl *flowcontrol.PriorityLevelConfiguration, flowDistinguisher string) {
-			classification = &PriorityAndFairnessClassification{
-				FlowSchemaName:    fs.Name,
-				FlowSchemaUID:     fs.UID,
-				PriorityLevelName: pl.Name,
-				PriorityLevelUID:  pl.UID}
-
-			httplog.AddKeyValue(ctx, "apf_pl", truncateLogField(pl.Name))
-			httplog.AddKeyValue(ctx, "apf_fs", truncateLogField(fs.Name))
-		}
         // ...
 
 		var served bool
@@ -464,7 +454,7 @@ func (cfgCtlr *configController) Handle(ctx context.Context, requestDigest Reque
 
 ```
 
-
+开始请求
 ```go
 // staging/src/k8s.io/apiserver/pkg/util/flowcontrol/apf_controller.go
 func (cfgCtlr *configController) startRequest(ctx context.Context, rd RequestDigest,
@@ -489,7 +479,7 @@ func (cfgCtlr *configController) startRequest(ctx context.Context, rd RequestDig
     // ...
 	plName := selectedFlowSchema.Spec.PriorityLevelConfiguration.Name
 	plState := cfgCtlr.priorityLevelStates[plName]
-	if plState.pl.Spec.Type == flowcontrol.PriorityLevelEnablementExempt {
+	if plState.pl.Spec.Type == flowcontrol.PriorityLevelEnablementExempt { // 豁免的情况
 		noteFn(selectedFlowSchema, plState.pl, "")
 		klog.V(7).Infof("startRequest(%#+v) => fsName=%q, distMethod=%#+v, plName=%q, immediate", rd, selectedFlowSchema.Name, selectedFlowSchema.Spec.DistinguisherMethod, plName)
 		return selectedFlowSchema, plState.pl, true, immediateRequest{}, time.Time{}
@@ -521,6 +511,8 @@ func (cfgCtlr *configController) startRequest(ctx context.Context, rd RequestDig
 }
 
 ```
+
+匹配规则
 ```go
 
 func matchesPolicyRule(digest RequestDigest, policyRule *flowcontrol.PolicyRulesWithSubjects) bool {
@@ -549,7 +541,7 @@ func (qs *queueSet) StartRequest(ctx context.Context, workEstimate *fqrequest.Wo
 	var req *request
 
 	// ========================================================================
-	// Step 0:
+	// 步骤 0:
 	// Apply only concurrency limit, if zero queues desired
 	if qs.qCfg.DesiredNumQueues < 1 {
 		if !qs.canAccommodateSeatsLocked(workEstimate.MaxSeats()) {
@@ -564,7 +556,7 @@ func (qs *queueSet) StartRequest(ctx context.Context, workEstimate *fqrequest.Wo
 	}
 
 	// ========================================================================
-	// Step 1:
+	// 步骤 1:
 	// 1) Start with shuffle sharding, to pick a queue.
 	// 2) Reject old requests that have been waiting too long
 	// 3) Reject current request if there is not enough concurrency shares and
@@ -580,7 +572,7 @@ func (qs *queueSet) StartRequest(ctx context.Context, workEstimate *fqrequest.Wo
 	}
 
 	// ========================================================================
-	// Step 2:
+	// 步骤 2:
 	// The next step is to invoke the method that dequeues as much
 	// as possible.
 	// This method runs a loop, as long as there are non-empty
@@ -595,6 +587,7 @@ func (qs *queueSet) StartRequest(ctx context.Context, workEstimate *fqrequest.Wo
 
 
 func (qs *queueSet) dispatchAsMuchAsPossibleLocked() {
+	// 循环出队
 	for qs.totRequestsWaiting != 0 && qs.totSeatsInUse < qs.dCfg.ConcurrencyLimit && qs.dispatchLocked() {
 	}
 }
@@ -604,9 +597,8 @@ func (qs *queueSet) timeoutOldRequestsAndRejectOrEnqueueLocked(ctx context.Conte
 	// 开始 shuffle sharding 选择队列 
 	queueIdx := qs.shuffleShardLocked(hashValue, descr1, descr2)
 	queue := qs.queues[queueIdx]
-	// The next step is the logic to reject requests that have been waiting too long
+	// 针对入队时间超过RequestWaitLimit,设置决定为拒绝 
 	qs.removeTimedOutRequestsFromQueueToBoundLocked(queue, fsName)
-
 
 	defer qs.boundNextDispatchLocked(queue)
 
@@ -616,7 +608,7 @@ func (qs *queueSet) timeoutOldRequestsAndRejectOrEnqueueLocked(ctx context.Conte
 		fsName:            fsName,
 		flowDistinguisher: flowDistinguisher,
 		ctx:               ctx,
-		decision:          qs.promiseFactory(nil, ctx.Done(), decisionCancel),
+		decision:          qs.promiseFactory(nil, ctx.Done(), decisionCancel), // 决定
 		arrivalTime:       qs.clock.Now(),
 		arrivalR:          qs.currentR,
 		queue:             queue,
@@ -625,6 +617,7 @@ func (qs *queueSet) timeoutOldRequestsAndRejectOrEnqueueLocked(ctx context.Conte
 		queueNoteFn:       queueNoteFn,
 		workEstimate:      qs.completeWorkEstimate(workEstimate),
 	}
+	// 达到上限进行拒绝
 	if ok := qs.rejectOrEnqueueToBoundLocked(req); !ok {
 		return nil
 	}
@@ -661,9 +654,172 @@ func (qs *queueSet) shuffleShardLocked(hashValue uint64, descr1, descr2 interfac
 	return bestQueueIdx
 }
 
+// 使用 fair queuing算法: 从所有queue中选择一个合适的queue取出请求，解除请求的阻塞，执行这个请求 
+func (qs *queueSet) dispatchLocked() bool {
+	queue, request := qs.findDispatchQueueToBoundLocked()
+	if queue == nil {
+		return false
+	}
+	if request == nil { // This should never happen.  But if it does...
+		return false
+	}
+	qs.totRequestsWaiting--
+	qs.totSeatsWaiting -= request.MaxSeats()
+	metrics.AddRequestsInQueues(request.ctx, qs.qCfg.Name, request.fsName, -1)
+	request.NoteQueued(false)
+	qs.reqsGaugePair.RequestsWaiting.Add(-1)
+	defer qs.boundNextDispatchLocked(queue)
+	if !request.decision.Set(decisionExecute) {
+		qs.seatDemandIntegrator.Set(float64(qs.totSeatsInUse + qs.totSeatsWaiting))
+		return true
+	}
+
+    // ... 
+	queue.nextDispatchR += request.totalWork()
+	return true
+}
+
+func (qs *queueSet) findDispatchQueueToBoundLocked() (*queue, *request) {
+	minVirtualFinish := fqrequest.MaxSeatSeconds
+	sMin := fqrequest.MaxSeatSeconds
+	dsMin := fqrequest.MaxSeatSeconds
+	sMax := fqrequest.MinSeatSeconds
+	dsMax := fqrequest.MinSeatSeconds
+	var minQueue *queue
+	var minIndex int
+	nq := len(qs.queues)
+	for range qs.queues {
+		qs.robinIndex = (qs.robinIndex + 1) % nq
+		queue := qs.queues[qs.robinIndex]
+		oldestWaiting, _ := queue.requests.Peek()
+		if oldestWaiting != nil {
+			sMin = ssMin(sMin, queue.nextDispatchR)
+			sMax = ssMax(sMax, queue.nextDispatchR)
+			estimatedWorkInProgress := fqrequest.SeatsTimesDuration(float64(queue.seatsInUse), qs.estimatedServiceDuration)
+			dsMin = ssMin(dsMin, queue.nextDispatchR-estimatedWorkInProgress)
+			dsMax = ssMax(dsMax, queue.nextDispatchR-estimatedWorkInProgress)
+			currentVirtualFinish := queue.nextDispatchR + oldestWaiting.totalWork()
+			klog.V(11).InfoS("Considering queue to dispatch", "queueSet", qs.qCfg.Name, "queue", qs.robinIndex, "finishR", currentVirtualFinish)
+			if currentVirtualFinish < minVirtualFinish {
+				minVirtualFinish = currentVirtualFinish
+				minQueue = queue
+				minIndex = qs.robinIndex
+			}
+		}
+	}
+
+	oldestReqFromMinQueue, _ := minQueue.requests.Peek()
+	if oldestReqFromMinQueue == nil {
+		// This cannot happen
+		klog.ErrorS(errors.New("selected queue is empty"), "Impossible", "queueSet", qs.qCfg.Name)
+		return nil, nil
+	}
+	if !qs.canAccommodateSeatsLocked(oldestReqFromMinQueue.MaxSeats()) {
+		// since we have not picked the queue with the minimum virtual finish
+		// time, we are not going to advance the round robin index here.
+		klogV := klog.V(4)
+		if klogV.Enabled() {
+			klogV.Infof("QS(%s): request %v %v seats %d cannot be dispatched from queue %d, waiting for currently executing requests to complete, %d requests are occupying %d seats and the limit is %d",
+				qs.qCfg.Name, oldestReqFromMinQueue.descr1, oldestReqFromMinQueue.descr2, oldestReqFromMinQueue.MaxSeats(), minQueue.index, qs.totRequestsExecuting, qs.totSeatsInUse, qs.dCfg.ConcurrencyLimit)
+		}
+		metrics.AddDispatchWithNoAccommodation(qs.qCfg.Name, oldestReqFromMinQueue.fsName)
+		return nil, nil
+	}
+	oldestReqFromMinQueue.removeFromQueueLocked()
+
+	// If the requested final seats exceed capacity of that queue,
+	// we reduce them to current capacity and adjust additional latency
+	// to preserve the total amount of work.
+	if oldestReqFromMinQueue.workEstimate.FinalSeats > uint64(qs.dCfg.ConcurrencyLimit) {
+		finalSeats := uint64(qs.dCfg.ConcurrencyLimit)
+		additionalLatency := oldestReqFromMinQueue.workEstimate.finalWork.DurationPerSeat(float64(finalSeats))
+		oldestReqFromMinQueue.workEstimate.FinalSeats = finalSeats
+		oldestReqFromMinQueue.workEstimate.AdditionalLatency = additionalLatency
+	}
+
+	// we set the round robin indexing to start at the chose queue
+	// for the next round.  This way the non-selected queues
+	// win in the case that the virtual finish times are the same
+	qs.robinIndex = minIndex
+
+	if minQueue.nextDispatchR < oldestReqFromMinQueue.arrivalR {
+		klog.ErrorS(errors.New("dispatch before arrival"), "Inconceivable!", "QS", qs.qCfg.Name, "queue", minQueue.index, "dispatchR", minQueue.nextDispatchR, "request", oldestReqFromMinQueue)
+	}
+	metrics.SetDispatchMetrics(qs.qCfg.Name, qs.currentR.ToFloat(), minQueue.nextDispatchR.ToFloat(), sMin.ToFloat(), sMax.ToFloat(), dsMin.ToFloat(), dsMax.ToFloat())
+	return minQueue, oldestReqFromMinQueue
+}
+
 ```
 
+等待请求结束
+```go
+func (req *request) Finish(execFn func()) bool {
+	exec, idle := req.wait()
+	if !exec {
+		return idle
+	}
+	func() {
+		defer func() {
+			idle = req.qs.finishRequestAndDispatchAsMuchAsPossible(req)
+		}()
 
+		execFn()
+	}()
+
+	return idle
+}
+
+func (req *request) wait() (bool, bool) {
+	qs := req.qs
+
+	// ========================================================================
+	// 步骤 3:
+	// The final step is to wait on a decision from
+	// somewhere and then act on it.
+	decisionAny := req.decision.Get()
+	qs.lockAndSyncTime(req.ctx)
+	defer qs.lock.Unlock()
+	if req.waitStarted {
+		// This can not happen, because the client is forbidden to
+		// call Wait twice on the same request
+		klog.Errorf("Duplicate call to the Wait method!  Immediately returning execute=false.  QueueSet=%s, startTime=%s, descr1=%#+v, descr2=%#+v", req.qs.qCfg.Name, req.startTime, req.descr1, req.descr2)
+		return false, qs.isIdleLocked()
+	}
+	req.waitStarted = true
+	switch decisionAny {
+	case decisionReject: // 拒绝
+		klog.V(5).Infof("QS(%s): request %#+v %#+v timed out after being enqueued\n", qs.qCfg.Name, req.descr1, req.descr2)
+		qs.totRequestsRejected++
+		qs.totRequestsTimedout++
+		metrics.AddReject(req.ctx, qs.qCfg.Name, req.fsName, "time-out")
+		return false, qs.isIdleLocked()
+	case decisionCancel: // 取消
+	case decisionExecute: 
+		klog.V(5).Infof("QS(%s): Dispatching request %#+v %#+v from its queue", qs.qCfg.Name, req.descr1, req.descr2)
+		return true, false
+	default:
+		// This can not happen, all possible values are handled above
+		klog.Errorf("QS(%s): Impossible decision (type %T, value %#+v) for request %#+v %#+v!  Treating as cancel", qs.qCfg.Name, decisionAny, decisionAny, req.descr1, req.descr2)
+	}
+	// TODO(aaron-prindle) add metrics for this case
+	klog.V(5).Infof("QS(%s): Ejecting request %#+v %#+v from its queue", qs.qCfg.Name, req.descr1, req.descr2)
+	// remove the request from the queue as it has timed out
+	queue := req.queue
+	if req.removeFromQueueLocked() != nil {
+		defer qs.boundNextDispatchLocked(queue)
+		qs.totRequestsWaiting--
+		qs.totSeatsWaiting -= req.MaxSeats()
+		qs.totRequestsRejected++
+		qs.totRequestsCancelled++
+		metrics.AddReject(req.ctx, qs.qCfg.Name, req.fsName, "cancelled")
+		metrics.AddRequestsInQueues(req.ctx, qs.qCfg.Name, req.fsName, -1)
+		req.NoteQueued(false)
+		qs.reqsGaugePair.RequestsWaiting.Add(-1)
+		qs.seatDemandIntegrator.Set(float64(qs.totSeatsInUse + qs.totSeatsWaiting))
+	}
+	return false, qs.isIdleLocked()
+}
+```
 
 
 ## 指标

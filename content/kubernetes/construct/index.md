@@ -60,10 +60,13 @@ somaxconn在5.4之前的内核中，默认都是128（5.4开始调整为了默�
 
 
 
-
+## kubeadm 使用
+- kubeadm init 创建新的控制平面节点
+- kubeadm join 将节点快速连接到指定的控制平面
 
 ## 参考
 
 - https://kubernetes.io/zh-cn/docs/setup/production-environment/tools/
 - [基础篇 TCP连接的建立和断开受哪些系统配置影响](https://time.geekbang.org/column/article/284912)
 - [Kubespray实现生产环境一键部署k8s v1.25.6集群](https://www.magiccloudnet.com/kubespray/)
+- https://github.com/kubernetes/kubernetes/tree/v1.32.0/cmd/kubeadm
