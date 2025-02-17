@@ -1,6 +1,6 @@
 ---
 title: "ShareInformer 模块"
-summary: ShareInformer 
+summary: 共享 reflector 反射器. 
 date: 2024-08-19T14:27:21+08:00
 categories:
   - kubernetes
@@ -27,7 +27,7 @@ SharedInformerFactory 工厂相比 SharedIndexInformer 来说, 组合了多个 i
 
 ```go
 func main() {
-	...
+	// ...
 
 	// 实例化 informers 集合对象
 	informers := informers.NewSharedInformerFactory(client, 0)
@@ -531,3 +531,5 @@ func ListAll(store Store, selector labels.Selector, appendFn AppendFunc) error {
 }
 
 ```
+
+## 参考

@@ -456,7 +456,7 @@ func loadFromConfDir(c *libcni, max int) error {
 }
 ```
 
-pod 初始化 sandbox 时网络设置
+### cni 调用方:pod 初始化 sandbox 时网络设置
 ```go
 // https://github.com/containerd/containerd/blob/6c6cc5ec107f10ccf4d4acbfe89d572a52d58a92/pkg/cri/server/sandbox_run.go
 func (c *criService) setupPodNetwork(ctx context.Context, sandbox *sandboxstore.Sandbox) error {
@@ -689,7 +689,7 @@ CNI 规范定义的核心接口：
 
 - CNI 官方已经提供了工具包，我们只需要实现cmdAdd, cmdCheck, cmdDel接口即可实现一个 CNI 插件.
 
-### cni 被调用方配置解析
+### cni 被调用方: 启动配置解析
 
 ```go
 func (t *dispatcher) getCmdArgsFromEnv() (string, *CmdArgs, *types.Error) {
@@ -743,10 +743,6 @@ func (t *dispatcher) getCmdArgsFromEnv() (string, *CmdArgs, *types.Error) {
 	return cmd, cmdArgs, nil
 }
 ```
-
-## SR-IOV 
-
-intel官方也给出了SR-IOV技术在容器中使用的开源组件，例如：sriov-cni和sriov-device-plugin等.
 
 
 ## 模拟 Kubernetes 的 CNI 环境
