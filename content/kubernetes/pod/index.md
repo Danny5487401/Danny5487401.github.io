@@ -1,7 +1,6 @@
 ---
 title: "Pod creation"
 date: 2024-10-30T22:30:14+08:00
-lastmod: 2024-11-19T09:20:14+08:00
 summary: pod 启动过程
 categories:
   - kubernetes

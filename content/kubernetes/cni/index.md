@@ -29,7 +29,7 @@ Main 插件：创建具体的网络设备
 - bridge: Creates a bridge, adds the host and the container to it.
 - ipvlan: 所有的虚拟接口都有相同的 mac 地址，而拥有不同的 ip 地址.
 - loopback: Set the state of loopback interface to up.
-- macvlan: MACVLAN可以从一个主机接口虚拟出多个macvtap，且每个macvtap设备都拥有不同的mac地址（对应不同的linux字符设备）。
+- macvlan: 可以从一个主机接口虚拟出多个macvtap，且每个macvtap设备都拥有不同的mac地址（对应不同的linux字符设备）。
 - ptp: 通过veth pair给容器和host创建点对点连接：veth pair一端在container netns内，另一端在host上
 - vlan: Allocates a vlan device.
 - host-device: Move an already-existing device into a container.
@@ -357,6 +357,213 @@ func (i *RangeIter) Next() (*net.IPNet, net.IP) {
 
 ```
 
+### bridge
+```go
+func cmdAdd(args *skel.CmdArgs) error {
+	var success bool = false
+
+	n, cniVersion, err := loadNetConf(args.StdinData)
+	if err != nil {
+		return err
+	}
+
+	isLayer3 := n.IPAM.Type != ""
+
+	if n.IsDefaultGW {
+		n.IsGW = true
+	}
+
+	if n.HairpinMode && n.PromiscMode {
+		return fmt.Errorf("cannot set hairpin mode and promiscous mode at the same time.")
+	}
+    // 创建网桥，如果需要的话
+	br, brInterface, err := setupBridge(n)
+	if err != nil {
+		return err
+	}
+
+	netns, err := ns.GetNS(args.Netns)
+	if err != nil {
+		return fmt.Errorf("failed to open netns %q: %v", args.Netns, err)
+	}
+	defer netns.Close()
+    // 创建veth pair
+	hostInterface, containerInterface, err := setupVeth(netns, br, args.IfName, n.MTU, n.HairpinMode, n.Vlan)
+	if err != nil {
+		return err
+	}
+
+	// Assume L2 interface only
+	result := &current.Result{CNIVersion: cniVersion, Interfaces: []*current.Interface{brInterface, hostInterface, containerInterface}}
+
+	if isLayer3 {
+		// 运行IPAM插件，并获取结果
+		r, err := ipam.ExecAdd(n.IPAM.Type, args.StdinData)
+		if err != nil {
+			return err
+		}
+
+		// release IP in case of failure
+		defer func() {
+			if !success {
+				ipam.ExecDel(n.IPAM.Type, args.StdinData)
+			}
+		}()
+
+		// Convert whatever the IPAM result was into the current Result type
+		ipamResult, err := current.NewResultFromResult(r)
+		if err != nil {
+			return err
+		}
+
+		result.IPs = ipamResult.IPs
+		result.Routes = ipamResult.Routes
+
+		if len(result.IPs) == 0 {
+			return errors.New("IPAM plugin returned missing IP config")
+		}
+
+		// 获取IPv4，IPv6的网关信息
+		gwsV4, gwsV6, err := calcGateways(result, n)
+		if err != nil {
+			return err
+		}
+
+		// Configure the container hardware address and IP address(es)
+		if err := netns.Do(func(_ ns.NetNS) error {
+			// Disable IPv6 DAD just in case hairpin mode is enabled on the
+			// bridge. Hairpin mode causes echos of neighbor solicitation
+			// packets, which causes DAD failures.
+			for _, ipc := range result.IPs {
+				if ipc.Version == "6" && (n.HairpinMode || n.PromiscMode) {
+					if err := disableIPV6DAD(args.IfName); err != nil {
+						return err
+					}
+					break
+				}
+			}
+
+			// Add the IP to the interface
+			if err := ipam.ConfigureIface(args.IfName, result); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+
+		// check bridge port state
+		retries := []int{0, 50, 500, 1000, 1000}
+		for idx, sleep := range retries {
+			time.Sleep(time.Duration(sleep) * time.Millisecond)
+
+			hostVeth, err := netlink.LinkByName(hostInterface.Name)
+			if err != nil {
+				return err
+			}
+			if hostVeth.Attrs().OperState == netlink.OperUp {
+				break
+			}
+
+			if idx == len(retries)-1 {
+				return fmt.Errorf("bridge port in error state: %s", hostVeth.Attrs().OperState)
+			}
+		}
+
+		// Send a gratuitous arp
+		if err := netns.Do(func(_ ns.NetNS) error {
+			contVeth, err := net.InterfaceByName(args.IfName)
+			if err != nil {
+				return err
+			}
+
+			for _, ipc := range result.IPs {
+				if ipc.Version == "4" {
+					_ = arping.GratuitousArpOverIface(ipc.Address.IP, *contVeth)
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+
+		if n.IsGW {
+			var firstV4Addr net.IP
+			var vlanInterface *current.Interface
+			// Set the IP address(es) on the bridge and enable forwarding
+			for _, gws := range []*gwInfo{gwsV4, gwsV6} {
+				for _, gw := range gws.gws {
+					if gw.IP.To4() != nil && firstV4Addr == nil {
+						firstV4Addr = gw.IP
+					}
+					if n.Vlan != 0 {
+						vlanIface, err := ensureVlanInterface(br, n.Vlan)
+						if err != nil {
+							return fmt.Errorf("failed to create vlan interface: %v", err)
+						}
+
+						if vlanInterface == nil {
+							vlanInterface = &current.Interface{Name: vlanIface.Attrs().Name,
+								Mac: vlanIface.Attrs().HardwareAddr.String()}
+							result.Interfaces = append(result.Interfaces, vlanInterface)
+						}
+                        // 设置网桥地址
+						err = ensureAddr(vlanIface, gws.family, &gw, n.ForceAddress)
+						if err != nil {
+							return fmt.Errorf("failed to set vlan interface for bridge with addr: %v", err)
+						}
+					} else {
+						err = ensureAddr(br, gws.family, &gw, n.ForceAddress)
+						if err != nil {
+							return fmt.Errorf("failed to set bridge addr: %v", err)
+						}
+					}
+				}
+
+				if gws.gws != nil {
+					if err = enableIPForward(gws.family); err != nil {
+						return fmt.Errorf("failed to enable forwarding: %v", err)
+					}
+				}
+			}
+		}
+
+		if n.IPMasq {
+			chain := utils.FormatChainName(n.Name, args.ContainerID)
+			comment := utils.FormatComment(n.Name, args.ContainerID)
+			for _, ipc := range result.IPs {
+				if err = ip.SetupIPMasq(&ipc.Address, chain, comment); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	// Refetch the bridge since its MAC address may change when the first
+	// veth is added or after its IP address is set
+	br, err = bridgeByName(n.BrName)
+	if err != nil {
+		return err
+	}
+	brInterface.Mac = br.Attrs().HardwareAddr.String()
+
+	result.DNS = n.DNS
+
+	// Return an error requested by testcases, if any
+	if debugPostIPAMError != nil {
+		return debugPostIPAMError
+	}
+
+	success = true
+
+	return types.PrintResult(result, cniVersion)
+}
+```
+#### hairpin mode
+bridge不允许包从收到包的端口发出，比如bridge从一个端口收到一个广播报文后，会将其广播到所有其他端口。
+bridge的某个端口打开hairpin mode后允许从这个端口收到的包仍然从这个端口发出。
+这个特性用于NAT场景下，比如docker的nat网络，一个容器访问其自身映射到主机的端口时，包到达bridge设备后走到ip协议栈，经过iptables规则的dnat转换后发现又需要从bridge的收包端口发出，需要开启端口的hairpin mode。
+
 ## 实现一个 CNI 插件
 实现一个 CNI 插件首先需要一个 JSON 格式的配置文件，配置文件需要放到每个节点的 /etc/cni/net.d/ 目录，一般命名为 <数字>-<CNI-plugin>.conf.
 
@@ -416,8 +623,10 @@ const (
 
 ## cni 调用入口 cri
 
-加载配置初始化 network
+加载配置初始化 network: 数据用来传给 cni 插件
 ```go
+// https://github.com/containerd/containerd/blob/e9f22e008b18a383cb440d86c8fd3a93e364f3f4/vendor/github.com/containerd/go-cni/opts.go
+
 type Network struct {
     cni    cnilibrary.CNI
     config *cnilibrary.NetworkConfigList
@@ -433,6 +642,7 @@ func loadFromConfDir(c *libcni, max int) error {
 	for _, confFile := range files {
 		var confList *cnilibrary.NetworkConfigList
 		if strings.HasSuffix(confFile, ".conflist") {
+			// 从文件读取
 			confList, err = cnilibrary.ConfListFromFile(confFile)
             // ..
 		} else {
@@ -453,6 +663,59 @@ func loadFromConfDir(c *libcni, max int) error {
 	}
 	c.networks = append(c.networks, networks...)
 	return nil
+}
+
+func ConfListFromFile(filename string) (*NetworkConfigList, error) {
+    bytes, err := ioutil.ReadFile(filename)
+    if err != nil {
+        return nil, fmt.Errorf("error reading %s: %w", filename, err)
+    }
+    return ConfListFromBytes(bytes)
+}
+
+
+func ConfListFromBytes(bytes []byte) (*NetworkConfigList, error) {
+	rawList := make(map[string]interface{})
+	if err := json.Unmarshal(bytes, &rawList); err != nil {
+		return nil, fmt.Errorf("error parsing configuration list: %w", err)
+	}
+
+    // ...
+
+	list := &NetworkConfigList{
+		Name:         name,
+		DisableCheck: disableCheck,
+		CNIVersion:   cniVersion,
+		Bytes:        bytes,
+	}
+
+	var plugins []interface{}
+	plug, ok := rawList["plugins"]
+	if !ok {
+		return nil, fmt.Errorf("error parsing configuration list: no 'plugins' key")
+	}
+	plugins, ok = plug.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("error parsing configuration list: invalid 'plugins' type %T", plug)
+	}
+	if len(plugins) == 0 {
+		return nil, fmt.Errorf("error parsing configuration list: no plugins in list")
+	}
+
+	for i, conf := range plugins {
+		newBytes, err := json.Marshal(conf)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal plugin config %d: %w", i, err)
+		}
+		netConf, err := ConfFromBytes(newBytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse plugin config %d: %w", i, err)
+		}
+		// 这里的数据用来传给 cni
+		list.Plugins = append(list.Plugins, netConf)
+	}
+
+	return list, nil
 }
 ```
 
@@ -750,12 +1013,12 @@ CNI 插件的测试过程，不需要一定安装一个 K8s 出来，走 K8s CNI
 
 
 
-
 ## 参考
-- https://github.com/containernetworking/cni/blob/main/SPEC.md
-- [深入解读 CNI：容器网络接口](https://jimmysong.io/blog/cni-deep-dive/)
 - https://github.com/containernetworking/plugins
 - https://github.com/k8snetworkplumbingwg/sriov-cni
+- https://github.com/containernetworking/cni/blob/main/SPEC.md
+- [深入解读 CNI：容器网络接口](https://jimmysong.io/blog/cni-deep-dive/)
 - [手写一个Kubernetes CNI网络插件](https://qingwave.github.io/how-to-write-k8s-cni/)
 - [源码分析：K8s CNI macvlan 网络插件](https://hansedong.github.io/2020/08/11/23/)
 - [k8s pod使用sriov](https://blog.csdn.net/weixin_40579389/article/details/138086057)
+- [bridge 插件使用](https://morningspace.github.io/tech/k8s-net-cni/)

@@ -64,7 +64,7 @@ type Kubelet struct {
 	// Handles certificate rotations.
 	serverCertificateManager certificate.Manager
 
-	// Syncs pods statuses with apiserver; also used as a cache of statuses.
+	// 负责维护状态信息，并把 pod 状态更新到 apiserver; also used as a cache of statuses.
 	statusManager status.Manager
 
 	// VolumeManager runs a set of asynchronous loops that figure out which
@@ -97,10 +97,10 @@ type Kubelet struct {
 ```
 
 - PodWorkers: 处理事件中 Pod 的同步。核心方法 managePodLoop() 间接调用 kubelet.syncPod() 完成 Pod 的同步
-- PLEG(pod lifecycle event generator) : Pod 生命周期事件（ContainerStarted、ContainerDied、ContainerRemoved、ContainerChanged）生成器.其维护着存储Pod 信息的cache，从运行时获取容器的信息，并根据前后两次信息对比，生成对应的PodLifecycleEvent，通过eventChannel发送到kubelet syncLoop进行消费，最终由kubelet syncPod完成Pod的同步，维护着用户的“期望”。
-- VolumeManager 运行一组异步循环，根据在此节点上调度的 pod 确定需要附加/挂载/卸载/分离哪些卷并执行操作
+- PLEG(pod lifecycle event generator): Pod 生命周期事件（ContainerStarted、ContainerDied、ContainerRemoved、ContainerChanged）生成器.其维护着存储Pod 信息的cache，从运行时获取容器的信息，并根据前后两次信息对比，生成对应的PodLifecycleEvent，通过eventChannel发送到kubelet syncLoop进行消费，最终由kubelet syncPod完成Pod的同步，维护着用户的“期望”。
+- VolumeManager: 运行一组异步循环，根据在此节点上调度的 pod 确定需要附加/挂载/卸载/分离哪些卷并执行操作
 - EvictionManager : 监控 Node 节点的资源占用情况，根据驱逐规则驱逐 Pod 释放资源，缓解节点的压力
-- OOMWatcher 从系统日志中获取容器的 OOM 日志，将其封装成事件并记录
+- OOMWatcher: 从系统日志中获取容器的 OOM 日志，将其封装成事件并记录
 
 
 ## 流程
