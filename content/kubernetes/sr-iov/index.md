@@ -62,6 +62,15 @@ bdi         dma          graphics        input        misc      powercap       r
 - /sys/class/net/<device name>/device/sriov_numvfs 参数设置了 SR-IOV 网络设备VF数量
 
 
+### /etc/sysconfig/netwrok-scripts/ 目录介绍
+
+与网络接口配置相关的文件，以及控制网络接口状态的脚本文件，全都位于 /etc/sysconfig/netwrok-scripts/ 目录下。
+网络接口配置文件用于控制系统中的软件网络接口，并通过这些接口实现对网络设备的控制。
+当系统启动时，系统通过这些接口配置文件决定启动哪些接口，以及如何对这些接口进行配置。接口配置文件的名称通常类似于 ifcfg-，其中 与配置文件所控制的设备的名称相关。 
+在所有的网络接口中，最常用的就是以太网接口ifcfg-eth0，它是系统中第一块网卡的配置文件。
+
+
+
 ### QoS(Quality of Service 服务质量)
 三种服务模型：
 
@@ -153,7 +162,7 @@ Linux Kernel version 3.8.x 及以上版本可以通过上述调整 sriov_numvfs 
 如果VF已经被放入了其他网络名字空间，那么net目录下会显示为空，例如上图中的virtfn0。
 
 
-## 网卡bond
+## 网卡 bond
 
 {{<figure src="./bond.png#center" width=800px >}}
 
@@ -164,6 +173,9 @@ Linux Kernel version 3.8.x 及以上版本可以通过上述调整 sriov_numvfs 
 多网卡绑定实际上需要提供一个额外的软件的bond驱动程序实现。通过驱动程序可以将多块网卡屏蔽。
 对TCP/IP协议层只存在一个Bond网卡，在Bond程序中实现网络流量的负载均衡，即将一个网络请求重定位到不同的网卡上，来提高总体网络的可用性
 
+怎么看当前bond的mode？
+- #cat /proc/net/bonding/bond0
+- #vim /etc/sysconfig/network-scripts/ifcfg-bond0的BONDING_OPTS参数
 ```shell
 # 查看 bond 绑定的网卡
 cat /proc/net/bonding/bond1
@@ -205,7 +217,7 @@ const (
 )
 
 ```
-#### Mode 0 - Balance-RR（轮询模式）
+#### Mode 0 - Balance-RR（轮询模式 round-robin）
 * 描述：链路负载均衡，增加带宽，支持容错，一条链路故障会自动切换正常链路。交换机需要配置聚合口，思科叫port channel。
 * 优点：增加网络吞吐量，另外也会增加高可用
 * 缺点：不提供冗余性，交换机需要配置trunking。
@@ -239,6 +251,14 @@ const (
 * 优点：在传输和接收方向上都实现负载均衡，不需要交换机特殊支持。
 
 
+LACP（Link Aggregation Control Protocol）链路聚合包含两种类型
+- 静态 LACP 模式链路聚合: Eth-Trunk 接口的建立，成员接口的加入，都是由手工配置完成的
+- 动态 LACP 模式链路: Eth-Trunk 接口的建立，成员接口的加入，活动接口的选择完全由LACP 协议通过协商完成。
+
+链路聚合控制的相关参数
+- Aggregator ID： 在一个设备上，能进行多组聚合，即有多个Aggregator，为了区分这些Aggregator，给每个Aggregator分配了一个聚合ID（Aggregator ID），为一个16位整数
+- 操作key : 在动态LACP聚合中，只有操作KEY相同的端口才能属于同一个聚合组，你可以认为操作KEY相同的端口，其属性相
+
 ### 参数介绍
 ```go
 // github.com/vishvananda/netlink/link.go
@@ -258,7 +278,7 @@ type Bond struct {
 	Primary         int // 哪个slave成为主设备（primary device），取值为字符串，如eth0，eth1等。只要指定的设备可用，它将一直是激活的slave。只有在主设备（primary device）断线时才会切换设备。primary 选项只对active-backup(mode=1)模式有效。
 	PrimaryReselect BondPrimaryReselect
 	FailOverMac     BondFailOverMac // 指定 active-backup 模式是否应该将所有从属连接设定为使用同一 MAC 地址作为 enslavement（传统行为），或在启用时根据所选策略执行绑定 MAC 地址的特殊处理。
-	XmitHashPolicy  BondXmitHashPolicy
+	XmitHashPolicy  BondXmitHashPolicy // 分发策略 
 	ResendIgmp      int  // 指定故障转移事件后要进行的 IGMP 成员报告数。故障转移后会立即提交一个报告，之后会每隔 200 毫秒发送数据包。
     NumPeerNotif    int
 	AllSlavesActive int
@@ -275,6 +295,15 @@ type Bond struct {
 	TlbDynamicLb   int
 }
 ```
+xmit_hash_policy
+1. layer2： 使用二层帧头作为计算分发出口的参数，这导致通过同一个网关的数据流将完全从一个端口发送，为了更加细化分发策略，必须使用一些三层信息，然而却增加了计算开销。
+
+2. layer2+3： 在1的基础上增加了三层的ip报头信息，计算量增加了，然而负载却更加均衡了，一个个主机到主机的数据流形成并且同一个流被分发到同一个端口，根据这个思想，如果要使负载更加均衡，我们在继续增加代价的前提下可以拿到4层的信息。
+
+3. layer3+4： 该策略在可能的时候使用上层协议的信息来生成hash。这将允许特定网络对（network peer）的流量分摊到多个slave上，尽管同一个连接（connection）不会分摊到多个slave上。
+
+
+
 
 ### bond口创建的一般流程：
 

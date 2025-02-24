@@ -202,7 +202,7 @@ func (s *server) Register(ctx context.Context, r *api.RegisterRequest) (*api.Emp
 	if !v1helper.IsExtendedResourceName(core.ResourceName(r.ResourceName)) {
         // ..
 	}
-    // 注册资源名
+    // 连接客户端
 	if err := s.connectClient(r.ResourceName, filepath.Join(s.socketDir, r.Endpoint)); err != nil {
         // ..
 	}
@@ -221,7 +221,6 @@ func (s *server) connectClient(name string, socketPath string) error {
 	}
 
 	go func() {
-		// 调用list-watch 资源的最新信息
 		s.runClient(name, c)
 	}()
 
@@ -241,6 +240,29 @@ func (s *server) runClient(name string, c Client) {
 		klog.V(2).InfoS("Unable to disconnect client", "resource", name, "client", c, "err", err)
 	}
 }
+```
+```go
+// https://github.com/kubernetes/kubernetes/blob/25dc4c4f320ecb75b936220c1c66741bce4b9014/pkg/kubelet/cm/devicemanager/plugin/v1beta1/client.go
+
+func (c *client) Run() {
+    // 调用list-watch 资源的最新信息
+	stream, err := c.client.ListAndWatch(context.Background(), &api.Empty{})
+	if err != nil {
+		klog.ErrorS(err, "ListAndWatch ended unexpectedly for device plugin", "resource", c.resource)
+		return
+	}
+
+	for {
+		response, err := stream.Recv()
+		if err != nil {
+			klog.ErrorS(err, "ListAndWatch ended unexpectedly for device plugin", "resource", c.resource)
+			return
+		}
+		klog.V(2).InfoS("State pushed for device plugin", "resource", c.resource, "resourceCapacity", len(response.Devices))
+		c.handler.PluginListAndWatchReceiver(c.resource, response)
+	}
+}
+
 ```
 
 kubelet 请求分配资源
