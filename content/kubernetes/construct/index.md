@@ -45,12 +45,12 @@ net.ipv4.tcp_keepalive_probes = 10
 
 创建过程:从Client调用connect()，到Server侧accept()成功返回这一过程中的TCP状态转换
 
-{{<figure src="tcp_process_establish.png.png#center" width=800px >}}
+{{<figure src="tcp_process_establish.png#center" width=800px >}}
 
 - 半连接: 收到了SYN后还没有回复SYNACK的连接.
 - TCP全连接(complete): Client在收到Server的SYNACK包后，就会发出ACK，Server收到该ACK后，三次握手就完成了，即产生了一个
 
-{{<figure src="tcp_process_close.png.png#center" width=800px >}}
+{{<figure src="tcp_process_close.png#center" width=800px >}}
 断开过程:当应用程序调用close()时，会向对端发送FIN包，然后会接收ACK；对端也会调用close()来发送FIN，然后本端也会向对端回ACK，这就是TCP的四次挥手过程。
 
 - TIME_WAIT状态存在的意义是：最后发送的这个ACK包可能会被丢弃掉或者有延迟，这样对端就会再次发送FIN包。如果不维持TIME_WAIT这个状态，那么再次收到对端的FIN包后，本端就会回一个Reset包，这可能会产生一些异常。
@@ -69,7 +69,7 @@ Server中积压的半连接较多，也有可能是因为有些恶意的Client�
 
 
 #### net.ipv4.tcp_syn_retries = 2
-{{<figure src="net.ipv4.tcp_syn_retriespng#center" width=800px >}}
+{{<figure src="net.ipv4.tcp_syn_retries.png#center" width=800px >}}
 
 首先Client会给Server发送一个SYN包，但是该SYN包可能会在传输过程中丢失，或者因为其他原因导致Server无法处理，此时Client这一侧就会触发超时重传机制。但是也不能一直重传下去，重传的次数也是有限制的，这就是tcp_syn_retries这个配置项来决定的
 
