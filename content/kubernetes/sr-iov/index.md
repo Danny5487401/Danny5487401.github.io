@@ -59,7 +59,7 @@ bdi         dma          graphics        input        misc      powercap       r
 
 
 
-- /sys/class/net/<device name>/device/sriov_numvfs 参数设置了 SR-IOV 网络设备VF数量
+- /sys/class/net/< device name >/device/sriov_numvfs 参数设置了 SR-IOV 网络设备VF数量
 
 
 ### /etc/sysconfig/netwrok-scripts/ 目录介绍

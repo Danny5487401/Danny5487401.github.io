@@ -27,7 +27,8 @@ tags:
 
 ## 审计策略配置
 
-```yaml
+```shell
+$ cat /etc/kubernetes/audit/audit-policy.yaml
 apiVersion: audit.k8s.io/v1 # 这是必填项。
 kind: Policy
 # 不要在 RequestReceived 阶段为任何请求生成审计事件。
@@ -118,6 +119,91 @@ const (
 ```
 
 
+"level": "Request" 案例
+```json
+
+{
+  "kind": "Event",
+  "apiVersion": "audit.k8s.io/v1",
+  "level": "Request",
+  "auditID": "a0476a61-8a54-4013-b150-98dcc007a449",
+  "stage": "ResponseComplete",
+  "requestURI": "/api/v1/namespaces/kube-system/pods?limit=500",
+  "verb": "list",
+  "user": {
+    "username": "admin",
+    "groups": [
+      "system:masters",
+      "system:authenticated"
+    ]
+  },
+  "sourceIPs": [
+    "172.16.7.30"
+  ],
+  "userAgent": "kubectl/v1.31.2 (linux/amd64) kubernetes/5864a46",
+  "objectRef": {
+    "resource": "pods",
+    "namespace": "kube-system",
+    "apiVersion": "v1"
+  },
+  "responseStatus": {
+    "metadata": {
+
+    },
+    "code": 200
+  },
+  "requestReceivedTimestamp": "2025-02-28T09:30:30.462366Z",
+  "stageTimestamp": "2025-02-28T09:30:30.468161Z",
+  "annotations": {
+    "authorization.k8s.io/decision": "allow",
+    "authorization.k8s.io/reason": ""
+  }
+}
+```
+"level": "Metadata"  例子
+```json
+{
+    "kind": "Event",
+    "apiVersion": "audit.k8s.io/v1",
+    "level": "Metadata",
+    "auditID": "9a70bf05-fd9a-4fd6-bbc7-2b2e863b2c82",
+    "stage": "ResponseComplete",
+    "requestURI": "/api/v1/namespaces/kube-system/pods/kubernetes-dashboard-5945846449-rrb2r/log?container=kubernetes-dashboard",
+    "verb": "get",
+    "user": {
+        "username": "admin",
+        "groups": [
+            "system:masters",
+            "system:authenticated"
+        ]
+    },
+    "sourceIPs": [
+        "172.16.7.30"
+    ],
+    "userAgent": "kubectl/v1.31.2 (linux/amd64) kubernetes/5864a46",
+    "objectRef": {
+        "resource": "pods",
+        "namespace": "kube-system",
+        "name": "kubernetes-dashboard-5945846449-rrb2r",
+        "apiVersion": "v1",
+        "subresource": "log"
+    },
+    "responseStatus": {
+        "metadata": {
+
+        },
+        "code": 200
+    },
+    "requestReceivedTimestamp": "2025-02-28T09:33:23.359308Z",
+    "stageTimestamp": "2025-02-28T09:33:23.387632Z",
+    "annotations": {
+        "authorization.k8s.io/decision": "allow",
+        "authorization.k8s.io/reason": ""
+    }
+}
+```
+
+
 
 每个请求都可被记录其相关的阶段（stage）。已定义的阶段有：
 ```go
@@ -156,7 +242,7 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
     failedHandler = filterlatency.TrackCompleted(failedHandler)
     handler = filterlatency.TrackCompleted(handler)
     handler = genericapifilters.WithAuthentication(handler, c.Authentication.Authenticator, failedHandler, c.Authentication.APIAudiences, c.Authentication.RequestHeaderConfig)
-	// ..
+	// ...
 }
 ```
 
@@ -294,7 +380,52 @@ func (p *policyRuleEvaluator) EvaluatePolicyRule(attrs authorizer.Attributes) au
 4. 基于审计策略配置文件中的omitStages配置（不配置omitStages的话默认RequestReceived、ResponseStarted、ResponseComplete这三个阶段都会产生审计事件），在保留的审计阶段生成审计事件并输出到对应后端
 
 
-启动设置初始化 
+audit 选项初始化 
+```go
+func NewAuditOptions() *AuditOptions {
+	return &AuditOptions{
+		WebhookOptions: AuditWebhookOptions{
+			InitialBackoff: pluginwebhook.DefaultInitialBackoffDelay,
+			BatchOptions: AuditBatchOptions{
+				Mode:        ModeBatch,
+				BatchConfig: defaultWebhookBatchConfig(),
+			},
+			TruncateOptions:    NewAuditTruncateOptions(),
+			GroupVersionString: "audit.k8s.io/v1",
+		},
+		LogOptions: AuditLogOptions{
+			Format: pluginlog.FormatJson,
+			BatchOptions: AuditBatchOptions{
+				Mode:        ModeBlocking,
+				BatchConfig: defaultLogBatchConfig(),
+			},
+			TruncateOptions:    NewAuditTruncateOptions(),
+			GroupVersionString: "audit.k8s.io/v1",
+		},
+	}
+}
+```
+添加配置选项
+```go
+func (o *AuditOptions) AddFlags(fs *pflag.FlagSet) {
+	if o == nil {
+		return
+	}
+
+	fs.StringVar(&o.PolicyFile, "audit-policy-file", o.PolicyFile,
+		"Path to the file that defines the audit policy configuration.")
+
+	o.LogOptions.AddFlags(fs)
+	o.LogOptions.BatchOptions.AddFlags(pluginlog.PluginName, fs)
+	o.LogOptions.TruncateOptions.AddFlags(pluginlog.PluginName, fs)
+	o.WebhookOptions.AddFlags(fs)
+	o.WebhookOptions.BatchOptions.AddFlags(pluginwebhook.PluginName, fs)
+	o.WebhookOptions.TruncateOptions.AddFlags(pluginwebhook.PluginName, fs)
+}
+
+
+```
+
 ```go
 func (o *AuditOptions) ApplyTo(
 	c *server.Config,
@@ -312,7 +443,7 @@ func (o *AuditOptions) ApplyTo(
 		return err
 	}
 
-	// 2. 构建 log backend , 基于 lumberjack 实现
+	// 2. 构建 log backend, 基于 lumberjack 实现
 	var logBackend audit.Backend
 	w, err := o.LogOptions.getWriter()
 
@@ -370,6 +501,27 @@ func (o *AuditOptions) ApplyTo(
 - Log 后端，将事件写入到文件系统
 - Webhook 后端，将事件发送到外部 HTTP API
 
+
+## 开启方式
+
+这里事件写入到文件系统,然后再用 filebeat 收集
+```shell
+# 在spec.containers.command 最后新增
+    # 配置审计日志策略的文件路径
+    - --audit-policy-file=/etc/kubernetes/audit/audit-policy.yaml
+    # 指定审计日志最长的保存周期，为7天
+    - --audit-log-maxage=7
+    # 指定单个审计日志的最大内存容量，为100 MB
+    - --audit-log-maxsize=100
+    # 指定审计日志的输出路径
+    - --audit-log-path=/var/log/apiserver/audit.log
+```
+
+- 
+
+
+## 应用
+- 示例1：对容器执行命令时告警: kubectl exec 进入到容器内部执行的命令的审计
 
 
 ## 参考

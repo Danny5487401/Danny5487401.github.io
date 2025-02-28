@@ -8,6 +8,69 @@ categories:
   - lvm
 ---
 
+## 基本知识
+### udev机制
+udev 是 Linux 2.6 内核里的一个功能，它替代了原来的 devfs，成为当前 Linux 默认的设备管理工具。
+
+udev机制是Linux kernel的设备管理机制. 当内核检测到设备插拔后, 会发送事件给用户态的udevd进程. 用户态udevd进程根据事件信息匹配不同规则从而进行不同的处理逻辑
+udev规则文件的扩展名为.rules, 主要位于两个目录:
+
+- /etc/udev/rules.d/: 自定义规则
+- /usr/lib/udev/rules.d/: 系统自带规则
+
+在规则文件里，除了以“#”开头的行（注释），所有的非空行都被视为一条规则，但是一条规则不能扩展到多行。
+规则都是由多个 键值对（key-value pairs）组成，并由逗号隔开，键值对可以分为 条件匹配键值对( 以下简称“匹配键 ”) 和 赋值键值对( 以下简称“赋值键 ”)，一条规则可以有多条匹配键和多条赋值键。
+匹配键是匹配一个设备属性的所有条件，当一个设备的属性匹配了该规则里所有的匹配键，就认为这条规则生效，然后按照赋值键的内容，执行该规则的赋值。
+```shell
+# 重新加载规则文件
+udevadm control --reload
+```
+
+#### udev 规则的匹配键
+
+ACTION： 事件 (uevent) 的行为，例如：add( 添加设备 )、remove( 删除设备 )。
+
+KERNEL： 内核设备名称，例如：sda, cdrom。
+
+DEVPATH：设备的 devpath 路径。
+
+SUBSYSTEM： 设备的子系统名称，例如：sda 的子系统为 block。
+
+BUS： 设备在 devpath 里的总线名称，例如：usb。
+
+DRIVER： 设备在 devpath 里的设备驱动名称，例如：ide-cdrom。
+
+ID： 设备在 devpath 里的识别号。
+
+SYSFS{filename}： 设备的 devpath 路径下，设备的属性文件“filename”里的内容。
+
+例如：SYSFS{model}==“ST936701SS”表示：如果设备的型号为 ST936701SS，则该设备匹配该 匹配键。
+
+在一条规则中，可以设定最多五条 SYSFS 的 匹配键。
+
+ENV{key}： 环境变量。在一条规则中，可以设定最多五条环境变量的 匹配键。
+
+PROGRAM：调用外部命令。
+
+RESULT： 外部命令 PROGRAM 的返回结果。例如：
+
+PROGRAM=="/lib/udev/scsi_id -g -s $devpath", RESULT=="35000c50000a7ef67"
+
+#### udev 的重要赋值键
+
+NAME：在 /dev下产生的设备文件名。只有第一次对某个设备的 NAME 的赋值行为生效，之后匹配的规则再对该设备的 NAME 赋值行为将被忽略。如果没有任何规则对设备的 NAME 赋值，udev 将使用内核设备名称来产生设备文件。
+
+SYMLINK：为 /dev/下的设备文件产生符号链接。由于 udev 只能为某个设备产生一个设备文件，所以为了不覆盖系统默认的 udev 规则所产生的文件，推荐使用符号链接。
+
+OWNER, GROUP, MODE：为设备设定权限。
+
+ENV{key}：导入一个环境变量
+
+
+### /dev/disk 目录
+/dev/disk 目录在类 Unix 系统中是一个特殊的目录，用于组织和管理磁盘设备文件和它们的符号链接。这个目录提供了一种方便的方式来访问和识别系统中的磁盘设备，无论它们是如何连接或挂载的。以
+
+在 Linux 系统中，/dev/disk 目录下的 by-* 文件夹是 udev 规则创建的符号链接
 
 ## 基本命令
 
@@ -31,6 +94,74 @@ sr0     11:0    1  1024M  0 rom
 ```
 
 ### blkid (block id)
+选项
+```shell
+-c <file>   指定cache文件(default: /etc/blkid.tab, /dev/null = none)
+-d          don't encode non-printing characters
+-h          显示帮助信息
+-g          garbage collect the blkid cache
+-o <format> 指定输出格式
+-k          list all known filesystems/RAIDs and exit
+-s <tag>    显示指定信息，默认显示所有信息
+-t <token>  find device with a specific token (NAME=value pair)
+-l          look up only first device with token specified by -t
+-L <label>  convert LABEL to device name
+-U <uuid>   convert UUID to device name
+-v          显示版本信息
+-w <file>   write cache to different file (/dev/null = no write)
+<dev>       specify device(s) to probe (default: all devices)
+Low-level probing options:
+-p          low-level superblocks probing (bypass cache)
+-i          gather information about I/O limits
+-S <size>   overwrite device size
+-O <offset> probe at the given offset
+-u <list>   filter by "usage" (e.g. -u filesystem,raid)
+-n <list>   filter by filesystem type (e.g. -n vfat,ext3)
+```
+```go
+// https://github.com/kubernetes/kubernetes/blob/326d4ce072b1176a239f534cf3e961a1f8beea1a/staging/src/k8s.io/mount-utils/mount_linux.go
+func getDiskFormat(exec utilexec.Interface, disk string) (string, error) {
+	args := []string{"-p", "-s", "TYPE", "-s", "PTTYPE", "-o", "export", disk}
+	klog.V(4).Infof("Attempting to determine if disk %q is formatted using blkid with args: (%v)", disk, args)
+	dataOut, err := exec.Command("blkid", args...).CombinedOutput()
+	output := string(dataOut)
+	klog.V(4).Infof("Output: %q", output)
+
+	if err != nil {
+		// ...
+	}   
+
+	var fstype, pttype string
+
+	lines := strings.Split(output, "\n")
+	for _, l := range lines {
+		if len(l) <= 0 {
+			// Ignore empty line.
+			continue
+		}
+		cs := strings.Split(l, "=")
+		if len(cs) != 2 {
+			return "", fmt.Errorf("blkid returns invalid output: %s", output)
+		}
+		// TYPE is filesystem type, and PTTYPE is partition table type, according
+		// to https://www.kernel.org/pub/linux/utils/util-linux/v2.21/libblkid-docs/.
+		if cs[0] == "TYPE" {
+			fstype = cs[1]
+		} else if cs[0] == "PTTYPE" {
+			pttype = cs[1]
+		}
+	}
+
+	if len(pttype) > 0 {
+		klog.V(4).Infof("Disk %s detected partition table type: %s", disk, pttype)
+		// Returns a special non-empty string as filesystem type, then kubelet
+		// will not format it.
+		return "unknown data, probably partitions", nil
+	}
+
+	return fstype, nil
+}
+```
 
 ### parted 
 
@@ -412,6 +543,22 @@ func removeVolumeFilesystem(lvmVolume *apis.LVMVolume) error {
 ## RAID( Redundant Array of Independent Disks 独立硬盘冗余阵列）
 旧称廉价磁盘冗余阵列（Redundant Array of Inexpensive Disks），简称磁盘阵列。其基本思想就是把多个相对便宜的硬盘组合起来，成为一个硬盘阵列组，使性能达到甚至超过一个价格昂贵、容量巨大的硬盘。
 
+### 基本概念
+proc/mdstat ： 当前md(软RAID)的状态信息
+
+/etc/mdadm.conf ： mdadm的配置文件
+
+Active devices ： RAID中的活动组件设备
+
+Faulty device ： RAID中失效的设备
+
+Spare device ： RAID中热备盘
+
+Device Names ： RAID设备名、标准格式是”/dev/mdNN”或者”/dev/md/NN”
+
+md            : Multiple Devices虚拟块设备（利用底层多个块设备虚拟出一个新的虚拟块设备）。
+
+md driver        : MD的驱动
 
 ### raid 分类
 #### raid 0
@@ -441,51 +588,32 @@ RAID 10 是组合 RAID 1 和 RAID 0 形成的.
 
 ### raid 操作 
 
+mdadm是一个用于创建、管理、监控RAID设备的工具，它使用Linux中的md驱动.
 ```shell
 # mdadm 使用
-    创建模式：创建RAID设备
-      -C 设备
-           专用选项：
-            -l：级别
-            -n：设备个数
-            -a {yes|no}：自动为其创建设备文件
-            -c：chunk大小 2^n 默认为64k
-            -x # : 指定空闲盘个数
-    管理模式：管理，拆散，
-      --add,--del ,--fail 
-    监控模式：监控
-         -F
-    装配模式：换系统后，使用RAID
-      -A 
-    mdadm -A /dev/md1 /dev/sdb3 /dev/sdb2
-     装配过程   
-    增长模式：添加磁盘
-    -G
--A, --assemble
-              Assemble a pre-existing array.
--C, --create
-              Create a new array.
--F, --follow, --monitor
-              Select Monitor mode.
-              
-mdadm  -D  /dev/md#
-     --detail   详细显示磁盘阵列的信息。
-     
-mdadm -f --fail --set 
-mdadm /dev/md# --fail /dev/sda7
+
+## Create模式:使用空闲的设备创建一个新的阵列，每个设备具有元数据块
+## 用法：mdadm –create md-device –chunk=X –level=Y –raid-devices=Z devices
+## 使用sda1和sdb1创建RAID0，条带大小是64KB。
+mdadm –create /dev/md0 –chunk=64 –level=0 –raid-devices=2 /dev/sda1 /dev/sdb1
 
 
-md - Multiple Device driver aka Linux Software RAID
+# 停止md0的运行
+mdadm –stop /dev/md0
 
-RAID 0 
-    2G
-      4：512M
-      2:1G
-RAID 1/2
-   2G：
-      2:2G 
-# 查看
-mdadm --detail --scan --verbose
+# 清除组件设备sda1中超级块的信息
+mdadm — zero-superblock /dev/sda1
+
+
+
+# 创建配置文件
+mdadm –detail –scan >> mdadm.conf
+```
+```shell
+# 说明：查看当前所有RAID的状态
+cat /proc/mdstat
+
+
 ```
 
 
@@ -540,6 +668,39 @@ rm /etc/mdadm.conf
 # 5 清除开机挂载信息 /etc/fstab
 ```
 
+## NVMe(Non-Volatile Memory Express)
+或称非易失性内存主机控制器接口规范（Non Volatile Memory Host Controller Interface Specification，缩写：NVMHCIS）是一个逻辑设备接口规范。
+它是与Advanced Host Controller Interface(AHCI)类似的、基于设备逻辑接口的总线传输协议规范（相当于通讯协议中的应用层），用于访问通过PCI Express（PCIe）总线附加的非易失性存储器介质（例如采用闪存的固态硬盘驱动器），虽然理论上不一定要求 PCIe 总线协议.
+这个协议就好比SAS（串行SCSI)和SATA一样，用于定义硬件接口和传输协议。
+
+接口：也就是设备如何与计算机通信。常见的存储设备接口包括：
+{{<figure src="./sata_vs_pcle.png#center" width=800px >}}
+
+- SATA接口，通常用于2.5寸和3.5寸硬盘，有时候一些M.2设备也会使用
+
+- PCI Express(PCIe)接口， 用于M.2和PCIe设备
+
+协议：定义了如何在计算机与设备之间传输数据。常见的协议包括：
+
+- 用于SATA接口的AHCI或者ATA协议
+
+- 用于PCIe接口的NVMe协议
+
+在SATA中计算机与存储设备只能有一个队列，即使是多CPU情况下，所有请求只能经过这样一个狭窄的道路。而NVMe协议可以最多有64K个队列，每个CPU或者核心都可以有一个队列，这样并发程度大大提升，性能也自然更高了。
+
+
+### nvme-cli 命令
+
+```shell
+# 列出系统所有NVMe SSD:设备名,序列号,型号,namespace,使用量,LBA格式,firmware版本
+$ nvme list
+Node          SN              Model                       Namespace Usage                  Format          FW Rev  
+------------- --------------- --------------------------- --------- ---------------------- --------------- --------
+/dev/nvme0n1  S676NF0R908202  SAMSUNG MZVL21T0HCLR-00B00  1         0.00   B /   1.02  TB  512   B +  0 B  GXA7401Q
+/dev/nvme1n1  S676NF0R908214  SAMSUNG MZVL21T0HCLR-00B00  1         0.00   B /   1.02  TB  512   B +  0 B  GXA7401Q
+/dev/nvme2n1  S676NF0R908144  SAMSUNG MZVL21T0HCLR-00B00  1         0.00   B /   1.02  TB  512   B +  0 B  GXA7401Q
+```
+
 
 ## 参考
 
@@ -548,4 +709,7 @@ rm /etc/mdadm.conf
 - [fdisk,gdisk,parted 三种分区工具比较](https://www.cnblogs.com/zhaojiedi1992/p/zhaojiedi_linux_039_fdisk_gdisk_parted.html)
 - [LVM管理](https://www.cnblogs.com/diantong/p/10554831.html)
 - [RAID及mdadm命令](https://cloud.tencent.com/developer/article/1108103)
+- [mdadm命令](https://www.cnblogs.com/apexchu/p/6512341.html)
 - [使用 mdadm 工具创建软 RAID 0 ](https://golinux.gitbooks.io/raid/content/chapter2.html)
+- [NVMe协议基础原理介绍](https://cloud.tencent.com/developer/article/2192563)
+- [NVMe存储 全解](https://cloud-atlas.readthedocs.io/zh-cn/latest/linux/storage/nvme/nvme.html)
