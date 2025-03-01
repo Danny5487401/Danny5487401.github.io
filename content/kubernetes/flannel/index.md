@@ -132,6 +132,7 @@ FDB表与ARP表的区别
 net-tools起源于BSD的TCP/IP工具箱，后来成为老版本Linux内核中配置网络功能的工具。但自2001年起，Linux社区已经对其停止维护；
 iproute2的核心命令是ip.
 
+{{<figure src="./net-tools_vs_iproute2.png#center" width=800px >}}
 {{<figure src="./ip_command.png#center" width=800px >}}
 
 ```shell
@@ -533,8 +534,8 @@ func (nw *network) handleSubnetEvents(batch []lease.Event) {
 只要发送数据包肯定要到达cni0，cni0在这里充当了网桥docker0的作用，二层交换，容器以cni0的网桥作为网关，不管是不是处于同网段都会到达cni0网桥这里.
 
 Flannel为每个主机提供独立的子网，整个集群的网络信息存储在etcd上。对于跨主机的转发，目标容器的IP地址，需要从etcd获取。
-- Flannel创建名为flannel0的网桥
-- flannel0网桥一端连接docker0网桥，另一端连接flanneld进程
+- Flannel创建名为flannel.1的网桥
+- flannel.1网桥一端连接docker0网桥，另一端连接flanneld进程
 - flanneld进程一端连接etcd，利用etcd管理分配的ip地址资源，同时监控pod地址，建立pod节点路由表
 - flanneld进程一端连接docker0和物理网络，配合路由表，完成数据包投递，完成pod之间通讯
 
