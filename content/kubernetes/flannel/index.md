@@ -20,12 +20,9 @@ Flannel是CoreOS开源的，Overlay模式的CNI网络插件，Flannel在每个�
 在vlan的基础之上进行的扩展, 可以划分的vlan个数扩大到16M个
 
 
-{{<figure src="./vxlan_info.png#center" width=800px >}}
-
 在常用的vxlan模式中，涉及到封包和拆包，这也是Flannel网络传输效率相对低的原因。
 
-### VTEP（VXLAN Tunnel Endpoints，VXLAN隧道端点）
-可以是个物理设备，也可以是虚拟设备，flannel创建的flannel.1就是vtep设备,flannel中vxlan所说的封包解包就是由这个设备完成
+VTEP（VXLAN Tunnel Endpoints VXLAN隧道端点）:可以是个物理设备，也可以是虚拟设备，flannel创建的flannel.1就是vtep设备,flannel中vxlan所说的封包解包就是由这个设备完成
 
 vtep设置即有ip地址，也有mac地址.
 
@@ -37,8 +34,8 @@ vtep设置即有ip地址，也有mac地址.
 ```
 
 
-### VNI（VXLAN Network Identifier，VXLAN 网络标识符）
-VNI是一种类似于VLAN ID的用户标识，一个VNI代表了一个租户. 在flannel中，vni默认都是1, 所以这就是为什么flannel创建的vtep设备的名称叫做flannel.1的原因
+
+VNI（VXLAN Network Identifier，VXLAN 网络标识符）: 是一种类似于VLAN ID的用户标识，一个VNI代表了一个租户. 在flannel中，vni默认都是1, 所以这就是为什么flannel创建的vtep设备的名称叫做flannel.1的原因
 
 
 ```shell
@@ -47,6 +44,26 @@ VNI是一种类似于VLAN ID的用户标识，一个VNI代表了一个租户. �
     link/ether 02:42:54:41:3c:e4 brd ff:ff:ff:ff:ff:ff promiscuity 0
     bridge forward_delay 1500 hello_time 200 max_age 2000 ageing_time 30000 stp_state 0 priority 32768 vlan_filtering 0 vlan_protocol 802.1Q bridge_id 8000.2:42:54:41:3c:e4 designated_root 8000.2:42:54:41:3c:e4 root_port 0 root_path_cost 0 topology_change 0 topology_change_detected 0 hello_timer    0.00 tcn_timer    0.00 topology_change_timer    0.00 gc_timer   21.99 vlan_default_pvid 1 vlan_stats_enabled 0 group_fwd_mask 0 group_address 01:80:c2:00:00:00 mcast_snooping 1 mcast_router 1 mcast_query_use_ifaddr 0 mcast_querier 0 mcast_hash_elasticity 4 mcast_hash_max 512 mcast_last_member_count 2 mcast_startup_query_count 2 mcast_last_member_interval 100 mcast_membership_interval 26000 mcast_querier_interval 25500 mcast_query_interval 12500 mcast_query_response_interval 1000 mcast_startup_query_interval 3125 mcast_stats_enabled 0 mcast_igmp_version 2 mcast_mld_version 1 nf_call_iptables 0 nf_call_ip6tables 0 nf_call_arptables 0 addrgenmode eui64 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535
 ```
+
+#### 报文解析
+{{<figure src="./vxlan_info.png#center" width=800px >}}
+
+右边的为原始报文 Original Ethernet Frame，左边的即为vxlan封装报文. 
+
+Original Ethernet Frame是原始的报文:  pod1访问pod2的报文，因为是个正常网络报文，包含IP header、Ethernet header、及 payload。
+- playload 就是数据
+- IP header 很自然也就是pod1及pod2的ip地址信息
+- Ethernet header: 不是pod1及pod2的MAC地址，而应该是两端flannel.1的MAC地址
+
+vxlan封装报文:
+- Vxlan header这里只需要关注一个字段，那就是VNI
+- udp header: 中包含有源端口，目的端口.Src.port为node1上的flannel.1的端口,Dst.port(上面也显示为VxlanPort)为node2上flannel.1的端口，Linux内核中默认为VXLAN分配的UDP监听端口为8472
+- Outer IP header: 在ip报文中,含有源ip及目的ip，源ip即为flannel.1所绑定的物理ip,即node1节点的eth0 ip,目标ip，那肯定是node2的eth0 ip了, 这个ip是需要根据目标flannel.1的mac地址获得，这部分信息同样维护在flanneld中的.
+
+flanneld中维护了这两部分信息:
+
+- flannel.1的ip与mac地址对应关系，通过flannel.1的ip可以查询到flannel.1 的mac地址
+- flannel.1的mac地址及其所在node ip对应关系，通过flannel.1的mac地址可以查询到node ip
 
 ### ARP（Address Resolution Protocol地址解析协议）
 将IP地址解析为MAC地址的协议
@@ -83,17 +100,94 @@ k8s-172-16-7-30:/etc/kubeasz# ansible -i clusters/test/hosts kube_node  -m shell
 FDB表的主要作用是在交换机内部实现二层数据转发。当交换机收到一个数据帧时，它会根据数据帧的目的MAC地址来查询FDB表，以确定将数据帧从哪个端口转发出去。
 如果目的MAC地址在FDB表中存在，交换机就会直接将该数据帧从对应的端口转发出去；如果不存在，交换机则会将该数据帧泛洪到除了接收端口之外的所有端口。
 
+```shell
+[root@worker-01 ~]# bridge fdb show dev flannel.1
+0a:08:b0:d6:65:bc dst 172.16.7.30 self permanent
+c6:73:f2:93:70:0a dst 172.16.7.32 self permanent
+
+[root@worker-02 ~]# bridge fdb show dev flannel.1
+0a:08:b0:d6:65:bc dst 172.16.7.30 self permanent
+da:9c:34:59:c0:cd dst 172.16.7.31 self permanent
+```
+
 
 FDB表与ARP表的区别
 - 作用层次不同：FDB表用于二层转发，而ARP表用于三层转发。FDB表记录的是MAC地址与端口的映射关系，而ARP表记录的是IP地址与MAC地址的映射关系。
 - 查询时机不同：在二层转发过程中，交换机首先查询FDB表；而在三层转发过程中，路由器首先查询路由表，然后根据路由表确定下一跳IP地址，再查询ARP表获取下一跳MAC地址。
 
 ```shell
-[root@master-01 net.d]# bridge fdb show dev flannel.1
-da:9c:34:59:c0:cd dst 172.16.7.31 self permanent
-c6:73:f2:93:70:0a dst 172.16.7.32 self permanent
+# ARP表
+
+[root@worker-01 ~]# ip neigh show dev flannel.1
+192.168.0.0 lladdr 0a:08:b0:d6:65:bc PERMANENT
+192.168.2.0 lladdr c6:73:f2:93:70:0a PERMANENT
+
+[root@worker-02 ~]# ip neigh show dev flannel.1
+192.168.1.0 lladdr da:9c:34:59:c0:cd PERMANENT
+192.168.0.0 lladdr 0a:08:b0:d6:65:bc PERMANENT
 ```
 
+### ip 命令
+如今很多系统管理员依然通过组合使用诸如ifconfig、route、arp和netstat等命令行工具(统称为net-tools)来配置网络功能，解决网络故障。
+net-tools起源于BSD的TCP/IP工具箱，后来成为老版本Linux内核中配置网络功能的工具。但自2001年起，Linux社区已经对其停止维护；
+iproute2的核心命令是ip.
+
+{{<figure src="./ip_command.png#center" width=800px >}}
+
+```shell
+# 路由管理
+[root@worker-01 ~]# ip route help
+Usage: ip route { list | flush } SELECTOR
+       ip route save SELECTOR
+       ip route restore
+       ip route showdump
+       ip route get ADDRESS [ from ADDRESS iif STRING ]
+                            [ oif STRING ] [ tos TOS ]
+                            [ mark NUMBER ] [ vrf NAME ]
+                            [ uid NUMBER ]
+       ip route { add | del | change | append | replace } ROUTE
+SELECTOR := [ root PREFIX ] [ match PREFIX ] [ exact PREFIX ]
+            [ table TABLE_ID ] [ vrf NAME ] [ proto RTPROTO ]
+            [ type TYPE ] [ scope SCOPE ]
+ROUTE := NODE_SPEC [ INFO_SPEC ]
+NODE_SPEC := [ TYPE ] PREFIX [ tos TOS ]
+             [ table TABLE_ID ] [ proto RTPROTO ]
+             [ scope SCOPE ] [ metric METRIC ]
+INFO_SPEC := NH OPTIONS FLAGS [ nexthop NH ]...
+NH := [ encap ENCAPTYPE ENCAPHDR ] [ via [ FAMILY ] ADDRESS ]
+	    [ dev STRING ] [ weight NUMBER ] NHFLAGS
+FAMILY := [ inet | inet6 | ipx | dnet | mpls | bridge | link ]
+OPTIONS := FLAGS [ mtu NUMBER ] [ advmss NUMBER ] [ as [ to ] ADDRESS ]
+           [ rtt TIME ] [ rttvar TIME ] [ reordering NUMBER ]
+           [ window NUMBER ] [ cwnd NUMBER ] [ initcwnd NUMBER ]
+           [ ssthresh NUMBER ] [ realms REALM ] [ src ADDRESS ]
+           [ rto_min TIME ] [ hoplimit NUMBER ] [ initrwnd NUMBER ]
+           [ features FEATURES ] [ quickack BOOL ] [ congctl NAME ]
+           [ pref PREF ] [ expires TIME ]
+TYPE := { unicast | local | broadcast | multicast | throw |
+          unreachable | prohibit | blackhole | nat }
+TABLE_ID := [ local | main | default | all | NUMBER ]
+SCOPE := [ host | link | global | NUMBER ]
+NHFLAGS := [ onlink | pervasive ]
+RTPROTO := [ kernel | boot | static | NUMBER ]
+PREF := [ low | medium | high ]
+TIME := NUMBER[s|ms]
+BOOL := [1|0]
+FEATURES := ecn
+ENCAPTYPE := [ mpls | ip | ip6 ]
+ENCAPHDR := [ MPLSLABEL ]
+
+# 添加路由写法: ip route add [network/prefix] via [gateway] dev [interface]
+
+# 将IP地址以10.0.0.开头的数据包通过网关192.168.0.1发往网卡接口eth0，可以根据实际需求修改IP地址、网关和网卡接口
+$ ip route add 10.0.0.0/24 via 192.168.0.1 dev eth0
+
+# 设置系统默认路由
+ip route add default via 192.168.1.254 
+
+# 检查与特定目标IP地址的连通性
+ip route get 8.8.8.8
+```
 
 
 
@@ -435,7 +529,7 @@ func (nw *network) handleSubnetEvents(batch []lease.Event) {
 ```
 
 #### 实现原理
-{{<figure src="./flannel_process.png#center" width=800px >}}
+{{<figure src="./flannel_process.svg#center" width=800px >}}
 只要发送数据包肯定要到达cni0，cni0在这里充当了网桥docker0的作用，二层交换，容器以cni0的网桥作为网关，不管是不是处于同网段都会到达cni0网桥这里.
 
 Flannel为每个主机提供独立的子网，整个集群的网络信息存储在etcd上。对于跨主机的转发，目标容器的IP地址，需要从etcd获取。
@@ -445,11 +539,110 @@ Flannel为每个主机提供独立的子网，整个集群的网络信息存储�
 - flanneld进程一端连接docker0和物理网络，配合路由表，完成数据包投递，完成pod之间通讯
 
 步骤：
+```shell
+# 节点1
+[root@worker-01 ~]# nsenter -t 60054 --net
+[root@worker-01 ~]# ip --detail link
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00 promiscuity 0 addrgenmode eui64 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535
+2: tunl0@NONE: <NOARP> mtu 1480 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/ipip 0.0.0.0 brd 0.0.0.0 promiscuity 0
+    ipip remote any local any ttl inherit nopmtudisc numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535
+3: eth0@if61: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether ea:2e:d6:4c:b8:89 brd ff:ff:ff:ff:ff:ff link-netnsid 0 promiscuity 0
+    veth addrgenmode eui64 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535
+    
+[root@worker-01 ~]# ip route
+default via 192.168.1.1 dev eth0 # default 这是一条默认路由。当系统需要发送数据包到不在其他特定路由规则中的目标地址时，会使用这条路由. via 192.168.1.1 默认路由的下一跳（网关）是192.168.1.1。所有非本地网络的数据包都将通过这个地址转发。dev eth0 数据包将通过名为 etho 的网络接口发送。
+192.168.0.0/16 via 192.168.1.1 dev eth0
+192.168.1.0/24 dev eth0 proto kernel scope link src 192.168.1.7 #  192.168.1.0/24 这条路由规则适用于IP地址范围为192.168.1.0到192.168.1.255的网络. dev eth0: 数据包将通过名为 eth0 的网络接口发送. proto kernel这条路由是由内核自动添加的. scope link: 这是一个链路范围的路由，意味着目标地址在直接连接的网络上。 src 192.168.1.7: 当从这个接口发送数据包时，源IP地址将是 192.168.1.7
 
+
+# 节点2
+[root@worker-02 ~]# ip -d link
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00 promiscuity 0 addrgenmode eui64 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535
+2: tunl0@NONE: <NOARP> mtu 1480 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/ipip 0.0.0.0 brd 0.0.0.0 promiscuity 0
+    ipip remote any local any ttl inherit nopmtudisc numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535
+3: eth0@if23: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether 9e:ad:7b:6c:71:cd brd ff:ff:ff:ff:ff:ff link-netnsid 0 promiscuity 0
+    veth addrgenmode eui64 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535
+[root@worker-02 ~]# ip route
+default via 192.168.2.1 dev eth0
+192.168.0.0/16 via 192.168.2.1 dev eth0
+192.168.2.0/24 dev eth0 proto kernel scope link src 192.168.2.3
+```
 - IP数据报被封装并通过容器的eth0发送。
+```shell
+[root@worker-01 ~]# bridge link show docker0
+61: vethadce958f state UP @docker0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 master cni0 state forwarding priority 32 cost 2
+
+```
 - Container1的eth0通过veth对与Docker0交互并将数据包发送到Docker0。然后Docker0转发包。
-- Docker0确定Container3的IP地址，通过查询本地路由表到外部容器，并将数据包发送到虚拟NIC Flannel0。
+```shell
+[root@worker-01 ~]# ip route
+default via 172.16.0.254 dev ens32 proto static metric 100
+172.16.0.0/16 dev ens32 proto kernel scope link src 172.16.7.31 metric 100
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1
+192.168.0.0/24 via 192.168.0.0 dev flannel.1 onlink
+192.168.1.0/24 dev cni0 proto kernel scope link src 192.168.1.1
+192.168.2.0/24 via 192.168.2.0 dev flannel.1 onlink
+192.168.37.192/26 via 172.16.7.32 dev tunl0 proto bird onlink
+blackhole 192.168.171.0/26 proto bird
+192.168.171.1 dev cali3261fb6a4b6 scope link
+192.168.171.2 dev cali005e8af0501 scope link
+192.168.171.3 dev cali24ec0f5f8e5 scope link
+192.168.171.4 dev calif06d79561a0 scope link
+192.168.171.7 dev cali27583b52bad scope link
+192.168.171.8 dev cali11239f98883 scope link
+192.168.171.9 dev cali8bac6c0ff3f scope link
+192.168.171.34 dev cali2528fb049ef scope link
+192.168.171.42 dev caliba820c98c54 scope link
+192.168.171.43 dev cali955f4579127 scope link
+192.168.171.44 dev calid04592fe6a2 scope link
+192.168.171.45 dev cali6043633cea4 scope link
+192.168.171.46 dev calid75abf4f5e0 scope link
+192.168.184.64/26 via 172.16.7.30 dev tunl0 proto bird onlink
+
+
+
+[root@worker-02 ~]# ip route
+default via 172.16.0.254 dev ens32 proto static metric 100
+172.16.0.0/16 dev ens32 proto kernel scope link src 172.16.7.32 metric 100
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1
+192.168.0.0/24 via 192.168.0.0 dev flannel.1 onlink
+192.168.1.0/24 via 192.168.1.0 dev flannel.1 onlink
+192.168.2.0/24 dev cni0 proto kernel scope link src 192.168.2.1
+blackhole 192.168.37.192/26 proto bird
+192.168.37.193 dev cali7e442cf0311 scope link
+192.168.37.196 dev cali15c7619fccc scope link
+192.168.37.204 dev calicac1c622361 scope link
+192.168.184.64/26 via 172.16.7.30 dev tunl0 proto bird onlink
+```
+- Docker0确定Container3的IP地址，通过查询本地路由表到外部容器，并将数据包发送到虚拟NIC Flannel1。
+```shell
+[root@worker-01 ~]# ip neigh show dev flannel.1
+192.168.0.0 lladdr 0a:08:b0:d6:65:bc PERMANENT
+192.168.2.0 lladdr c6:73:f2:93:70:0a PERMANENT
+```
 - Flannel0收到的数据包被转发到Flanneld进程。 Flanneld进程封装了数据包通过查询etcd维护的路由表并发送数据包通过主机的eth0。
+
+```shell
+[root@worker-01 ~]# ip neigh show dev ens32
+172.16.7.30 lladdr 00:0c:29:e0:d7:e1 REACHABLE
+172.16.7.32 lladdr 00:0c:29:b3:7c:bb REACHABLE
+172.16.0.254 lladdr 7c:a2:3e:fb:30:c1 REACHABLE
+172.16.111.254 lladdr d4:94:e8:08:e6:d6 STALE
+172.16.111.253 lladdr 84:5b:12:3f:30:76 STALE
+
+[root@worker-02 ~]# ip neigh show dev ens32
+172.16.111.253 lladdr 84:5b:12:3f:30:76 STALE
+172.16.111.254 lladdr d4:94:e8:08:e6:d6 STALE
+172.16.7.31 lladdr 00:0c:29:a5:19:4c REACHABLE
+172.16.7.30 lladdr 00:0c:29:e0:d7:e1 REACHABLE
+172.16.0.254 lladdr 7c:a2:3e:fb:30:c1 STALE
+```
 - 数据包确定网络中的目标主机主机。
 - 目的主机的 Flanneld 进程监听8285端口，负责解封包。
 - 解封装的数据包将转发到虚拟 NIC Flannel0。
@@ -467,3 +660,4 @@ Flannel为每个主机提供独立的子网，整个集群的网络信息存储�
 
 - [VXLAN-原理介绍+报文分析+配置实例 ](https://www.cnblogs.com/FengXingZhe008/p/17335124.html)
 - [Flannel Vxlan封包原理剖析](https://izsk.me/2022/03/25/Kubernetes-Flannel-Vxlan/)
+- [ip route 命令](https://cloud.tencent.com/developer/article/2101102)
