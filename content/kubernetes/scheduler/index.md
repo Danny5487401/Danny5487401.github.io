@@ -14,7 +14,7 @@ tags:
 
 Scheduler是Kubernetes组件中功能&逻辑相对单一&简单的模块，它主要的作用是：watch kube-apiserver，监听PodSpec.NodeName为空的pod，并利用预选和优选算法为该pod选择一个最佳的调度节点，最终将pod与该节点进行绑定，使pod调度在该节点上运行。
 
-## scheduler扩展方案
+## scheduler 扩展方案
 
 目前Kubernetes支持四种方式实现客户自定义的调度算法(预选&优选)：
 
@@ -137,7 +137,37 @@ func NewInTreeRegistry() runtime.Registry {
 
 ### 第三方插件 out-of-tree plugins
 
-github.com/kubernetes-sigs/scheduler-plugins。 用户只需要引用这个包，编写自己的调度器插件，然后以普通 pod 方式部署就行.
+- github.com/kubernetes-sigs/scheduler-plugins: 基于scheduler framework编写的插件,用户只需要引用这个包，编写自己的调度器插件，然后以普通 pod 方式部署就行.
+```go
+// https://github.com/kubernetes-sigs/scheduler-plugins/blob/588b8ecdf54fc4d5d7a43dca50c76e2bbfaf7e4e/cmd/scheduler/main.go
+func main() {
+	// Register custom plugins to the scheduler framework.
+	// Later they can consist of scheduler profile(s) and hence
+	// used by various kinds of workloads.
+	command := app.NewSchedulerCommand(
+		app.WithPlugin(capacityscheduling.Name, capacityscheduling.New),
+		app.WithPlugin(coscheduling.Name, coscheduling.New),
+		app.WithPlugin(loadvariationriskbalancing.Name, loadvariationriskbalancing.New), // LoadVariationRiskBalancing：负载均衡器插件，用于给节点排序，实现优先选择负载低的节点，使整个集群的负载达到动态均衡
+		app.WithPlugin(networkoverhead.Name, networkoverhead.New),
+		app.WithPlugin(topologicalsort.Name, topologicalsort.New),
+		app.WithPlugin(noderesources.AllocatableName, noderesources.NewAllocatable),
+		app.WithPlugin(noderesourcetopology.Name, noderesourcetopology.New), 
+		app.WithPlugin(preemptiontoleration.Name, preemptiontoleration.New),
+		app.WithPlugin(targetloadpacking.Name, targetloadpacking.New), // TargetLoadPacking 目标负载调度器，用于控制节点的CPU利用率不超过目标值x%（例如65%），通过打分让所有cpu利用率超过x%的都不被选中
+		app.WithPlugin(lowriskovercommitment.Name, lowriskovercommitment.New), // LowRiskOverCommitment：目标是想让limits也能均衡分布，通过跨节点“分散”或“平衡”Pod 的资源limits来缓解可突发Pod导致的资源过度订阅问题
+		app.WithPlugin(sysched.Name, sysched.New),
+		app.WithPlugin(peaks.Name, peaks.New),
+		// Sample plugins below.
+		// app.WithPlugin(crossnodepreemption.Name, crossnodepreemption.New),
+		app.WithPlugin(podstate.Name, podstate.New),
+		app.WithPlugin(qos.Name, qos.New),
+	)
+
+	code := cli.Run(command)
+	os.Exit(code)
+}
+
+```
 
 
 ### 插件注册
@@ -255,7 +285,6 @@ func RegisterDefaults(scheme *runtime.Scheme) error {
 }
 
 
-
 func SetObjectDefaults_KubeSchedulerConfiguration(in *v1.KubeSchedulerConfiguration) {
 	SetDefaults_KubeSchedulerConfiguration(in)
 }
@@ -368,8 +397,6 @@ func getDefaultPlugins() *v1.Plugins {
 
 
 
-
-
 ### 调度流程
 
 - findNodesThatFitPod：过滤（或称为预选)--> Filters the nodes to find the ones that fit the pod based on the framework  filter plugins and filter extenders.
@@ -380,7 +407,6 @@ func getDefaultPlugins() *v1.Plugins {
 
 
 最后，kube-scheduler 会将 Pod 调度到得分最高的节点上。 如果存在多个得分最高的节点，kube-scheduler 会从中随机选取一个
-
 
 
 ### 调度器性能
@@ -1227,6 +1253,11 @@ func (r *resourceAllocationScorer) score(
 }
 ```
 
+
+## 高级调度策略
+Gang scheduling(帮派调度) 是一种调度算法，主要的原则是保证所有相关联的进程能够同时启动，防止部分进程的异常，导致整个关联进程组的阻塞.
+例如，您提交一个批量 Job，这个批量 Job 包含多个任务，要么这多个任务全部调度成功，要么一个都调度不成功。
+这种 All-or-Nothing 调度场景，就被称作 Gang scheduling. 
 
 ## 参考 
 

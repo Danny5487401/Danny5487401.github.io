@@ -364,8 +364,8 @@ GPU共享资源隔离方案
 
 ## 参考
 
-- [Kubernetes容器平台下的 GPU 集群算力管控](https://mp.weixin.qq.com/s/KzyXgXAsGde_OeF-5TMd2A)
 - https://kubernetes.io/docs/concepts/extend-kubernetes/compute-storage-net/device-plugins/
+- [Kubernetes容器平台下的 GPU 集群算力管控](https://mp.weixin.qq.com/s/KzyXgXAsGde_OeF-5TMd2A)
 - [自定义资源支持：K8s Device Plugin 从原理到实现](https://www.lixueduan.com/posts/kubernetes/21-device-plugin/)
 - [GPU 环境搭建指南：如何在裸机、Docker、K8s 等环境中使用 GPU](https://www.lixueduan.com/posts/ai/01-how-to-use-gpu/)
 - [CUDA简介](https://cloud.tencent.com/developer/article/2092885)
