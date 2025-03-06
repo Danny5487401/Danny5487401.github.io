@@ -21,7 +21,8 @@ tags:
 # List-Watch 机制和 Informer 模块
 
 
-Etcd存储集群的数据信息，apiserver 作为统一入口，任何对数据的操作都必须经过apiserver。客户端(kubelet/scheduler/controller-manager)通过list-watch监听apiserver中资源(pod/rs/rc等等)的create,update和delete事件，并针对事件类型调用相应的事件处理函数
+Etcd存储集群的数据信息，apiserver 作为统一入口，任何对数据的操作都必须经过apiserver。
+客户端(kubelet/scheduler/controller-manager)通过list-watch监听apiserver中资源(pod/rs/rc等等)的create,update和delete事件，并针对事件类型调用相应的事件处理函数.
 
 
 那么list-watch具体是什么呢，顾名思义，list-watch有两部分组成，分别是list和watch。list非常好理解，就是调用资源的list API罗列资源，基于HTTP短链接实现；watch则是调用资源的watch API监听资源变更事件，基于HTTP 长链接实现
@@ -32,34 +33,27 @@ Etcd存储集群的数据信息，apiserver 作为统一入口，任何对数据
 {{<figure src="./informer.png#center" width=800px >}}
 
 
+Informer 中的 Reflector 通过 List/watch 从 apiserver 中获取到集群中所有资源对象的变化事件（event），将其放入 Delta FIFO 队列中（以 Key、Value 的形式保存），触发 onAdd、onUpdate、onDelete 回调将 Key 放入 WorkQueue 中。
+同时将 Key 更新 Indexer 本地缓存。Control Loop 从 WorkQueue 中取到 Key，从 Indexer 中获取到该 Key 的 Value，进行相应的处理.
 
 
 ## 基本概念
 
 
-1. reflector 反射器
+1. reflector 反射器 :通过 list/watch 监听 apiserver, 后面把增量的数据推到 deltaFIFO 增量事件队列里
 
-通过 list/watch 监听 apiserver, 后面把增量的数据推到 deltaFIFO 增量事件队列里
+2. deltaFIFO 增量队列: 对资源对象的的操作类型进行队列的基本操作
 
-2. deltaFIFO 增量队列
+- FIFO：先进先出队列，提供资源对象的增删改查等操作
+- Delta：资源对象存储，可以保存资源对象的操作类型。如：添加操作类型、更新操作类型、删除操作类型、同步操作类型
 
-增量队列, 存储 delta 事件.
+3. storeIndex 索引: 存储了索引, 其目的就是为了加速数据的检索. 通过索引值只是拿到资源的 name, 获取对象还是存储在 `threadSafeMap` 里.
 
-3. storeIndex 索引
+4. threadSafeMap 对象缓存: 本地缓存, storeIndex 是索引, threadSafeMap 是存储资源对象的缓存.
 
-index 就是存储了索引, 其目的就是为了加速数据的检索. 通过索引值只是拿到资源的 name, 获取对象还是存储在 `threadSafeMap` 里.
+5. controller 控制器: 实例化并启动 reflector 反射器, 并调用 processLoop 来消费 deltaFIFO 队列.
 
-4. threadSafeMap 对象缓存
-
-本地缓存, storeIndex 是索引, threadSafeMap 是存储资源对象的缓存.
-
-5. controller 控制器
-
-实例化并启动 reflector 反射器, 并调用 processLoop 来消费 deltaFIFO 队列.
-
-6. informer
-
-把上面的这几个模块组合起来就实现的 informer 的功能.
+6. informer: 把上面的这几个模块组合起来就实现的 informer 的功能.
 
 内部依赖 controller 实现 informer 的功能. controller 又会关联 reflector, deltaFIFO, Store (indexer, threadSafeMap ) 组件之间的协调联动.
 
@@ -91,7 +85,7 @@ func main() {
 		klog.Fatal(err)
 	}
 
-	// creates the clientset
+	// 通过kubernetes.NewForConfig创建clientset对象。informer需要通过clientset与apiserver进行交互
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		klog.Fatal(err)
@@ -529,6 +523,7 @@ const (
 
 ### 结构体定义
 ![deltaFIFO 队列架构](deltafifo.png "deltaFIFO 队列")
+
 ```go
 type DeltaFIFO struct {
 	// lock/cond protects access to 'items' and 'queue'.
@@ -728,9 +723,11 @@ func processDeltas(
 		switch d.Type {
 		case Sync, Replaced, Added, Updated:
 			if old, exists, err := clientState.Get(obj); err == nil && exists {
+				// 写入本地缓存
 				if err := clientState.Update(obj); err != nil {
 					return err
 				}
+				// handler 回调处理
 				handler.OnUpdate(old, obj)
 			} else {
 				if err := clientState.Add(obj); err != nil {
@@ -1072,16 +1069,67 @@ func NewIndexerInformer(
 	h ResourceEventHandler,
 	indexers Indexers,
 ) (Indexer, Controller) {
-	// This will hold the client state, as we know it.
+	// 本地缓存
 	clientState := NewIndexer(DeletionHandlingMetaNamespaceKeyFunc, indexers)
-
+    
+	// 实际就是创建 cache.controller
 	return clientState, newInformer(lw, objType, resyncPeriod, h, clientState, nil)
 }
 ```
+ResyncDuration 的参数: 多久从 Indexer 缓存中同步一次数据到 Delta FIFO 队列，
+为什么需要 Resync 机制呢？因为在处理 Informer 事件回调时，可能存在处理失败的情况，定时的 Resync 让这些处理失败的事件有了重新 onUpdate 处理的机会。
+**错误理解resync:定时从etcd拉最新的以防出错**
 
-实际就是创建 cache.controller
+```go
+// k8s.io/client-go/tools/cache/delta_fifo.go
+// 重新同步一次 Indexer 缓存数据到 Delta FIFO 队列中
+func (f *DeltaFIFO) Resync() error {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	if f.knownObjects == nil {
+		return nil
+	}
+	// 遍历 indexer 中的 key，传入 syncKeyLocked 中处理
+	keys := f.knownObjects.ListKeys()
+	for _, k := range keys {
+		if err := f.syncKeyLocked(k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *DeltaFIFO) syncKeyLocked(key string) error {
+	obj, exists, err := f.knownObjects.GetByKey(key)
+	if err != nil {
+		klog.Errorf("Unexpected error %v during lookup of key %v, unable to queue object for sync", err, key)
+		return nil
+	} else if !exists {
+		klog.Infof("Key %v does not exist in known objects store, unable to queue object for sync", key)
+		return nil
+	}
+	// 如果发现 FIFO 队列中已经有相同 key 的 event 进来了，说明该资源对象有了新的 event，
+	// 在 Indexer 中旧的缓存应该失效，因此不做 Resync 处理直接返回 nil
+	id, err := f.KeyOf(obj)
+	if err != nil {
+		return KeyError{obj, err}
+	}
+	if len(f.items[id]) > 0 {
+		return nil
+	}
+    // 重新放入 FIFO 队列中
+	if err := f.queueActionLocked(Sync, obj); err != nil {
+		return fmt.Errorf("couldn't queue object: %v", err)
+	}
+	return nil
+}
+
+```
 
 
 ## 参考
 - [client-go 的正确打开方式](https://juejin.cn/post/7203690731276517432#heading-6)
 - [v0.26.0 深入源码分析 kubernetes client-go list-watch 和 informer 机制的实现原理](https://github.com/rfyiamcool/notes/blob/main/kubernetes_client_go_informer.md)
+- [Informer 中为什么需要引入 Resync 机制？#11](https://github.com/cloudnativeto/sig-kubernetes/issues/11)
+- [k8s源码分析- Informer机制](https://cloud.tencent.com/developer/article/1717404)

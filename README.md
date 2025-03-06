@@ -116,17 +116,19 @@ _index.md索引页面在Hugo内容中是个特殊角色。它允许您在列表�
 
 ### 图片处理
 
-
 - 全局资源是位于 assets 目录中或装载到 assets 目录中任意目录中的文件,这里是 assets/media/
 - 页面资源是页面束（page bundle）中的文件。
 
 
 
 
-使用 [shortcodes](https://gohugo.io/content-management/shortcodes/#figure)
+1. 使用 [shortcodes](https://gohugo.io/content-management/shortcodes/#figure)
 ```markdown
 {{<figure src="informer.png#center" width=800px >}}
 ```
+
+2. 引用全局资源
+![deltaFIFO 队列架构](deltafifo.png "deltaFIFO 队列")
 
 
 ## 命令使用
