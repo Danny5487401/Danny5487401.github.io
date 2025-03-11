@@ -1,7 +1,7 @@
 ---
 title: "Trimaran"
 date: 2025-03-02T14:13:27+08:00
-summary: Trimaran 算法 LoadVariationRiskBalancing,TargetLoadPacking,
+summary: Trimaran 算法 LoadVariationRiskBalancing 负载感知均衡调度,TargetLoadPacking 负载上限调度,LowRiskOverCommitment 资源限制感知调度
 categories:
   - kubernetes
   - scheduler
@@ -16,10 +16,26 @@ tags:
 
 - 方向一: 在 Pod 调度阶段，加入优先将 Pod 调度到资源实际使用率低的节点的节点Score插件
 - 方向二: 在集群治理阶段，通过实时监控，在观测到节点资源率较高、节点故障、Pod 数量较多等情况时，可以自动干预，迁移节点上的一些 Pod 到利用率低的节点上
+
 解决方式
 - 针对方向一，可以通过赋予Kubernetes调度器感知集群实际负载的能力，计算资源分配和实际资源利用之间的差距，优化调度策略。
-- 针对方向二，社区给出了Descheduler方案，Descheduler 可以根据一些规则和策略配置来帮助再平衡集群状态，当前项目实现了十余种策略
+- 针对方向二，社区给出了 Descheduler 重调度方案，Descheduler 可以根据一些规则和策略配置来帮助再平衡集群状态，当前项目实现了十余种策略
 
+[scheduler-plugins](https://github.com/kubernetes-sigs/scheduler-plugins)基于requests调度，非常依赖request的设置。
+
+
+## 基本概念
+
+重调度（Descheduling): 通常是指将部署在某个节点上调度不合理的Pod重新调度到另一个节点.
+在集群利用率不均而产生热点节点、节点属性变化导致存量Pod调度规则不匹配等场景下，您可以使用重调度来优化资源使用，确保Pod在最佳节点上运行，从而保障集群的高可用性和工作负载的高效运行。
+
+
+Gang scheduling(帮派调度) : 是一种调度算法，主要的原则是保证所有相关联的进程能够同时启动，防止部分进程的异常，导致整个关联进程组的阻塞.
+例如，您提交一个批量 Job，这个批量 Job 包含多个任务，要么这多个任务全部调度成功，要么一个都调度不成功。
+这种 All-or-Nothing 调度场景，就被称作 Gang scheduling.
+
+
+拓扑感知调度: 在机器学习和大数据分析类作业中，Pod间通常有较大的网络通信需求。默认情况下，原生Kubernetes调度器会将Pod均匀打散在集群中，增加了通信距离，导致作业完成时间变长。您可以将Pod部署在同一可用区或机架上，减少通信跳数和时延以优化作业执行时间。
 
 ## 指标获取
 通过 load-watcher,可以是service部署,或则直接作为客户端库嵌入.
@@ -80,7 +96,7 @@ func NewLibraryClient(opts watcher.MetricsProviderOpts) (Client, error) {
 	var err error
 	client := libraryClient{}
 	switch opts.Name {
-	case watcher.PromClientName: // promethues 客户端的方式
+	case watcher.PromClientName: // prometheus 客户端的方式
 		client.fetcherClient, err = metricsprovider.NewPromClient(opts)
 	case watcher.SignalFxClientName:
 		client.fetcherClient, err = metricsprovider.NewSignalFxClient(opts)
@@ -99,7 +115,7 @@ func NewLibraryClient(opts watcher.MetricsProviderOpts) (Client, error) {
 ```
 
 
-## LoadVariationRiskBalancing
+## LoadVariationRiskBalancing 负载感知均衡调度
 LoadVariationRiskBalancing 插件的算法是利用节点负载在某段时间内（滑动窗口）的平均值（M）和标准差(V)这两个指标，假设集群所有节点的CPU利用率的M+V是0.3(30%)，那么每个节点的cpu利用率的M+V越接近0.3，得分应该越小。
 
 LoadVariationRiskBalancing是分别计算每种资源的得分，再取得分的最小值，例：假设CPU得分0，内存得分10，则节点的最终得分是0。
@@ -192,7 +208,7 @@ func computeScore(logger klog.Logger, rs *trimaran.ResourceStats, margin float64
 6. 当前节点最终的得分为：U = min(Ui)，意思是cpu、内存的分数，哪个低取哪个：
 
 
-## TargetLoadPacking
+## TargetLoadPacking 负载上限调度
 
 TargetLoadPacking即目标负载调度器，用于控制节点的CPU利用率不超过目标值x%（例如65%），通过打分让所有cpu利用率超过x%的都不被选中。目标负载调度器只支持CPU。
 
@@ -207,15 +223,9 @@ func (pl *TargetLoadPacking) Score(ctx context.Context, cycleState *framework.Cy
 		return score, framework.NewStatus(framework.Error, fmt.Sprintf("getting node %q from Snapshot: %v", nodeName, err))
 	}
 
-	// get node metrics
+	// 获取节点 metrics
 	metrics, allMetrics := pl.collector.GetNodeMetrics(logger, nodeName)
-	if metrics == nil {
-		klog.InfoS("Failed to get metrics for node; using minimum score", "nodeName", nodeName)
-		// Avoid the node by scoring minimum
-		return score, nil
-		// TODO(aqadeer): If this happens for a long time, fall back to allocation based packing. This could mean maintaining failure state across cycles if scheduler doesn't provide this state
-
-	}
+    // ...
 
 	// 计算 pod 使用率
 	var curPodCPUUsage int64
@@ -224,7 +234,7 @@ func (pl *TargetLoadPacking) Score(ctx context.Context, cycleState *framework.Cy
 		curPodCPUUsage += PredictUtilisation(&container)
 	}
 	logger.V(6).Info("Predicted utilization for pod", "podName", pod.Name, "cpuUsage", curPodCPUUsage)
-	// 补充runtimeClass 定义的overhead
+	// 补充runtimeClass 定义的 overhead
 	if pod.Spec.Overhead != nil {
 		curPodCPUUsage += pod.Spec.Overhead.Cpu().MilliValue()
 	}
@@ -313,6 +323,118 @@ else if cluster_cpu < target_cpu <= 100:
   score = cluster_cpu(100 - target_cpu)/(100 - cluster_cpu)
 else:
   score = 0
+```
+
+
+
+## LowRiskOverCommitment 资源限制感知调度
+
+让limits也能均衡分布，通过跨节点“分散”或“平衡”Pod 的资源limits来缓解可突发Pod导致的资源过度订阅问题。
+
+```go
+// computeRank : rank function for the LowRiskOverCommitment
+func (pl *LowRiskOverCommitment) computeRank(logger klog.Logger, metrics []watcher.Metric, nodeInfo *framework.NodeInfo, pod *v1.Pod,
+	podRequests *framework.Resource, podLimits *framework.Resource) float64 {
+	node := nodeInfo.Node()
+	// calculate risk based on requests and limits
+	nodeRequestsAndLimits := trimaran.GetNodeRequestsAndLimits(logger, nodeInfo.Pods, node, pod, podRequests, podLimits)
+	riskCPU := pl.computeRisk(logger, metrics, v1.ResourceCPU, watcher.CPU, node, nodeRequestsAndLimits)
+	riskMemory := pl.computeRisk(logger, metrics, v1.ResourceMemory, watcher.Memory, node, nodeRequestsAndLimits)
+	rank := 1 - math.Max(riskCPU, riskMemory)
+
+	logger.V(6).Info("Node rank", "nodeName", node.GetName(), "riskCPU", riskCPU, "riskMemory", riskMemory, "rank", rank)
+
+	return rank
+}
+
+
+func (pl *LowRiskOverCommitment) computeRisk(logger klog.Logger, metrics []watcher.Metric, resourceName v1.ResourceName,
+	resourceType string, node *v1.Node, nodeRequestsAndLimits *trimaran.NodeRequestsAndLimits) float64 {
+	var riskLimit, riskLoad, totalRisk float64
+
+	defer func() {
+		logger.V(6).Info("Calculated risk", "node", klog.KObj(node), "resource", resourceName,
+			"riskLimit", riskLimit, "riskLoad", riskLoad, "totalRisk", totalRisk)
+	}()
+
+	nodeRequest := nodeRequestsAndLimits.NodeRequest
+	nodeLimit := nodeRequestsAndLimits.NodeLimit
+	nodeRequestMinusPod := nodeRequestsAndLimits.NodeRequestMinusPod
+	nodeLimitMinusPod := nodeRequestsAndLimits.NodeLimitMinusPod
+	nodeCapacity := nodeRequestsAndLimits.Nodecapacity
+
+	var request, limit, capacity, requestMinusPod, limitMinusPod int64
+	if resourceName == v1.ResourceCPU {
+		request = nodeRequest.MilliCPU
+		limit = nodeLimit.MilliCPU
+		requestMinusPod = nodeRequestMinusPod.MilliCPU
+		limitMinusPod = nodeLimitMinusPod.MilliCPU
+		capacity = nodeCapacity.MilliCPU
+	} else if resourceName == v1.ResourceMemory {
+		request = nodeRequest.Memory
+		limit = nodeLimit.Memory
+		requestMinusPod = nodeRequestMinusPod.Memory
+		limitMinusPod = nodeLimitMinusPod.Memory
+		capacity = nodeCapacity.Memory
+	} else {
+		// invalid resource
+		logger.V(6).Info("Unexpected resource", "resourceName", resourceName)
+		return 0
+	}
+
+	// (1) riskLimit : calculate overcommit potential load
+	if limit > capacity {
+		riskLimit = float64(limit-capacity) / float64(limit-request)
+	}
+	logger.V(6).Info("RiskLimit", "node", klog.KObj(node), "resource", resourceName, "riskLimit", riskLimit)
+
+	// (2) riskLoad : calculate measured overcommitment
+	zeroRequest := &framework.Resource{}
+	stats, ok := trimaran.CreateResourceStats(logger, metrics, node, zeroRequest, resourceName, resourceType)
+	if ok {
+		// fit a beta distribution to the measured load stats
+		mu, sigma := trimaran.GetMuSigma(stats)
+		// adjust standard deviation due to data smoothing
+		// 求出x 的y 次方
+		sigma *= math.Pow(float64(pl.args.SmoothingWindowSize), 0.5)
+		// limit the standard deviation close to the allowed maximum for the beta distribution
+		// math.Sqrt 一个数的平方根
+		sigma = math.Min(sigma, math.Sqrt(GetMaxVariance(mu)*MaxVarianceAllowance))
+
+		// calculate area under beta probability curve beyond total allocated, as overuse risk measure
+		allocThreshold := float64(requestMinusPod) / float64(capacity)
+		allocThreshold = math.Min(math.Max(allocThreshold, 0), 1)
+		allocProb, fitDistribution := ComputeProbability(mu, sigma, allocThreshold)
+		if fitDistribution != nil {
+			klog.V(6).InfoS("FitDistribution", "node", klog.KObj(node), "resource", resourceName, "dist", fitDistribution.Print())
+		}
+		// condition the probability in case total limit is less than capacity
+		if limitMinusPod < capacity && requestMinusPod <= limitMinusPod {
+			limitThreshold := float64(limitMinusPod) / float64(capacity)
+			if limitThreshold == 0 {
+				allocProb = 1 // zero over zero
+			} else if fitDistribution != nil {
+				limitProb := fitDistribution.DistributionFunction(limitThreshold)
+				if limitProb > 0 {
+					allocProb /= limitProb
+					allocProb = math.Min(math.Max(allocProb, 0), 1)
+				}
+			}
+		}
+
+		// calculate risk
+		riskLoad = 1 - allocProb
+		logger.V(6).Info("RiskLoad", "node", klog.KObj(node), "resource", resourceName,
+			"allocThreshold", allocThreshold, "allocProb", allocProb, "riskLoad", riskLoad)
+	}
+
+	// combine two components of risk into a total risk as a weighted sum
+	w := pl.riskLimitWeightsMap[resourceName]
+	totalRisk = w*riskLimit + (1-w)*riskLoad
+	totalRisk = math.Min(math.Max(totalRisk, 0), 1)
+	return totalRisk
+}
+
 ```
 
 

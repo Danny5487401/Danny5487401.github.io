@@ -53,9 +53,11 @@ Kubernetes v1.15版本中引入了可插拔架构的调度框架，使得定制�
 #### Extension Points 扩展点
 
 {{<figure src="./scheduler_framework_extensions.png#center" width=800px >}}
+
 ```go
 type Framework interface {
-    // ...
+    //  framework.Handle 提供与插件的生存期有关的API
+	Handle
 
 	// 扩展用于对 Pod 的待调度队列进行排序，以决定先调度哪个 Pod
 	QueueSortFunc() LessFunc
@@ -76,6 +78,7 @@ type Framework interface {
     // 是一个通知性质的扩展，如果为 Pod 预留了资源，Pod 又在被绑定过程中被拒绝绑定，则 unreserve 扩展将被调用。Unreserve 扩展应该释放已经为 Pod 预留的节点上的计算资源。
 	RunReservePluginsUnreserve(ctx context.Context, state *CycleState, pod *v1.Pod, nodeName string)
 	
+	// 这些插件用于防止或延迟Pod的绑定
 	RunPermitPlugins(ctx context.Context, state *CycleState, pod *v1.Pod, nodeName string) *Status
 
 	WaitOnPermit(ctx context.Context, pod *v1.Pod) *Status
@@ -86,10 +89,32 @@ type Framework interface {
 }
 ```
 
+### 核心数据结构
+{{<figure src="./cycle_state.png#center" width=800px >}}
+
+```go
+type CycleState struct {
+	// storage is keyed with StateKey, and valued with StateData.
+	storage sync.Map
+	// if recordPluginMetrics is true, metrics.PluginExecutionDuration will be recorded for this cycle.
+	recordPluginMetrics bool
+	// SkipFilterPlugins are plugins that will be skipped in the Filter extension point.
+	SkipFilterPlugins sets.Set[string]
+	// SkipScorePlugins are plugins that will be skipped in the Score extension point.
+	SkipScorePlugins sets.Set[string]
+}
+```
+在Framework的实现中，每个插件扩展阶段调用都会传递context和CycleState两个对象，
+其中context与我们在大多数go编程中的用法类似，这里主要是用于多阶段并行处理的时候的统一退出操作，而CycleState则存储当前这一个调度周期内的所有数据，这是一个并发安全的结构
+
+
+
+
 #### scheduler framework 调度框架第三方应用
 
 - github.com/koordinator-sh/koordinator
 - github.com/kubernetes-sigs/scheduler-plugins
+
 
 ## 插件分类
 
@@ -388,7 +413,7 @@ func getDefaultPlugins() *v1.Plugins {
 ```
 
 
-## k8s scheduler
+## kube-scheduler
 
 要职责是为新创建的 pod 寻找一个最合适的 node 节点, 然后进行 bind node 绑定, 后面 kubelet 才会监听到并创建真正的 pod.
 
@@ -412,8 +437,8 @@ func getDefaultPlugins() *v1.Plugins {
 ### 调度器性能
 
 考虑一个问题, 当 k8s 的 node 节点特别多时, 这些节点都要参与预先的调度过程么 ?
-比如大集群有 2500 个节点, 注册的插件有 10 个, 那么 筛选 Filter 和 打分 Score 过程需要进行 2500 * 10 * 2 = 50000 次计算, 最后选定一个最高分值的节点来绑定 pod. k8s scheduler 考虑到了这样的性能开销, 所以加入了百分比参数控制参与预选的节点数
-
+比如大集群有 2500 个节点, 注册的插件有 10 个, 那么 筛选 Filter 和 打分 Score 过程需要进行 2500 * 10 * 2 = 50000 次计算, 最后选定一个最高分值的节点来绑定 pod. 
+k8s scheduler 考虑到了这样的性能开销, 所以加入了百分比参数控制参与预选的节点数.
 
 
 ```go
@@ -720,30 +745,25 @@ func (sched *Scheduler) schedulingCycle(
 	podsToActivate *framework.PodsToActivate,
 ) (ScheduleResult, *framework.QueuedPodInfo, *framework.Status) {
 	pod := podInfo.Pod
-	// 调度pod 
+	// 调度 pod 
 	scheduleResult, err := sched.SchedulePod(ctx, fwk, state, pod)
-	if err != nil {
-        // ..
-	}
 
     // ...
 	assumedPodInfo := podInfo.DeepCopy()
 	assumedPod := assumedPodInfo.Pod
 	// 告诉缓存，假设他已经绑定
 	err = sched.assume(assumedPod, scheduleResult.SuggestedHost)
-	if err != nil {
-        // ...
-	}
+
 
 	// 预留资源
 	if sts := fwk.RunReservePluginsReserve(ctx, state, assumedPod, scheduleResult.SuggestedHost); !sts.IsSuccess() {
-        // 。。
+        // ...
 	}
 
 	// Run "permit" plugins.
 	runPermitStatus := fwk.RunPermitPlugins(ctx, state, assumedPod, scheduleResult.SuggestedHost)
 	if !runPermitStatus.IsWait() && !runPermitStatus.IsSuccess() {
-        // 。。
+        // ...
 	}
 
 	// At the end of a successful scheduling cycle, pop and move up Pods if needed.
@@ -757,12 +777,12 @@ func (sched *Scheduler) schedulingCycle(
 }
 ```
 
-SchedulePod 
+调度 pod
 ```go
 
 func (sched *Scheduler) schedulePod(ctx context.Context, fwk framework.Framework, state *framework.CycleState, pod *v1.Pod) (result ScheduleResult, err error) {
     // ..
-	// 过滤出符合要求的预选节点
+	// 过滤: 选出符合要求的预选节点
 	feasibleNodes, diagnosis, err := sched.findNodesThatFitPod(ctx, fwk, state, pod)
 	if err != nil {
 		return result, err
@@ -798,9 +818,7 @@ func (sched *Scheduler) findNodesThatFitPod(ctx context.Context, fwk framework.F
 	}
 	// 调用 framework 的 PreFilter 集合里的插件
 	preRes, s := fwk.RunPreFilterPlugins(ctx, state, pod)
-	if !s.IsSuccess() {
-        // ..
-	}
+    // ...
 
 	// "NominatedNodeName" can potentially be set in a previous scheduling cycle as a result of preemption.
 	// This node is likely the only candidate that will fit the pod, and hence we try it first before iterating over all nodes.
@@ -942,8 +960,8 @@ Predicate有一系列的算法可以使用：
 - HostName: 检查Pod.Spec.NodeName是否与候选节点一
 - MatchNodeSelector：检查候选节点的Pod.Spec.NodeSelector 是否匹
 - NoVolumeZoneConflict：检查 volume zone是否冲
-- MaxEBSVolumeCount：检查AWS EBS Volume数量是否过多（默认不超过 39
-- MaxGCEPDVolumeCount：检查GCE PD Volume数量是否过多（默认不超过 16
+- MaxEBSVolumeCount：检查AWS EBS Volume数量是否过多（默认不超过 39)
+- MaxGCEPDVolumeCount：检查GCE PD Volume数量是否过多（默认不超过 16)
 - MaxAzureDiskVolumeCount：检查Azure Disk Volume数量是否过多（默认不超过 16
 - MatchInterPodAffinity：检查是否匹配Pod的亲和性要求
 
@@ -963,13 +981,13 @@ func prioritizeNodes(
 ) ([]framework.NodePluginScores, error) {
 	// ..
 
-	//  在 framework 的 PreScore 插件集合里, 遍历执行插件的 PreSocre 方法
+	//  在 framework 的 PreScore 插件集合里, 遍历执行插件的 PreScore 方法
 	preScoreStatus := fwk.RunPreScorePlugins(ctx, state, pod, nodes)
 	if !preScoreStatus.IsSuccess() {
 		return nil, preScoreStatus.AsError()
 	}
 
-	// 在 framework 的 Score 插件集合里, 遍历执行插件的 Socre 方法
+	// 在 framework 的 Score 插件集合里, 遍历执行插件的 Score 方法
 	nodesScores, scoreStatus := fwk.RunScorePlugins(ctx, state, pod, nodes)
 	if !scoreStatus.IsSuccess() {
 		return nil, scoreStatus.AsError()
@@ -1254,10 +1272,7 @@ func (r *resourceAllocationScorer) score(
 ```
 
 
-## 高级调度策略
-Gang scheduling(帮派调度) 是一种调度算法，主要的原则是保证所有相关联的进程能够同时启动，防止部分进程的异常，导致整个关联进程组的阻塞.
-例如，您提交一个批量 Job，这个批量 Job 包含多个任务，要么这多个任务全部调度成功，要么一个都调度不成功。
-这种 All-or-Nothing 调度场景，就被称作 Gang scheduling. 
+ 
 
 ## 参考 
 

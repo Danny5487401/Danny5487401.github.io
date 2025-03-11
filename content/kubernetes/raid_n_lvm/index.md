@@ -544,21 +544,67 @@ func removeVolumeFilesystem(lvmVolume *apis.LVMVolume) error {
 旧称廉价磁盘冗余阵列（Redundant Array of Inexpensive Disks），简称磁盘阵列。其基本思想就是把多个相对便宜的硬盘组合起来，成为一个硬盘阵列组，使性能达到甚至超过一个价格昂贵、容量巨大的硬盘。
 
 ### 基本概念
-proc/mdstat ： 当前md(软RAID)的状态信息
+/proc/mdstat: 当前md(软RAID)的状态信息
+```go
+// github.com/prometheus/procfs@v0.8.0/mdstat.go
+func (fs FS) MDStat() ([]MDStat, error) {
+	data, err := os.ReadFile(fs.proc.Path("mdstat"))
+	if err != nil {
+		return nil, err
+	}
+	mdstat, err := parseMDStat(data)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing mdstat %q: %w", fs.proc.Path("mdstat"), err)
+	}
+	return mdstat, nil
+}
+
+```
+```go
+type MDStat struct {
+	// Name of the device.
+	Name string
+	// activity-state of the device.
+	ActivityState string
+	// Number of active disks.
+	DisksActive int64
+	// Total number of disks the device requires.
+	DisksTotal int64
+	// Number of failed disks.
+	DisksFailed int64
+	// Number of "down" disks. (the _ indicator in the status line)
+	DisksDown int64
+	// Spare disks in the device.
+	DisksSpare int64
+	// Number of blocks the device holds.
+	BlocksTotal int64
+	// Number of blocks on the device that are in sync.
+	BlocksSynced int64
+	// progress percentage of current sync
+	BlocksSyncedPct float64
+	// estimated finishing time for current sync (in minutes)
+	BlocksSyncedFinishTime float64
+	// current sync speed (in Kilobytes/sec)
+	BlocksSyncedSpeed float64
+	// Name of md component devices
+	Devices []string
+}
+
+```
 
 /etc/mdadm.conf ： mdadm的配置文件
 
-Active devices ： RAID中的活动组件设备
+Active devices： RAID中的活动组件设备
 
-Faulty device ： RAID中失效的设备
+Faulty device： RAID中失效的设备
 
-Spare device ： RAID中热备盘
+Spare device： RAID中热备盘
 
-Device Names ： RAID设备名、标准格式是”/dev/mdNN”或者”/dev/md/NN”
+Device Names： RAID设备名、标准格式是”/dev/mdNN”或者”/dev/md/NN”
 
-md            : Multiple Devices虚拟块设备（利用底层多个块设备虚拟出一个新的虚拟块设备）。
+md: Multiple Devices虚拟块设备（利用底层多个块设备虚拟出一个新的虚拟块设备）。
 
-md driver        : MD的驱动
+md driver: MD的驱动
 
 ### raid 分类
 #### raid 0
@@ -605,14 +651,13 @@ mdadm –stop /dev/md0
 mdadm — zero-superblock /dev/sda1
 
 
-
 # 创建配置文件
 mdadm –detail –scan >> mdadm.conf
 ```
+
 ```shell
 # 说明：查看当前所有RAID的状态
 cat /proc/mdstat
-
 
 ```
 
