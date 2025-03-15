@@ -1,7 +1,7 @@
 ---
-title: "存储: Raid 和 lvm"
+title: "存储: Raid 和 lvm, NVMe"
 date: 2025-02-21T08:34:31+08:00
-summary: raid 和 lvm 在 k8s中应用
+summary: RAID(Redundant Array of Independent Disks 独立硬盘冗余阵列, lvm(Logical Volume Manager),nvme(Non-Volatile Memory Express 非易失性内存主机控制器接口规范) 在k8s中应用
 categories:
   - kubernetes
   - raid
@@ -540,7 +540,7 @@ func removeVolumeFilesystem(lvmVolume *apis.LVMVolume) error {
 }
 ```
 
-## RAID( Redundant Array of Independent Disks 独立硬盘冗余阵列）
+## RAID(Redundant Array of Independent Disks 独立硬盘冗余阵列）
 旧称廉价磁盘冗余阵列（Redundant Array of Inexpensive Disks），简称磁盘阵列。其基本思想就是把多个相对便宜的硬盘组合起来，成为一个硬盘阵列组，使性能达到甚至超过一个价格昂贵、容量巨大的硬盘。
 
 ### 基本概念
@@ -634,7 +634,7 @@ RAID 10 是组合 RAID 1 和 RAID 0 形成的.
 
 ### raid 操作 
 
-mdadm是一个用于创建、管理、监控RAID设备的工具，它使用Linux中的md驱动.
+mdadm 是一个用于创建、管理、监控RAID设备的工具，它使用Linux中的md驱动.
 ```shell
 # mdadm 使用
 

@@ -31,17 +31,19 @@ SR-IOV（Single Root I/O Virtualization）是一个将PCIe共享给虚拟机的�
 
 
 ## 基本知识
+
 ### PCI(Peripheral Component Interconnect 外围设备互联)
-PCI是一种外设总线规范。我们先来看一下什么是总线：总线是一种传输信号的路径或信道。典型情况是，总线是连接于一个或多个导体的电气连线，总 线上连接的全部设备可在同一时间收到全部的传输内容。总线由电气接口和编程接口组成。
+PCI是一种外设总线规范。我们先来看一下什么是总线：总线是一种传输信号的路径或信道。典型情况是，总线是连接于一个或多个导体的电气连线，总线上连接的全部设备可在同一时间收到全部的传输内容。
+总线由电气接口和编程接口组成。
 
 Linux PCI设备驱动实际包括Linux PCI设备驱动和设备本身驱动两部分。
-PCI(Peripheral Component Interconnect 外围设备互联)有三种地址空间：PCI I/O空间、PCI内存地址空间和PCI配置空间。
+PCI有三种地址空间：PCI I/O空间、PCI内存地址空间和PCI配置空间。
 其中，PCI I/O空间和PCI内存地址空间由设备驱动程序使用，而PCI配置空间由Linux PCI初始化代码使用，用于配置PCI设备，比如中断号以及I/O或内存基地址。
 
-/proc/iomem描写叙述了系统中全部的设备I/O在内存地址空间上的映射。 40000000-400003ff : 0000:00:1f.1
+/proc/iomem 描写叙述了系统中全部的设备I/O在内存地址空间上的映射。
 
-一个PCI设备，40000000-400003ff是它所映射的内存地址空间，占领了内存地址空间的1024 bytes的位置，而 0000:00:1f.1则是一个PCI外设的地址,它以冒号和逗号分隔为4个部分
-
+40000000-400003ff : 0000:00:1f.1 解释
+一个PCI设备，40000000-400003ff是它所映射的内存地址空间，占领了内存地址空间的1024 bytes的位置，而 0000:00:1f.1 则是一个PCI外设的地址,它以冒号和逗号分隔为4个部分
 
 
 一般一类设备在出厂的时候会有相同的一串classid,而classid记录在/sys/bus/pci/devices/*/class文件中
@@ -81,7 +83,7 @@ Integrated service 综合服务模型:
 Differentiated service 差分服务模型: 将网络流量分成多个类，不同类按不同优先级处理
 
 
-### VLAN优先级
+### VLAN 优先级
 
 802.1P优先级，也叫CoS（Class of Service，服务等级）
 
@@ -114,11 +116,11 @@ ethX 是真实的物理网卡，bondX 是网络绑定 (bonding) 接口，lo 是�
 # ethtool命令用于获取以太网卡的配置信息, -i 显示网卡驱动的信息，如驱动的名称、版本等
 $ ethtool -i eno49
  
-driver: igb
+driver: igb # 驱动
 version: 5.6.0-k
 firmware-version: 1.61, 0x80000daa, 1.949.0
 expansion-rom-version:
-bus-info: 0000:04:00.0
+bus-info: 0000:04:00.0 # PCI 地址
 supports-statistics: yes
 supports-test: yes
 supports-eeprom-access: yes
@@ -152,6 +154,10 @@ ip link show eth0
 # 删除 SR-IOV VF
 echo 0 > /sys/class/net/eth0/device/sriov_numvfs
 
+# 查看厂商、设备 ID
+$ lspci -s 0000:3d:00.0 -n
+3d:00.0 0200: 8086:37d1 (rev 09) #  8086 就是厂商 ID，37d1 就是设备 ID。
+
 ```
 这里需要注意VF设备是不能增量添加的，如果需要修改启动的VF数量，需要先将sriov_numvfs值重置为0后再重新设置为目标值，所以在使用SR-IOV功能最好能确定最多会使用到几个VF，以防在业务运行过程中需要扩展VF数影响正在使用VF的业务。
 
@@ -174,8 +180,8 @@ Linux Kernel version 3.8.x 及以上版本可以通过上述调整 sriov_numvfs 
 对TCP/IP协议层只存在一个Bond网卡，在Bond程序中实现网络流量的负载均衡，即将一个网络请求重定位到不同的网卡上，来提高总体网络的可用性
 
 怎么看当前bond的mode？
-- #cat /proc/net/bonding/bond0
-- #vim /etc/sysconfig/network-scripts/ifcfg-bond0的BONDING_OPTS参数
+- $ cat /proc/net/bonding/bond0
+- $ vim /etc/sysconfig/network-scripts/ifcfg-bond0的BONDING_OPTS参数
 ```shell
 # 查看 bond 绑定的网卡
 cat /proc/net/bonding/bond1
@@ -305,7 +311,7 @@ xmit_hash_policy
 
 
 
-### bond口创建的一般流程：
+### bond 创建的一般流程
 
 Step 1、创建slave口
 
@@ -393,27 +399,199 @@ func createBond(bondName string, bondConf *bondingConfig, nspath string, ns ns.N
 intel官方也给出了SR-IOV技术在容器中使用的开源组件，例如：sriov-cni 和 sriov-device-plugin等.
 当前招商银行数据库服务就是使用这方面的技术.
 
+{{<figure src="./sr-iov-in-k8s.png#center" width=800px >}}
+节点上的vf设备需要提前生成，然后由 sriov-device-plugin将vf设备发布到k8s集群中。在pod创建的时候，由kubelet调用multus-cni，multus-cni分别调用默认cni和sriov-cni插件为pod构建网络环境。sriov-cni就是将主机上的vf设备添加进容器的网络命名空间中并配置ip地址。
 
+### sriov-device-plugin 使用
+
+
+### sriov-cni使用
 ```go
-// 根据 pci 地址获取 pf 和 vfid
-func getVfInfo(vfPci string) (string, int, error) {
-	var vfID int
+func cmdAdd(args *skel.CmdArgs) error {
+	if err := config.SetLogging(args.StdinData, args.ContainerID, args.Netns, args.IfName); err != nil {
+		return err
+	}
+	logging.Debug("function called",
+		"func", "cmdAdd",
+		"args.Path", args.Path, "args.StdinData", string(args.StdinData), "args.Args", args.Args)
 
-	pf, err := utils.GetPfName(vfPci)
+	netConf, err := config.LoadConf(args.StdinData)
 	if err != nil {
-		return "", vfID, err
+		return fmt.Errorf("SRIOV-CNI failed to load netconf: %v", err)
 	}
 
-	vfID, err = utils.GetVfid(vfPci, pf)
+	envArgs, err := getEnvArgs(args.Args)
 	if err != nil {
-		return "", vfID, err
+		return fmt.Errorf("SRIOV-CNI failed to parse args: %v", err)
 	}
 
-	return pf, vfID, nil
+	if envArgs != nil {
+		MAC := string(envArgs.MAC)
+		if MAC != "" {
+			netConf.MAC = MAC
+		}
+	}
+
+	// RuntimeConfig takes preference than envArgs.
+	// This maintains compatibility of using envArgs
+	// for MAC config.
+	if netConf.RuntimeConfig.Mac != "" {
+		netConf.MAC = netConf.RuntimeConfig.Mac
+	}
+
+	// Always use lower case for mac address
+	netConf.MAC = strings.ToLower(netConf.MAC)
+
+	netns, err := ns.GetNS(args.Netns)
+	if err != nil {
+		return fmt.Errorf("failed to open netns %q: %v", netns, err)
+	}
+	defer netns.Close()
+
+	sm := sriov.NewSriovManager()
+	// 补充原始信息
+	err = sm.FillOriginalVfInfo(netConf)
+	if err != nil {
+		return fmt.Errorf("failed to get original vf information: %v", err)
+	}
+	defer func() {
+		if err != nil {
+			err := netns.Do(func(_ ns.NetNS) error {
+				_, err := netlink.LinkByName(args.IfName)
+				return err
+			})
+			if err == nil {
+				_ = sm.ReleaseVF(netConf, args.IfName, netns)
+			}
+			// Reset the VF if failure occurs before the netconf is cached
+			_ = sm.ResetVFConfig(netConf)
+		}
+	}()
+	if err := sm.ApplyVFConfig(netConf); err != nil {
+		return fmt.Errorf("SRIOV-CNI failed to configure VF %q", err)
+	}
+
+	result := &current.Result{}
+	result.Interfaces = []*current.Interface{{
+		Name:    args.IfName,
+		Sandbox: netns.Path(),
+	}}
+
+	if !netConf.DPDKMode {
+		err = sm.SetupVF(netConf, args.IfName, netns)
+
+		if err != nil {
+			return fmt.Errorf("failed to set up pod interface %q from the device %q: %v", args.IfName, netConf.Master, err)
+		}
+	}
+
+	result.Interfaces[0].Mac = config.GetMacAddressForResult(netConf)
+	// check if we are able to find MTU for the virtual function
+	if netConf.MTU != nil {
+		result.Interfaces[0].Mtu = *netConf.MTU
+	}
+
+	doAnnounce := false
+
+	// run the IPAM plugin
+	if netConf.IPAM.Type != "" {
+        // 分配 ip
+	}
+
+	// Cache NetConf for CmdDel
+	logging.Debug("Cache NetConf for CmdDel",
+		"func", "cmdAdd",
+		"config.DefaultCNIDir", config.DefaultCNIDir,
+		"netConf", netConf)
+	if err = utils.SaveNetConf(args.ContainerID, config.DefaultCNIDir, args.IfName, netConf); err != nil {
+		return fmt.Errorf("error saving NetConf %q", err)
+	}
+
+	// Mark the pci address as in use.
+	logging.Debug("Mark the PCI address as in use",
+		"func", "cmdAdd",
+		"config.DefaultCNIDir", config.DefaultCNIDir,
+		"netConf.DeviceID", netConf.DeviceID)
+	
+	// 记录设备已分配
+	allocator := utils.NewPCIAllocator(config.DefaultCNIDir)
+	if err = allocator.SaveAllocatedPCI(netConf.DeviceID, args.Netns); err != nil {
+		return fmt.Errorf("error saving the pci allocation for vf pci address %s: %v", netConf.DeviceID, err)
+	}
+
+	if doAnnounce {
+        // arp 设置 
+	}
+
+	return types.PrintResult(result, netConf.CNIVersion)
 }
 
+```
+
+加载配置
+```go
+func LoadConf(bytes []byte) (*sriovtypes.NetConf, error) {
+	n := &sriovtypes.NetConf{}
+	if err := json.Unmarshal(bytes, n); err != nil {
+		return nil, fmt.Errorf("LoadConf(): failed to load netconf: %v", err)
+	}
+
+	// DeviceID takes precedence; if we are given a VF pciaddr then work from there
+	if n.DeviceID != "" { 
+		// Get rest of the VF information
+		pfName, vfID, err := getVfInfo(n.DeviceID)
+		if err != nil {
+			return nil, fmt.Errorf("LoadConf(): failed to get VF information: %q", err)
+		}
+		n.VFID = vfID
+		n.Master = pfName
+	} else {
+		return nil, fmt.Errorf("LoadConf(): VF pci addr is required")
+	}
+
+	// Check if the device is already allocated.
+	// This is to prevent issues where kubelet request to delete a pod and in the same time a new pod using the same
+	// vf is started. we can have an issue where the cmdDel of the old pod is called AFTER the cmdAdd of the new one
+	// This will block the new pod creation until the cmdDel is done.
+	logging.Debug("Check if the device is already allocated",
+		"func", "LoadConf",
+		"DefaultCNIDir", DefaultCNIDir,
+		"n.DeviceID", n.DeviceID)
+	allocator := utils.NewPCIAllocator(DefaultCNIDir)
+	isAllocated, err := allocator.IsAllocated(n.DeviceID)
+	if err != nil {
+		return n, err
+	}
+
+	if isAllocated { // 如果已经分配
+		return n, fmt.Errorf("pci address %s is already allocated", n.DeviceID)
+	}
+
+	// Assuming VF is netdev interface; Get interface name(s)
+	hostIFName, err := utils.GetVFLinkName(n.DeviceID)
+	if err != nil || hostIFName == "" {
+		// VF interface not found; check if VF has dpdk driver
+		hasDpdkDriver, err := utils.HasDpdkDriver(n.DeviceID)
+		if err != nil {
+			return nil, fmt.Errorf("LoadConf(): failed to detect if VF %s has dpdk driver %q", n.DeviceID, err)
+		}
+		n.DPDKMode = hasDpdkDriver
+	}
+
+	if hostIFName != "" {
+		n.OrigVfState.HostIFName = hostIFName
+	}
+	
+
+    // 参数校验,主要vlan信息,LinkState状态
+
+
+
+	return n, nil
+}
 
 ```
+
 ```go
 // https://github.com/k8snetworkplumbingwg/sriov-cni/blob/36e2d17af18803d0a1ced3c0c62a33b321d05a5b/pkg/utils/utils.go
 var (
@@ -477,7 +655,49 @@ func GetVfid(addr string, pfName string) (int, error) {
 ```
 
 
+
+补充 vf 信息
+```go
+func (s *sriovManager) FillOriginalVfInfo(conf *sriovtypes.NetConf) error {
+	pfLink, err := s.nLink.LinkByName(conf.Master)
+	if err != nil {
+		return fmt.Errorf("failed to lookup master %q: %v", conf.Master, err)
+	}
+	// Save current the VF state before modifying it
+	vfState := getVfInfo(pfLink, conf.VFID)
+	if vfState == nil {
+		return fmt.Errorf("failed to find vf %d", conf.VFID)
+	}
+	conf.OrigVfState.FillFromVfInfo(vfState)
+
+	return err
+}
+```
+
+```go
+// 根据 pci 地址获取 pf 和 vfid
+func getVfInfo(vfPci string) (string, int, error) {
+	var vfID int
+
+	pf, err := utils.GetPfName(vfPci)
+	if err != nil {
+		return "", vfID, err
+	}
+
+	vfID, err = utils.GetVfid(vfPci, pf)
+	if err != nil {
+		return "", vfID, err
+	}
+
+	return pf, vfID, nil
+}
+
+
+```
+
+
 ## 参考
+- https://github.com/k8snetworkplumbingwg/sriov-cni
 - https://github.com/k8snetworkplumbingwg/sriov-network-device-plugin/blob/master/docs/vf-setup.md
 - https://www.howtoforge.com/tutorial/how-to-configure-high-availability-and-network-bonding-on-linux/
 - [SR-IOV 技术及在Pod 中使用](https://www.chenshaowen.com/blog/sr-iov-technique.html)

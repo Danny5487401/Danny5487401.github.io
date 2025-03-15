@@ -1,7 +1,7 @@
 ---
 title: "Cni( Container Network Interface)"
 date: 2025-01-12T14:52:13+08:00
-summary: cni 规范及实现原理
+summary: cni 规范及实现原理, 常见的 cni 插件实现 
 categories:
   - kubernetes
   - cni
@@ -24,6 +24,7 @@ CNI 规范包含以下几个核心组成部分：
 - 结果返回：定义了插件执行完成后如何向运行时返回结果的数据格式
 
 ## CNI Plugin
+github.com/containernetworking/plugins 
 ### 插件分类
 Main 插件：创建具体的网络设备
 - bridge: Creates a bridge, adds the host and the container to it.
@@ -68,6 +69,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	}
 	defer netns.Close()
 
+	// 创建 macvlan 设备
 	macvlanInterface, err := createMacvlan(n, args.IfName, netns)
 	if err != nil {
 		return err
@@ -153,6 +155,93 @@ func cmdAdd(args *skel.CmdArgs) error {
 	result.DNS = n.DNS
 
 	return types.PrintResult(result, cniVersion)
+}
+
+func createMacvlan(conf *NetConf, ifName string, netns ns.NetNS) (*current.Interface, error) {
+	macvlan := &current.Interface{}
+
+	mode, err := modeFromString(conf.Mode)
+	if err != nil {
+		return nil, err
+	}
+
+	var m netlink.Link
+	if conf.LinkContNs {
+		err = netns.Do(func(_ ns.NetNS) error {
+			m, err = netlink.LinkByName(conf.Master)
+			return err
+		})
+	} else {
+		m, err = netlink.LinkByName(conf.Master)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup master %q: %v", conf.Master, err)
+	}
+
+	// due to kernel bug we have to create with tmpName or it might
+	// collide with the name on the host and error out
+	tmpName, err := ip.RandomVethName()
+	if err != nil {
+		return nil, err
+	}
+
+	linkAttrs := netlink.NewLinkAttrs()
+	linkAttrs.MTU = conf.MTU
+	linkAttrs.Name = tmpName
+	linkAttrs.ParentIndex = m.Attrs().Index
+	linkAttrs.Namespace = netlink.NsFd(int(netns.Fd()))
+
+	if conf.Mac != "" {
+		addr, err := net.ParseMAC(conf.Mac)
+		if err != nil {
+			return nil, fmt.Errorf("invalid args %v for MAC addr: %v", conf.Mac, err)
+		}
+		linkAttrs.HardwareAddr = addr
+	}
+
+	mv := &netlink.Macvlan{
+		LinkAttrs: linkAttrs,
+		Mode:      mode,
+	}
+
+	mv.BCQueueLen = conf.BcQueueLen
+
+	if conf.LinkContNs {
+		err = netns.Do(func(_ ns.NetNS) error {
+			return netlink.LinkAdd(mv)
+		})
+	} else {
+		if err = netlink.LinkAdd(mv); err != nil {
+			return nil, fmt.Errorf("failed to create macvlan: %v", err)
+		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to create macvlan: %v", err)
+	}
+
+	err = netns.Do(func(_ ns.NetNS) error {
+		err := ip.RenameLink(tmpName, ifName)
+		if err != nil {
+			_ = netlink.LinkDel(mv)
+			return fmt.Errorf("failed to rename macvlan to %q: %v", ifName, err)
+		}
+		macvlan.Name = ifName
+
+		// Re-fetch macvlan to get all properties/attributes
+		contMacvlan, err := netlink.LinkByName(ifName)
+		if err != nil {
+			return fmt.Errorf("failed to refetch macvlan %q: %v", ifName, err)
+		}
+		macvlan.Mac = contMacvlan.Attrs().HardwareAddr.String()
+		macvlan.Sandbox = netns.Path()
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return macvlan, nil
 }
 ```
 
@@ -563,6 +652,141 @@ func cmdAdd(args *skel.CmdArgs) error {
 bridge不允许包从收到包的端口发出，比如bridge从一个端口收到一个广播报文后，会将其广播到所有其他端口。
 bridge的某个端口打开hairpin mode后允许从这个端口收到的包仍然从这个端口发出。
 这个特性用于NAT场景下，比如docker的nat网络，一个容器访问其自身映射到主机的端口时，包到达bridge设备后走到ip协议栈，经过iptables规则的dnat转换后发现又需要从bridge的收包端口发出，需要开启端口的hairpin mode。
+
+
+### vlan
+```go
+func cmdAdd(args *skel.CmdArgs) error {
+	n, cniVersion, err := loadConf(args)
+	if err != nil {
+		return err
+	}
+
+	netns, err := ns.GetNS(args.Netns)
+	if err != nil {
+		return fmt.Errorf("failed to open netns %q: %v", args.Netns, err)
+	}
+	defer netns.Close()
+
+	// 创建 vlan 设备
+	vlanInterface, err := createVlan(n, args.IfName, netns)
+	if err != nil {
+		return err
+	}
+
+	// run the IPAM plugin and get back the config to apply
+	r, err := ipam.ExecAdd(n.IPAM.Type, args.StdinData)
+	if err != nil {
+		return fmt.Errorf("failed to execute IPAM delegate: %v", err)
+	}
+
+	// Invoke ipam del if err to avoid ip leak
+	defer func() {
+		if err != nil {
+			ipam.ExecDel(n.IPAM.Type, args.StdinData)
+		}
+	}()
+
+	// Convert whatever the IPAM result was into the current Result type
+	result, err := current.NewResultFromResult(r)
+	if err != nil {
+		return err
+	}
+
+	if len(result.IPs) == 0 {
+		return errors.New("IPAM plugin returned missing IP config")
+	}
+	for _, ipc := range result.IPs {
+		// All addresses belong to the vlan interface
+		ipc.Interface = current.Int(0)
+	}
+
+	result.Interfaces = []*current.Interface{vlanInterface}
+
+	err = netns.Do(func(_ ns.NetNS) error {
+		return ipam.ConfigureIface(args.IfName, result)
+	})
+	if err != nil {
+		return err
+	}
+
+	result.DNS = n.DNS
+
+	return types.PrintResult(result, cniVersion)
+}
+
+func createVlan(conf *NetConf, ifName string, netns ns.NetNS) (*current.Interface, error) {
+	vlan := &current.Interface{}
+
+	var m netlink.Link
+	var err error
+	if conf.LinkContNs {
+		err = netns.Do(func(_ ns.NetNS) error {
+			m, err = netlink.LinkByName(conf.Master)
+			return err
+		})
+	} else {
+		m, err = netlink.LinkByName(conf.Master)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup master %q: %v", conf.Master, err)
+	}
+
+	// due to kernel bug we have to create with tmpname or it might
+	// collide with the name on the host and error out
+	tmpName, err := ip.RandomVethName()
+	if err != nil {
+		return nil, err
+	}
+
+	linkAttrs := netlink.NewLinkAttrs()
+	linkAttrs.MTU = conf.MTU
+	linkAttrs.Name = tmpName
+	linkAttrs.ParentIndex = m.Attrs().Index
+	linkAttrs.Namespace = netlink.NsFd(int(netns.Fd()))
+
+	v := &netlink.Vlan{
+		LinkAttrs: linkAttrs,
+		VlanId:    conf.VlanID,
+	}
+
+	if conf.LinkContNs {
+		err = netns.Do(func(_ ns.NetNS) error {
+			return netlink.LinkAdd(v)
+		})
+	} else {
+		err = netlink.LinkAdd(v)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to create vlan: %v", err)
+	}
+
+	err = netns.Do(func(_ ns.NetNS) error {
+		err := ip.RenameLink(tmpName, ifName)
+		if err != nil {
+			return fmt.Errorf("failed to rename vlan to %q: %v", ifName, err)
+		}
+		vlan.Name = ifName
+
+		// Re-fetch interface to get all properties/attributes
+		contVlan, err := netlink.LinkByName(vlan.Name)
+		if err != nil {
+			return fmt.Errorf("failed to refetch vlan %q: %v", vlan.Name, err)
+		}
+		vlan.Mac = contVlan.Attrs().HardwareAddr.String()
+		vlan.Sandbox = netns.Path()
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return vlan, nil
+}
+```
+
 
 ## 实现一个 CNI 插件
 实现一个 CNI 插件首先需要一个 JSON 格式的配置文件，配置文件需要放到每个节点的 /etc/cni/net.d/ 目录，一般命名为 <数字>-<CNI-plugin>.conf.
@@ -1015,7 +1239,6 @@ CNI 插件的测试过程，不需要一定安装一个 K8s 出来，走 K8s CNI
 
 ## 参考
 - https://github.com/containernetworking/plugins
-- https://github.com/k8snetworkplumbingwg/sriov-cni
 - https://github.com/containernetworking/cni/blob/main/SPEC.md
 - [深入解读 CNI：容器网络接口](https://jimmysong.io/blog/cni-deep-dive/)
 - [手写一个Kubernetes CNI网络插件](https://qingwave.github.io/how-to-write-k8s-cni/)

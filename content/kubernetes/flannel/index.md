@@ -16,9 +16,44 @@ Flannel是CoreOS开源的，Overlay模式的CNI网络插件，Flannel在每个�
 
 ## 基本知识
 
-### Vxlan(Virtual Extensible LAN 虚拟可扩展局域网）
-在vlan的基础之上进行的扩展, 可以划分的vlan个数扩大到16M个
+### VLAN（Virtual Local Area Network 虚拟局域网）
+{{<figure src="./vxlan_before_n_after.png#center" width=800px >}}
 
+VLAN具备以下优点：
+
+- 限制广播域：广播域被限制在一个VLAN内，节省了带宽，提高了网络处理能力。
+- 增强局域网的安全性：不同VLAN内的报文在传输时相互隔离，即一个VLAN内的用户不能和其它VLAN内的用户直接通信。
+- 提高了网络的健壮性：故障被限制在一个VLAN内，本VLAN内的故障不会影响其他VLAN的正常工作。
+- 灵活构建虚拟工作组：用VLAN可以划分不同的用户到不同的工作组，同一工作组的用户也不必局限于某一固定的物理范围，网络构建和维护更方便灵活。
+
+| 表头 |                Vlan                |             子网              |
+|:--:|:----------------------------------:|:---------------------------:|
+| 区别 | 1. 划分二层网络 2. 可划分4094个vlan,设备数量不受限制 | 1. 划分三层网络 2. 划分网段数量影响子网设备数量 |
+| 联系 |         同一 vlan 可以划分一或多个网段         |      同一子网可以划分一或多个vlan       |
+
+
+{{<figure src="./vxlan_structure.png#center" width=800px >}}
+
+
+####  VLAN的使用场景
+VLAN的常见使用场景包括：VLAN间用户的二层隔离，VLAN间用户的三层互访
+
+VLAN间用户的二层隔离 
+{{<figure src="./vlan_department.png#center" width=800px >}}
+1. 为了保证部门内员工的位置调整后，访问网络资源的权限不变，可在公司的交换机Switch_1上配置基于IP子网划分VLAN。这样，服务器的不同网段就划分到不同的VLAN，访问服务器不同应用服务的数据流就会隔离，提高了安全性。
+
+{{<figure src="./vlan_company.png#center" width=800px >}}
+2. 某商务楼内有多家公司，为了降低成本，多家公司共用网络资源，各公司分别连接到一台二层交换机的不同接口，并通过统一的出口访问Internet。
+
+
+VLAN间用户的三层互访
+
+{{<figure src="./vlan_access_route.png#center" width=800px >}}
+某小型公司的两个部门分别通过二层交换机接入到一台三层交换机Switch_3，所属VLAN分别为VLAN2和VLAN3，部门1和部门2的用户互通时，需要经过三层交换机。
+可在Switch_1和Switch_2上划分VLAN并将VLAN透传到Switch_3上，然后在Switch_3上为每个VLAN配置一个VLANIF接口，实现VLAN2和VLAN3间的路由。
+
+### Vxlan(Virtual Extensible LAN 虚拟可扩展局域网）
+在vlan的基础之上进行的扩展, 可以划分的vlan个数扩大到16M个. VXLAN采用MAC in UDP（User Datagram Protocol）封装方式，是NVO3（Network Virtualization over Layer 3）中的一种网络虚拟化技术。
 
 在常用的vxlan模式中，涉及到封包和拆包，这也是Flannel网络传输效率相对低的原因。
 
@@ -51,7 +86,7 @@ VNI（VXLAN Network Identifier，VXLAN 网络标识符）: 是一种类似于VLA
 右边的为原始报文 Original Ethernet Frame，左边的即为vxlan封装报文. 
 
 Original Ethernet Frame是原始的报文:  pod1访问pod2的报文，因为是个正常网络报文，包含IP header、Ethernet header、及 payload。
-- playload 就是数据
+- payload 就是数据
 - IP header 很自然也就是pod1及pod2的ip地址信息
 - Ethernet header: 不是pod1及pod2的MAC地址，而应该是两端flannel.1的MAC地址
 
@@ -658,7 +693,7 @@ blackhole 192.168.37.192/26 proto bird
 
 
 ## 参考
-
+- [图文并茂VLAN详解](https://cloud.tencent.com/developer/article/1412795)
 - [VXLAN-原理介绍+报文分析+配置实例 ](https://www.cnblogs.com/FengXingZhe008/p/17335124.html)
 - [Flannel Vxlan封包原理剖析](https://izsk.me/2022/03/25/Kubernetes-Flannel-Vxlan/)
 - [ip route 命令](https://cloud.tencent.com/developer/article/2101102)
