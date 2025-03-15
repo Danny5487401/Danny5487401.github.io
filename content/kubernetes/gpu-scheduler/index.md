@@ -1,7 +1,7 @@
 ---
 title: "Gpu Scheduler"
 date: 2024-10-16T10:37:57+08:00
-summary: "在 Kubernetes 中调度 GPU 资源及 Device Plugin "
+summary: "在 Kubernetes 中调度 GPU 资源, Device Plugin 原理 "
 categories:
   - kubernetes
 tags:
@@ -106,7 +106,7 @@ $  kubectl create -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/
 在 1.8 版本引入了 device plugin 机制，通过插件形式来接入其他资源，设备厂家只需要开发对应的 xxx-device-plugin 就可以将资源接入到 k8s 了。
 
 
-比如 NVIDIA 的device plugin : https://github.com/NVIDIA/k8s-device-plugin/tree/v0.16.2
+比如 NVIDIA 的device plugin: https://github.com/NVIDIA/k8s-device-plugin/tree/v0.16.2
 
 
 ### Device Plugin 原理
@@ -190,6 +190,8 @@ device plugin 插件需要实现以下接口：
 
 
 ### kubelet 注册 device plugin
+
+注册
 ```go
 // https://github.com/kubernetes/kubernetes/blob/40741681a24a5acf9361ec74b97e887a9da3e3e4/pkg/kubelet/cm/devicemanager/plugin/v1beta1/server.go
 func (s *server) Register(ctx context.Context, r *api.RegisterRequest) (*api.Empty, error) {
@@ -241,6 +243,7 @@ func (s *server) runClient(name string, c Client) {
 	}
 }
 ```
+
 ```go
 // https://github.com/kubernetes/kubernetes/blob/25dc4c4f320ecb75b936220c1c66741bce4b9014/pkg/kubelet/cm/devicemanager/plugin/v1beta1/client.go
 
@@ -281,6 +284,7 @@ func (m *ManagerImpl) allocateContainerResources(pod *v1.Pod, container *v1.Cont
 		resource := string(k)
 		needed := int(v.Value())
         // ...
+		// 需要分配的设备
 		allocDevices, err := m.devicesToAllocate(podUID, contName, resource, needed, devicesToReuse[resource])
         // ...
 

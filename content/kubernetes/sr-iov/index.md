@@ -48,6 +48,24 @@ PCI有三种地址空间：PCI I/O空间、PCI内存地址空间和PCI配置空�
 
 一般一类设备在出厂的时候会有相同的一串classid,而classid记录在/sys/bus/pci/devices/*/class文件中
 
+
+### PCIe(Peripheral Component Interconnect Express)
+{{<figure src="./pcie.png#center" width=800px >}}
+
+一种用于连接外设的总线。它于2003年提出来，作为替代PCI和PCI-X的方案，现在已经成了现代CPU和其他几乎所有外设交互的标准或者基石，
+比如，我们马上能想到的GPU，网卡，USB控制器，声卡，网卡等等，这些都是通过PCIe总线进行连接的，然后现在非常常见的基于m.2接口的SSD，也是使用NVMe协议，通过PCIe总线进行连接的，
+除此以外，Thunderbolt 3 ，USB4，甚至最新的CXL互联协议 ，都是基于PCIe的！
+
+### Modalias
+Modalias 是 Linux 内核用来识别硬件设备的一种机制。在 Linux 内核中，硬件设备驱动程序需要能够识别并与之交互的硬件设备。
+Modalias 字符串包含了设备的基本信息，如设备类型、制造商 ID、设备 ID 等，这些信息被内核用来匹配相应的驱动程
+```shell
+# pci 表示设备遵循 PCI 总线标准，后面的键值对分别表示供应商 ID（vender ID）、设备 ID、子供应商 ID（sub-vendor ID）、子设备 ID（sub-device ID）和设备序列号。
+[root@master-01 ~]# cat /sys/devices/pci0000:00/0000:00:00.0/modalias
+pci:v00008086d00007190sv000015ADsd00001976bc06sc00i00
+```
+Modalias 的主要作用是在内核初始化过程中，帮助内核识别新检测到的硬件设备，并找到与之匹配的驱动程序。当内核发现一个新设备时，它会尝试读取设备的 Modalias 属性，然后通过内核的驱动模型来查找匹配的驱动程序。如果找到了匹配的驱动程序，内核将加载该驱动程序，并允许它管理新检测到的设备。
+
 ### /sys/bus/pci/devices 目录介绍
 ```shell
 # sys/class目录下 net/scsi_host/fc_host/infiband_host 等 是/sys/bus/pci/devices/*/class下面pci设备的映射，映射到它们指定的类型中
@@ -402,10 +420,73 @@ intel官方也给出了SR-IOV技术在容器中使用的开源组件，例如：
 {{<figure src="./sr-iov-in-k8s.png#center" width=800px >}}
 节点上的vf设备需要提前生成，然后由 sriov-device-plugin将vf设备发布到k8s集群中。在pod创建的时候，由kubelet调用multus-cni，multus-cni分别调用默认cni和sriov-cni插件为pod构建网络环境。sriov-cni就是将主机上的vf设备添加进容器的网络命名空间中并配置ip地址。
 
-### sriov-device-plugin 使用
+### sriov-device-plugin-->vf 分配
 
+```go
+// https://github.com/k8snetworkplumbingwg/sriov-network-device-plugin/blob/d7bd80381b00f5e0818cabcca69edb5f53149bd6/pkg/resources/server.go
+func (rs *resourceServer) Allocate(ctx context.Context, rqt *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
+	glog.Infof("Allocate() called with %+v", rqt)
+	resp := new(pluginapi.AllocateResponse)
 
-### sriov-cni使用
+	for _, container := range rqt.ContainerRequests {
+		containerResp := new(pluginapi.ContainerAllocateResponse)
+
+		envs, err := rs.getEnvs(container.DevicesIDs)
+		if err != nil {
+			glog.Errorf("failed to get environment variables for device IDs %v: %v", container.DevicesIDs, err)
+			return nil, err
+		}
+
+		if rs.useCdi {
+			containerResp.Annotations, err = rs.cdi.CreateContainerAnnotations(
+				container.DevicesIDs, rs.resourceNamePrefix, rs.resourcePool.GetCDIName())
+			if err != nil {
+				return nil, fmt.Errorf("can't create container annotation: %s", err)
+			}
+		} else {
+			containerResp.Devices = rs.resourcePool.GetDeviceSpecs(container.DevicesIDs)
+			containerResp.Mounts = rs.resourcePool.GetMounts(container.DevicesIDs)
+		}
+        // 保存分配的信息到文件中
+		err = rs.resourcePool.StoreDeviceInfoFile(rs.resourceNamePrefix, container.DevicesIDs)
+		if err != nil {
+			glog.Errorf("failed to store device info file for device IDs %v: %v", container.DevicesIDs, err)
+			return nil, err
+		}
+
+		containerResp.Envs = envs
+		resp.ContainerResponses = append(resp.ContainerResponses, containerResp)
+	}
+	glog.Infof("AllocateResponse send: %+v", resp)
+	return resp, nil
+}
+
+```
+这里 netdevice 作为例子
+```go
+func (rp *netResourcePool) GetDeviceSpecs(deviceIDs []string) []*pluginapi.DeviceSpec {
+	glog.Infof("GetDeviceSpecs(): for devices: %v", deviceIDs)
+	devSpecs := make([]*pluginapi.DeviceSpec, 0)
+
+	devicePool := rp.GetDevicePool()
+
+	// Add device driver specific and rdma specific devices
+	for _, id := range deviceIDs {
+		if dev, ok := devicePool[id]; ok {
+			netDev := dev.(types.PciNetDevice) // convert generic HostDevice to PciNetDevice
+			newSpecs := netDev.GetDeviceSpecs()
+			for _, ds := range newSpecs {
+				if !rp.DeviceSpecExist(devSpecs, ds) {
+					devSpecs = append(devSpecs, ds)
+				}
+			}
+		}
+	}
+	return devSpecs
+}
+```
+
+### sriov-cni-->将SR-IOV VF 放入容器Namespace
 ```go
 func cmdAdd(args *skel.CmdArgs) error {
 	if err := config.SetLogging(args.StdinData, args.ContainerID, args.Netns, args.IfName); err != nil {
@@ -478,6 +559,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	}}
 
 	if !netConf.DPDKMode {
+		// 主要将 vf 放入容器 namespace
 		err = sm.SetupVF(netConf, args.IfName, netns)
 
 		if err != nil {
@@ -700,8 +782,9 @@ func getVfInfo(vfPci string) (string, int, error) {
 - https://github.com/k8snetworkplumbingwg/sriov-cni
 - https://github.com/k8snetworkplumbingwg/sriov-network-device-plugin/blob/master/docs/vf-setup.md
 - https://www.howtoforge.com/tutorial/how-to-configure-high-availability-and-network-bonding-on-linux/
-- [SR-IOV 技术及在Pod 中使用](https://www.chenshaowen.com/blog/sr-iov-technique.html)
+- [SR-IOV 技术及在 Pod 中使用](https://www.chenshaowen.com/blog/sr-iov-technique.html)
 - [SR-IOV vs DPDK](https://feisky.gitbooks.io/sdn/content/linux/sr-iov.html)
 - [BONDING_OPTS参数详细说明](https://blog.csdn.net/cuichongxin/article/details/116160277)
 - [LSPCI具体解释分析](https://www.cnblogs.com/yxwkf/p/3996202.html)
 - [Single Root IO Virtualization (SR-IOV)二：SR-IOV 配置](https://blog.csdn.net/lincolnjunior_lj/article/details/131683558)
+- [Linux 内核 Modalias 解析详尽教程](https://my.oschina.net/emacs_8808488/blog/17312648)
