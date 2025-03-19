@@ -13,6 +13,7 @@ tags:
 
 
 CNI（容器网络接口）规范为容器运行时和网络插件之间提供了一个通用的接口.
+CNI 的目的是将网络配置与容器平台解耦，在不同的平台只需要使用不同的网络插件，其他容器化的内容仍然可以复用。
 
 
 CNI 规范包含以下几个核心组成部分：
@@ -23,9 +24,24 @@ CNI 规范包含以下几个核心组成部分：
 - 插件委派：允许插件将特定功能委托给其他插件执行。
 - 结果返回：定义了插件执行完成后如何向运行时返回结果的数据格式
 
+
+如果没有 CNI，我们需要手动执行以下操作：
+
+- 创建接口（物理网络接口和虚拟网络接口）
+- 创建 veth 对
+- 设置命名空间网络
+- 设置静态路由
+- 配置以太网桥（eth bridge）
+- 分配 IP 地址
+- 创建 NAT 规则。
+
 ## CNI Plugin
 github.com/containernetworking/plugins 
+
 ### 插件分类
+
+{{<figure src="./plugin_category.png#center" width=800px >}}
+
 Main 插件：创建具体的网络设备
 - bridge: Creates a bridge, adds the host and the container to it.
 - ipvlan: 所有的虚拟接口都有相同的 mac 地址，而拥有不同的 ip 地址.
@@ -315,7 +331,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	}
 
 	// If an IP was requested that wasn't fulfilled, fail
-	if len(requestedIPs) != 0 {
+	if len(requestedIPs) != 0 { // 如果还有需要分配的ip不在rangeset
 		for _, alloc := range allocs {
 			_ = alloc.Release(args.ContainerID, args.IfName)
 		}
@@ -455,7 +471,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	if err != nil {
 		return err
 	}
-
+    // 如果 ipam 类型不为空则为3层, 这里一般是 host-local
 	isLayer3 := n.IPAM.Type != ""
 
 	if n.IsDefaultGW {
@@ -476,7 +492,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return fmt.Errorf("failed to open netns %q: %v", args.Netns, err)
 	}
 	defer netns.Close()
-    // 创建veth pair
+    // 创建 veth pair
 	hostInterface, containerInterface, err := setupVeth(netns, br, args.IfName, n.MTU, n.HairpinMode, n.Vlan)
 	if err != nil {
 		return err
@@ -846,6 +862,7 @@ const (
 ```
 
 ## cni 调用入口 cri
+{{<figure src="./cni-process.png#center" width=800px >}}
 
 加载配置初始化 network: 数据用来传给 cni 插件
 ```go

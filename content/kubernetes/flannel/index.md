@@ -214,7 +214,6 @@ ENCAPTYPE := [ mpls | ip | ip6 ]
 ENCAPHDR := [ MPLSLABEL ]
 
 # 添加路由写法: ip route add [network/prefix] via [gateway] dev [interface]
-
 # 将IP地址以10.0.0.开头的数据包通过网关192.168.0.1发往网卡接口eth0，可以根据实际需求修改IP地址、网关和网卡接口
 $ ip route add 10.0.0.0/24 via 192.168.0.1 dev eth0
 
@@ -223,6 +222,85 @@ ip route add default via 192.168.1.254
 
 # 检查与特定目标IP地址的连通性
 ip route get 8.8.8.8
+
+# 设备管理
+[root@master-01 ~]# ip link help
+Usage: ip link add [link DEV] [ name ] NAME
+                   [ txqueuelen PACKETS ]
+                   [ address LLADDR ]
+                   [ broadcast LLADDR ]
+                   [ mtu MTU ] [index IDX ]
+                   [ numtxqueues QUEUE_COUNT ]
+                   [ numrxqueues QUEUE_COUNT ]
+                   type TYPE [ ARGS ]
+
+       ip link delete { DEVICE | dev DEVICE | group DEVGROUP } type TYPE [ ARGS ]
+
+       ip link set { DEVICE | dev DEVICE | group DEVGROUP }
+	                  [ { up | down } ]
+	                  [ type TYPE ARGS ]
+	                  [ arp { on | off } ]
+	                  [ dynamic { on | off } ]
+	                  [ multicast { on | off } ]
+	                  [ allmulticast { on | off } ]
+	                  [ promisc { on | off } ]
+	                  [ trailers { on | off } ]
+	                  [ carrier { on | off } ]
+	                  [ txqueuelen PACKETS ]
+	                  [ name NEWNAME ]
+	                  [ address LLADDR ]
+	                  [ broadcast LLADDR ]
+	                  [ mtu MTU ]
+	                  [ netns { PID | NAME } ]
+	                  [ link-netnsid ID ]
+			  [ alias NAME ]
+	                  [ vf NUM [ mac LLADDR ]
+				   [ vlan VLANID [ qos VLAN-QOS ] [ proto VLAN-PROTO ] ]
+				   [ rate TXRATE ]
+				   [ max_tx_rate TXRATE ]
+				   [ min_tx_rate TXRATE ]
+				   [ spoofchk { on | off} ]
+				   [ query_rss { on | off} ]
+				   [ state { auto | enable | disable} ] ]
+				   [ trust { on | off} ] ]
+				   [ node_guid { eui64 } ]
+				   [ port_guid { eui64 } ]
+			  [ xdp { off |
+				  object FILE [ section NAME ] [ verbose ] |
+				  pinned FILE } ]
+			  [ master DEVICE ][ vrf NAME ]
+			  [ nomaster ]
+			  [ addrgenmode { eui64 | none | stable_secret | random } ]
+	                  [ protodown { on | off } ]
+
+       ip link show [ DEVICE | group GROUP ] [up] [master DEV] [vrf NAME] [type TYPE]
+
+       ip link xstats type TYPE [ ARGS ]
+
+       ip link afstats [ dev DEVICE ]
+
+       ip link help [ TYPE ]
+
+TYPE := { vlan | veth | vcan | dummy | ifb | macvlan | macvtap |
+          bridge | bond | team | ipoib | ip6tnl | ipip | sit | vxlan |
+          gre | gretap | ip6gre | ip6gretap | vti | nlmon | team_slave |
+          bond_slave | ipvlan | geneve | bridge_slave | vrf | macsec }
+# 创建网络命名空间 ns1
+ip netns add ns1
+
+# 网卡连接到网桥上
+ip link set eth0 master cni0
+
+# 从网桥解绑eth0
+ip link set eth0 nomaster
+
+# 创建 veth pair 设备，一端叫eth0 ，另一端叫做 vethb4963f3
+ip link add eth0 type veth peer name vethb4963f3
+
+# 配置虚拟网卡的IP并启用
+ip netns exec ns1 ip addr add 10.1.1.2/24 dev vethDemo0
+
+
 ```
 
 
@@ -287,6 +365,84 @@ FLANNEL_IPMASQ=true
 ```
 3. flanneld再将本主机获取的subnet以及用于主机间通信的Public IP，同样通过kubernetes API或者etcd存储起来。
 4. flannel利用各种backend ，例如udp，vxlan，host-gw等等，跨主机转发容器间的网络流量，完成容器间的跨主机通信。
+```shell
+[root@master-01 ~]# cat /etc/cni/net.d/10-flannel.conflist
+{
+  "name": "cbr0",
+  "cniVersion": "0.3.1",
+  "plugins": [
+    {
+      "type": "flannel",
+      "delegate": {
+        "hairpinMode": true,
+        "isDefaultGateway": true
+      }
+    },
+    {
+      "type": "portmap",
+      "capabilities": {
+        "portMappings": true
+      }
+    }
+  ]
+}
+```
+```go
+func cmdAdd(args *skel.CmdArgs) error {
+	n, err := loadFlannelNetConf(args.StdinData)
+	if err != nil {
+		return fmt.Errorf("loadFlannelNetConf failed: %w", err)
+	}
+	fenv, err := loadFlannelSubnetEnv(n.SubnetFile)
+	if err != nil {
+		return fmt.Errorf("loadFlannelSubnetEnv failed: %w", err)
+	}
+
+    // 校验操作
+
+	return doCmdAdd(args, n, fenv)
+}
+
+func doCmdAdd(args *skel.CmdArgs, n *NetConf, fenv *subnetEnv) error {
+	n.Delegate["name"] = n.Name
+
+	// 默认使用 bridge 进行下一步
+	if !hasKey(n.Delegate, "type") {
+		n.Delegate["type"] = "bridge"
+	}
+
+	if !hasKey(n.Delegate, "ipMasq") {
+		// if flannel is not doing ipmasq, we should
+		ipmasq := !*fenv.ipmasq
+		n.Delegate["ipMasq"] = ipmasq
+	}
+
+	if !hasKey(n.Delegate, "mtu") {
+		mtu := fenv.mtu
+		n.Delegate["mtu"] = mtu
+	}
+
+	if n.Delegate["type"].(string) == "bridge" {
+		if !hasKey(n.Delegate, "isGateway") {
+			n.Delegate["isGateway"] = true
+		}
+	}
+	if n.CNIVersion != "" {
+		n.Delegate["cniVersion"] = n.CNIVersion
+	}
+
+	ipam, err := getDelegateIPAM(n, fenv)
+	if err != nil {
+		return fmt.Errorf("failed to assemble Delegate IPAM: %w", err)
+	}
+	n.Delegate["ipam"] = ipam
+	fmt.Fprintf(os.Stderr, "\n%#v\n", n.Delegate)
+
+	// 这里实际调用 bridge 进行操作
+	return delegateAdd(args.ContainerID, n.DataDir, n.Delegate)
+}
+
+```
 
 ## 三种主要的 backend
 Flannel的数据包在集群节点间转发是由backend实现的，目前，已经支持核心官方推荐的模式有UDP、VXLAN、HOST-GW，以及扩展试用实验的模式有 IPIP，AWS VPC、GCE、Ali VPC、Tencent VPC等路由，其中VXLAN模式在实际的生产中使用最多。
@@ -305,7 +461,6 @@ Directrouting：同时支持VXLAN和Host-GW工作模式
 * 一种是用户态的 udp，这种是最早期的实现；
 * 然后是内核的 Vxlan，这两种都算是 overlay 的方案。Vxlan 的性能会比较好一点，但是它对内核的版本是有要求的，需要内核支持 Vxlan 的特性功能；
 * 如果你的集群规模不够大，又处于同一个二层域，也可以选择采用 host-gw 的方式。这种方式的 backend 基本上是由一段广播路由规则来启动的，性能比较高
-
 
 
 
@@ -689,7 +844,8 @@ blackhole 192.168.37.192/26 proto bird
 ### hostgw 
 它的原理非常简单，直接添加路由，将目的主机当做网关，直接路由原始封包。
 
-例如，我们从etcd中监听到一个EventAdded事件subnet为10.1.15.0/24被分配给主机Public IP 192.168.0.100，hostgw要做的工作就是在本主机上添加一条目的地址为10.1.15.0/24，网关地址为192.168.0.100，输出设备为上文中选择的集群间交互的网卡即可。对于EventRemoved事件，只需删除对应的路由
+例如，我们从etcd中监听到一个EventAdded事件subnet为10.1.15.0/24被分配给主机Public IP 192.168.0.100，hostgw要做的工作就是在本主机上添加一条目的地址为10.1.15.0/24，网关地址为192.168.0.100，输出设备为上文中选择的集群间交互的网卡即可。
+对于EventRemoved事件，只需删除对应的路由.
 
 
 ## 参考

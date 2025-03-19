@@ -331,6 +331,66 @@ xmit_hash_policy
 
 ### bond 创建的一般流程
 
+```shell
+# 配置逻辑网卡bond0
+$ cat  /etc/sysconfig/network-scripts/ifcfg-bond0
+DEVICE=bond0
+
+BOOTPROTO=static
+
+IPADDR=192.168.10.1
+
+NETMASK=255.255.255.0
+
+GATEWAY=192.168.10.254
+
+ONBOOT=yes
+
+TYPE=Ethernet
+
+ 
+
+$ cat /etc/sysconfig/network-scripts/ifcfg-eth0 
+
+DEVICE=eth0
+
+BOOTPROTO=static
+
+ONBOOT=yes
+
+MASTER=bond0
+
+SLAVE=yes  // 可以没有此字段，就需要开机执行ifenslave bond0 eth0 eth1命令了
+
+$ cat /etc/sysconfig/network-scripts/ifcfg-eth1 
+
+DEVICE=eth1
+
+BOOTPROTO=static
+
+ONBOOT=yes
+
+MASTER=bond0
+
+SLAVE=yes
+
+# 加载模块，让系统支持bonding
+$ cat /etc/ modprobe.conf
+... 
+alias bond0 bonding
+
+options bond0 miimon=100 mode=0
+
+$ cat /etc/rc.d/rc.local
+...
+ifenslave bond0 eth0 eth1
+route add -net 172.31.3.254 netmask 255.255.255.0 bond0
+
+$ service  network  restart
+
+
+```
+
 Step 1、创建slave口
 
 Step 2、slave口配置网卡队列、网口启动
@@ -367,7 +427,8 @@ func createBond(bondName string, bondConf *bondingConfig, nspath string, ns ns.N
 			return nil, fmt.Errorf("Failed to move the links (%+v) in container network namespace, error: %+v", bondConf.Links, err)
 		}
 	}
-
+    
+	// 获取需要绑定的网络设备
 	linkObjectsToBond, err := getLinkObjectsFromConfig(bondConf, netNsHandle, false)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to retrieve link objects from configuration file (%+v), error: %+v", bondConf, err)
@@ -381,12 +442,13 @@ func createBond(bondName string, bondConf *bondingConfig, nspath string, ns ns.N
 	if bondConf.FailOverMac < 0 || bondConf.FailOverMac > 2 {
 		return nil, fmt.Errorf("FailOverMac mode should be 0, 1 or 2 actual: %+v", bondConf.FailOverMac)
 	}
-	
+	// 创建 网卡绑定
 	bondLinkObj, err := createBondedLink(bondName, bondConf.Mode, bondConf.Miimon, bondConf.MTU, bondConf.FailOverMac, netNsHandle)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create bonded link (%+v), error: %+v", bondName, err)
 	}
 
+	// 网卡绑定添加slave口
 	err = attachLinksToBond(bondLinkObj, linkObjectsToBond, netNsHandle)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to attached links to bond, error: %+v", err)
@@ -409,8 +471,64 @@ func createBond(bondName string, bondConf *bondingConfig, nspath string, ns ns.N
 	return bond, nil
 
 }
-```
 
+func getLinkObjectsFromConfig(bondConf *bondingConfig, netNsHandle *netlink.Handle, releaseLinks bool) ([]netlink.Link, error) {
+	linkNames := []string{}
+	for _, linkName := range bondConf.Links {
+		s, ok := linkName["name"].(string)
+		if !ok {
+			return nil, fmt.Errorf("failed to find link name")
+		}
+		linkNames = append(linkNames, s)
+	}
+
+	// 保证2个网络设备以上
+	if len(linkNames) < 2 {
+		return nil, fmt.Errorf("Bonding requires at least two links, we have %+v", len(linkNames))
+	}
+
+	linkObjectsToBond := []netlink.Link{}
+	for _, linkName := range linkNames {
+		linkObject, err := netNsHandle.LinkByName(linkName)
+		if err != nil {
+			// Do not fail if device in container assigned to the bond has been deleted.
+			// This device might have been deleted by another plugin.
+			_, ok := err.(netlink.LinkNotFoundError)
+			if !ok || !releaseLinks {
+				return nil, fmt.Errorf("Failed to confirm that link (%+v) exists, error: %+v", linkName, err)
+			}
+		} else {
+			linkObjectsToBond = append(linkObjectsToBond, linkObject)
+		}
+	}
+
+	return linkObjectsToBond, nil
+}
+
+func attachLinksToBond(bondLinkObj *netlink.Bond, linkObjectsToBond []netlink.Link, netNsHandle *netlink.Handle) error {
+	err := util.HandleMacDuplicates(linkObjectsToBond, netNsHandle)
+	if err != nil {
+		return fmt.Errorf("Failed to handle duplicated macs on link slaves, error: %+v", err)
+	}
+
+	bondLinkIndex := bondLinkObj.LinkAttrs.Index
+	for _, linkObject := range linkObjectsToBond {
+		err = netNsHandle.LinkSetDown(linkObject)
+		if err != nil {
+			return fmt.Errorf("Failed to set link: %+v DOWN, error: %+v", linkObject.Attrs().Name, err)
+		}
+		err = netNsHandle.LinkSetMasterByIndex(linkObject, bondLinkIndex)
+		if err != nil {
+			return fmt.Errorf("Failed to set link: %+v MASTER, master index used: %+v, error: %+v", linkObject.Attrs().Name, bondLinkIndex, err)
+		}
+		err = netNsHandle.LinkSetUp(linkObject)
+		if err != nil {
+			return fmt.Errorf("Failed to set link: %+v UP, error: %+v", linkObject.Attrs().Name, err)
+		}
+	}
+	return nil
+}
+```
 
 ## SR-IOV 在 k8s 中应用
 
