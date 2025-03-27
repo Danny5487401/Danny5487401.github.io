@@ -18,6 +18,13 @@ Flannel是CoreOS开源的，Overlay模式的CNI网络插件，Flannel在每个�
 
 ### VLAN（Virtual Local Area Network 虚拟局域网）
 {{<figure src="./vxlan_before_n_after.png#center" width=800px >}}
+解决广播问题和安全问题的两种方式
+- 物理隔离: 配置单独的子网.
+- 虚拟隔离: VLAN
+
+我们可以设置交换机每个口所属的VLAN。如果某个口坐的是程序员，他们属于VLAN 10；如果某个口坐的是人事，他们属于VLAN 20；如果某个口坐的是财务，他们属于VLAN 30。这样，财务发的包，交换机只会转发到VLAN 30的口上。程序员啊，你就监听VLAN 10吧，里面除了代码，啥都没有。
+
+而且对于交换机来讲，每个VLAN的口都是可以重新设置的。一个财务走了，把他所在座位的口从VLAN 30移除掉，来了一个程序员，坐在财务的位置上，就把这个口设置为VLAN 10，十分灵活。
 
 VLAN具备以下优点：
 
@@ -170,6 +177,15 @@ iproute2的核心命令是ip.
 {{<figure src="./net-tools_vs_iproute2.png#center" width=800px >}}
 {{<figure src="./ip_command.png#center" width=800px >}}
 
+
+一张路由表中会有多条路由规则。每一条规则至少包含这三项信息。
+
+1. 目的网络：这个包想去哪儿？
+2. 出口设备：将包从哪个口扔出去？
+3. 下一跳网关：下一个路由器的地址。
+
+
+静态路由配置
 ```shell
 # 路由管理
 [root@worker-01 ~]# ip route help
@@ -214,15 +230,27 @@ ENCAPTYPE := [ mpls | ip | ip6 ]
 ENCAPHDR := [ MPLSLABEL ]
 
 # 添加路由写法: ip route add [network/prefix] via [gateway] dev [interface]
-# 将IP地址以10.0.0.开头的数据包通过网关192.168.0.1发往网卡接口eth0，可以根据实际需求修改IP地址、网关和网卡接口
-$ ip route add 10.0.0.0/24 via 192.168.0.1 dev eth0
+$ ip route add 10.176.48.0/20 via 10.173.32.1 dev eth0，# 就说明要去10.176.48.0/20这个目标网络，要从eth0端口出去，经过10.173.32.1。
 
 # 设置系统默认路由
-ip route add default via 192.168.1.254 
+$ ip route add default via 192.168.1.254 
 
 # 检查与特定目标IP地址的连通性
-ip route get 8.8.8.8
+$ ip route get 8.8.8.8
 
+# 在真实的复杂的网络环境中，除了可以根据目的ip地址配置路由外，还可以根据多个参数来配置路由，这就称为策略路由
+
+# 表示从192.168.1.10/24这个网段来的，使用table 10中的路由表，而从192.168.2.0/24网段来的，使用table20的路由表
+$ ip rule add from 192.168.1.0/24 table 10 
+$ ip rule add from 192.168.2.0/24 table 20
+
+# 下一跳有两个地方，分别是100.100.100.1和200.200.200.1，权重分别为1比2。
+$ ip route add default scope global nexthop via 100.100.100.1 weight 1 nexthop via 200.200.200.1 weight 2
+```
+
+
+
+```shell
 # 设备管理
 [root@master-01 ~]# ip link help
 Usage: ip link add [link DEV] [ name ] NAME

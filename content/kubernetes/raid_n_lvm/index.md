@@ -637,6 +637,78 @@ RAID 10 是组合 RAID 1 和 RAID 0 形成的.
 mdadm 是一个用于创建、管理、监控RAID设备的工具，它使用Linux中的md驱动.
 ```shell
 # mdadm 使用
+[root@master-01 ~]# yum install -y mdadm
+[root@master-01 ~]# mdadm --help
+mdadm is used for building, managing, and monitoring
+Linux md devices (aka RAID arrays)
+Usage: mdadm --create device options...
+            Create a new array from unused devices.
+       mdadm --assemble device options...
+            Assemble a previously created array.
+       mdadm --build device options...
+            Create or assemble an array without metadata.
+       mdadm --manage device options...
+            make changes to an existing array.
+       mdadm --misc options... devices
+            report on or modify various md related devices.
+       mdadm --grow options device
+            resize/reshape an active array
+       mdadm --incremental device
+            add/remove a device to/from an array as appropriate
+       mdadm --monitor options...
+            Monitor one or more array for significant changes.
+       mdadm device options...
+            Shorthand for --manage.
+Any parameter that does not start with '-' is treated as a device name
+or, for --examine-bitmap, a file name.
+The first such name is often the name of an md device.  Subsequent
+names are often names of component devices.
+
+ For detailed help on the above major modes use --help after the mode
+ e.g.
+         mdadm --assemble --help
+ For general help on options use
+         mdadm --help-options
+
+# 查看查看RAID信息
+$ mdadm --query --detail /dev/md0
+/dev/md0:
+           Version : 1.2
+     Creation Time : Thu Mar 27 11:34:48 2025
+        Raid Level : raid10
+        Array Size : 9376453632 (8942.08 GiB 9601.49 GB)
+     Used Dev Size : 3125484544 (2980.69 GiB 3200.50 GB)
+      Raid Devices : 6
+     Total Devices : 6
+       Persistence : Superblock is persistent
+
+     Intent Bitmap : Internal
+
+       Update Time : Thu Mar 27 11:43:28 2025
+             State : active, resyncing 
+    Active Devices : 6
+   Working Devices : 6
+    Failed Devices : 0
+     Spare Devices : 0
+
+            Layout : near=2
+        Chunk Size : 512K
+
+Consistency Policy : bitmap
+
+     Resync Status : 1% complete
+
+              Name : 主机名:0  (local to host 主机名)
+              UUID : 79ae7670:6937e95c:f53b7106:2d16618f
+            Events : 608
+
+    Number   Major   Minor   RaidDevice State
+       0     259        5        0      active sync set-A   /dev/rd0
+       1     259        0        1      active sync set-B   /dev/rd1
+       2     259        1        2      active sync set-A   /dev/rd2
+       3     259        2        3      active sync set-B   /dev/rd3
+       4     259        3        4      active sync set-A   /dev/rd4
+       5     259        4        5      active sync set-B   /dev/rd5        
 
 ## Create模式:使用空闲的设备创建一个新的阵列，每个设备具有元数据块
 ## 用法：mdadm –create md-device –chunk=X –level=Y –raid-devices=Z devices
