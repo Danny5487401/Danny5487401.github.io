@@ -17,7 +17,7 @@ Flannel是CoreOS开源的，Overlay模式的CNI网络插件，Flannel在每个�
 ## 基本知识
 
 ### VLAN（Virtual Local Area Network 虚拟局域网）
-{{<figure src="./vxlan_before_n_after.png#center" width=800px >}}
+{{<figure src="./vlan_before_n_after.png#center" width=800px >}}
 解决广播问题和安全问题的两种方式
 - 物理隔离: 配置单独的子网.
 - 虚拟隔离: VLAN
@@ -39,7 +39,7 @@ VLAN具备以下优点：
 | 联系 |         同一 vlan 可以划分一或多个网段         |      同一子网可以划分一或多个vlan       |
 
 
-{{<figure src="./vxlan_structure.png#center" width=800px >}}
+{{<figure src="./vlan_structure.png#center" width=800px >}}
 
 
 ####  VLAN的使用场景
@@ -330,6 +330,17 @@ ip netns exec ns1 ip addr add 10.1.1.2/24 dev vethDemo0
 
 
 ```
+
+```shell
+[root@master-01 ~]# ip addr show flannel.1
+7: flannel.1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UNKNOWN group default
+    link/ether 0a:08:b0:d6:65:bc brd ff:ff:ff:ff:ff:ff
+    inet 192.168.0.0/32 scope global flannel.1
+       valid_lft forever preferred_lft forever
+    inet6 fe80::808:b0ff:fed6:65bc/64 scope link
+       valid_lft forever preferred_lft forever
+```
+- <BROADCAST,MULTICAST,UP,LOWER_UP> 是 net_device flags 网络设备的状态标识: UP 表示网卡处于启动的状态；BROADCAST 表示这个网卡有广播地址，可以发送广播包；MULTICAST 表示网卡可以发送多播包；LOWER_UP 表示 L1 是启动的，也即网线插着呢。
 
 
 
@@ -772,7 +783,7 @@ Flannel为每个主机提供独立的子网，整个集群的网络信息存储�
     veth addrgenmode eui64 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535
     
 [root@worker-01 ~]# ip route
-default via 192.168.1.1 dev eth0 # default 这是一条默认路由。当系统需要发送数据包到不在其他特定路由规则中的目标地址时，会使用这条路由. via 192.168.1.1 默认路由的下一跳（网关）是192.168.1.1。所有非本地网络的数据包都将通过这个地址转发。dev eth0 数据包将通过名为 etho 的网络接口发送。
+default via 192.168.1.1 dev eth0 # default 这是一条默认路由。当系统需要发送数据包到不在其他特定路由规则中的目标地址时，会使用这条路由. via 192.168.1.1 默认路由的下一跳（网关）是192.168.1.1。所有非本地网络的数据包都将通过这个地址转发。dev eth0 数据包将通过名为 eth0 的网络接口发送。
 192.168.0.0/16 via 192.168.1.1 dev eth0
 192.168.1.0/24 dev eth0 proto kernel scope link src 192.168.1.7 #  192.168.1.0/24 这条路由规则适用于IP地址范围为192.168.1.0到192.168.1.255的网络. dev eth0: 数据包将通过名为 eth0 的网络接口发送. proto kernel这条路由是由内核自动添加的. scope link: 这是一个链路范围的路由，意味着目标地址在直接连接的网络上。 src 192.168.1.7: 当从这个接口发送数据包时，源IP地址将是 192.168.1.7
 

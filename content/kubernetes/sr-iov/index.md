@@ -186,7 +186,7 @@ Linux Kernel version 3.8.x 及以上版本可以通过上述调整 sriov_numvfs 
 如果VF已经被放入了其他网络名字空间，那么net目录下会显示为空，例如上图中的virtfn0。
 
 
-## 网卡 bond
+## 网卡绑定 bond
 
 {{<figure src="./bond.png#center" width=800px >}}
 
@@ -277,7 +277,7 @@ const (
 
 LACP（Link Aggregation Control Protocol）链路聚合包含两种类型
 - 静态 LACP 模式链路聚合: Eth-Trunk 接口的建立，成员接口的加入，都是由手工配置完成的
-- 动态 LACP 模式链路: Eth-Trunk 接口的建立，成员接口的加入，活动接口的选择完全由LACP 协议通过协商完成。
+- 动态 LACP 模式链路: Eth-Trunk 接口的建立，成员接口的加入，活动接口的选择完全由 LACP 协议通过协商完成。
 
 链路聚合控制的相关参数
 - Aggregator ID： 在一个设备上，能进行多组聚合，即有多个Aggregator，为了区分这些Aggregator，给每个Aggregator分配了一个聚合ID（Aggregator ID），为一个16位整数

@@ -1,7 +1,7 @@
 ---
 title: "存储: Raid 和 lvm, NVMe"
 date: 2025-02-21T08:34:31+08:00
-summary: RAID(Redundant Array of Independent Disks 独立硬盘冗余阵列, lvm(Logical Volume Manager),nvme(Non-Volatile Memory Express 非易失性内存主机控制器接口规范) 在k8s中应用
+summary: RAID(Redundant Array of Independent Disks 独立硬盘冗余阵列, lvm(Logical Volume Manager), nvme(Non-Volatile Memory Express 非易失性内存主机控制器接口规范) 在k8s中应用
 categories:
   - kubernetes
   - raid
@@ -9,24 +9,42 @@ categories:
 ---
 
 ## 基本知识
-### udev机制
+### udev-->Dynamic device management 设备管理工具
+```shell
+[root@master-01 ~]# man udev
+```
 udev 是 Linux 2.6 内核里的一个功能，它替代了原来的 devfs，成为当前 Linux 默认的设备管理工具。
 
 udev机制是Linux kernel的设备管理机制. 当内核检测到设备插拔后, 会发送事件给用户态的udevd进程. 用户态udevd进程根据事件信息匹配不同规则从而进行不同的处理逻辑
 udev规则文件的扩展名为.rules, 主要位于两个目录:
 
 - /etc/udev/rules.d/: 自定义规则
-- /usr/lib/udev/rules.d/: 系统自带规则
+- /usr/lib/udev/rules.d/ 或则 /usr/local/lib/udev/rules.d/ : 系统自带规则
+- /run/udev/rules.d: 运行时规则目录
 
 在规则文件里，除了以“#”开头的行（注释），所有的非空行都被视为一条规则，但是一条规则不能扩展到多行。
-规则都是由多个 键值对（key-value pairs）组成，并由逗号隔开，键值对可以分为 条件匹配键值对( 以下简称“匹配键 ”) 和 赋值键值对( 以下简称“赋值键 ”)，一条规则可以有多条匹配键和多条赋值键。
+规则都是由多个 键值对（key-value pairs）组成，并由逗号隔开，键值对可以分为 条件匹配键值对( 以下简称“匹配键 match”) 和 赋值键值对( 以下简称“赋值键assignment ”)，一条规则可以有多条匹配键和多条赋值键。
 匹配键是匹配一个设备属性的所有条件，当一个设备的属性匹配了该规则里所有的匹配键，就认为这条规则生效，然后按照赋值键的内容，执行该规则的赋值。
 ```shell
+[root@master-01 ~]# udevadm --help
+udevadm [--help] [--version] [--debug] COMMAND [COMMAND OPTIONS]
+
+Send control commands or test the device manager.
+
+Commands:
+  info          Query sysfs or the udev database
+  trigger       Request events from the kernel
+  settle        Wait for pending udev events
+  control       Control the udev daemon
+  monitor       Listen to kernel and udev events
+  test          Test an event run
+  test-builtin  Test a built-in command
+  
 # 重新加载规则文件
 udevadm control --reload
 ```
 
-#### udev 规则的匹配键
+#### udev 规则的 match 匹配键
 
 ACTION： 事件 (uevent) 的行为，例如：add( 添加设备 )、remove( 删除设备 )。
 
@@ -42,29 +60,29 @@ DRIVER： 设备在 devpath 里的设备驱动名称，例如：ide-cdrom。
 
 ID： 设备在 devpath 里的识别号。
 
-SYSFS{filename}： 设备的 devpath 路径下，设备的属性文件“filename”里的内容。
 
-例如：SYSFS{model}==“ST936701SS”表示：如果设备的型号为 ST936701SS，则该设备匹配该 匹配键。
-
-在一条规则中，可以设定最多五条 SYSFS 的 匹配键。
-
-ENV{key}： 环境变量。在一条规则中，可以设定最多五条环境变量的 匹配键。
+ENV{key}： 匹配设置属性。
 
 PROGRAM：调用外部命令。
 
-RESULT： 外部命令 PROGRAM 的返回结果。例如：
+RESULT： 外部命令 PROGRAM 的返回结果
 
+```shell
+
+# 调用外部命令/lib/udev/scsi_id查询设备的SCSIID，如果返回结果为35000c50000a7ef67，则该设备匹配该匹配键
 PROGRAM=="/lib/udev/scsi_id -g -s $devpath", RESULT=="35000c50000a7ef67"
+```
 
-#### udev 的重要赋值键
+#### udev 的重要 assignment赋值键
 
-NAME：在 /dev下产生的设备文件名。只有第一次对某个设备的 NAME 的赋值行为生效，之后匹配的规则再对该设备的 NAME 赋值行为将被忽略。如果没有任何规则对设备的 NAME 赋值，udev 将使用内核设备名称来产生设备文件。
+NAME：在 /dev下产生的设备文件名。只有第一次对某个设备的 NAME 的赋值行为生效，之后匹配的规则再对该设备的 NAME 赋值行为将被忽略。
+如果没有任何规则对设备的 NAME 赋值，udev 将使用内核设备名称来产生设备文件。
 
 SYMLINK：为 /dev/下的设备文件产生符号链接。由于 udev 只能为某个设备产生一个设备文件，所以为了不覆盖系统默认的 udev 规则所产生的文件，推荐使用符号链接。
 
 OWNER, GROUP, MODE：为设备设定权限。
 
-ENV{key}：导入一个环境变量
+ENV{key}：设置设备属性
 
 
 ### /dev/disk 目录
@@ -809,6 +827,94 @@ rm /etc/mdadm.conf
 ### nvme-cli 命令
 
 ```shell
+# 安装
+$ yum install nvme-cli
+
+[root@master-01 ~]# nvme
+nvme-1.8.1
+usage: nvme <command> [<device>] [<args>]
+
+The '<device>' may be either an NVMe character device (ex: /dev/nvme0) or an
+nvme block device (ex: /dev/nvme0n1).
+
+The following are all implemented sub-commands:
+  list                  List all NVMe devices and namespaces on machine
+  list-subsys           List nvme subsystems
+  id-ctrl               Send NVMe Identify Controller
+  id-ns                 Send NVMe Identify Namespace, display structure
+  list-ns               Send NVMe Identify List, display structure
+  ns-descs              Send NVMe Namespace Descriptor List, display structure
+  id-nvmset             Send NVMe Identify NVM Set List, display structure
+  create-ns             Creates a namespace with the provided parameters
+  delete-ns             Deletes a namespace from the controller
+  attach-ns             Attaches a namespace to requested controller(s)
+  detach-ns             Detaches a namespace from requested controller(s)
+  list-ctrl             Send NVMe Identify Controller List, display structure
+  get-ns-id             Retrieve the namespace ID of opened block device
+  get-log               Generic NVMe get log, returns log in raw format
+  telemetry-log         Retrieve FW Telemetry log write to file
+  fw-log                Retrieve FW Log, show it
+  changed-ns-list-log   Retrieve Changed Namespace List, show it
+  smart-log             Retrieve SMART Log, show it
+  ana-log               Retrieve ANA Log, show it
+  error-log             Retrieve Error Log, show it
+  effects-log           Retrieve Command Effects Log, show it
+  endurance-log         Retrieve Endurance Group Log, show it
+  get-feature           Get feature and show the resulting value
+  device-self-test      Perform the necessary tests to observe the performance
+  self-test-log         Retrieve the SELF-TEST Log, show it
+  set-feature           Set a feature and show the resulting value
+  set-property          Set a property and show the resulting value
+  get-property          Get a property and show the resulting value
+  format                Format namespace with new block format
+  fw-commit             Verify and commit firmware to a specific slot (fw-activate in old version < 1.2)
+  fw-download           Download new firmware
+  admin-passthru        Submit an arbitrary admin command, return results
+  io-passthru           Submit an arbitrary IO command, return results
+  security-send         Submit a Security Send command, return results
+  security-recv         Submit a Security Receive command, return results
+  resv-acquire          Submit a Reservation Acquire, return results
+  resv-register         Submit a Reservation Register, return results
+  resv-release          Submit a Reservation Release, return results
+  resv-report           Submit a Reservation Report, return results
+  dsm                   Submit a Data Set Management command, return results
+  flush                 Submit a Flush command, return results
+  compare               Submit a Compare command, return results
+  read                  Submit a read command, return results
+  write                 Submit a write command, return results
+  write-zeroes          Submit a write zeroes command, return results
+  write-uncor           Submit a write uncorrectable command, return results
+  sanitize              Submit a sanitize command
+  sanitize-log          Retrieve sanitize log, show it
+  reset                 Resets the controller
+  subsystem-reset       Resets the subsystem
+  ns-rescan             Rescans the NVME namespaces
+  show-regs             Shows the controller registers or properties. Requires character device
+  discover              Discover NVMeoF subsystems
+  connect-all           Discover and Connect to NVMeoF subsystems
+  connect               Connect to NVMeoF subsystem
+  disconnect            Disconnect from NVMeoF subsystem
+  disconnect-all        Disconnect from all connected NVMeoF subsystems
+  gen-hostnqn           Generate NVMeoF host NQN
+  dir-receive           Submit a Directive Receive command, return results
+  dir-send              Submit a Directive Send command, return results
+  virt-mgmt             Manage Flexible Resources between Primary and Secondary Controller
+  version               Shows the program version
+  help                  Display this help
+
+See 'nvme help <command>' for more information on a specific command
+
+The following are all installed plugin extensions:
+  intel           Intel vendor specific extensions
+  lnvm            LightNVM specific extensions
+  memblaze        Memblaze vendor specific extensions
+  wdc             Western Digital vendor specific extensions
+  huawei          Huawei vendor specific extensions
+  netapp          NetApp vendor specific extensions
+  toshiba         Toshiba NVME plugin
+  micron          Micron vendor specific extensions
+  seagate         Seagate vendor specific extensions
+
 # 列出系统所有NVMe SSD:设备名,序列号,型号,namespace,使用量,LBA格式,firmware版本
 $ nvme list
 Node          SN              Model                       Namespace Usage                  Format          FW Rev  
@@ -830,3 +936,4 @@ Node          SN              Model                       Namespace Usage       
 - [使用 mdadm 工具创建软 RAID 0 ](https://golinux.gitbooks.io/raid/content/chapter2.html)
 - [NVMe协议基础原理介绍](https://cloud.tencent.com/developer/article/2192563)
 - [NVMe存储 全解](https://cloud-atlas.readthedocs.io/zh-cn/latest/linux/storage/nvme/nvme.html)
+- [udev和rules使用规则](https://www.cnblogs.com/zhouhbing/p/4025748.html)
