@@ -55,11 +55,12 @@ Main 插件：创建具体的网络设备
 IPAM(IP Address Management)插件：负责分配 IP 地址
 - dhcp：容器向 DHCP 服务器发起请求，给 Pod 发放或回收 IP 地址；
 - host-local：使用预先配置的 IP 地址段来进行分配
+- github.com/k8snetworkplumbingwg/whereabouts: cluster-wide ip 分配插件. 比 host-local 多了集群内可以跨节点.
 
 META 插件：其他功能的插件
 - tuning：通过 sysctl 调整网络设备参数；
 - portmap：通过 iptables 配置端口映射；
-- bandwidth：使用 Token Bucket Filter 来限流；
+- bandwidth：使用 Token Bucket Filter（TBF） 来限流；
 - sbr：为网卡设置 source based routing；
 - firewall：通过 iptables 给容器网络的进出流量进行限制。
 
@@ -260,7 +261,6 @@ func createMacvlan(conf *NetConf, ifName string, netns ns.NetNS) (*current.Inter
 	return macvlan, nil
 }
 ```
-
 
 ### host-local
 一般用于单机 pod IP管理.host-local插件从address ranges 中分配IP，将分配的结果存在本地机器，所以这也是为什么叫做host-local
@@ -668,7 +668,6 @@ func cmdAdd(args *skel.CmdArgs) error {
 bridge不允许包从收到包的端口发出，比如bridge从一个端口收到一个广播报文后，会将其广播到所有其他端口。
 bridge的某个端口打开hairpin mode后允许从这个端口收到的包仍然从这个端口发出。
 这个特性用于NAT场景下，比如docker的nat网络，一个容器访问其自身映射到主机的端口时，包到达bridge设备后走到ip协议栈，经过iptables规则的dnat转换后发现又需要从bridge的收包端口发出，需要开启端口的hairpin mode。
-
 
 ### vlan
 ```go
