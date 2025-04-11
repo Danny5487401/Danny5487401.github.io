@@ -123,6 +123,57 @@ net.ipv4.tcp_tw_recycle = 0  因为打开该选项后引起了太多的问题，
 
 
 
+```shell
+# 这里使用 registry:2 镜像
+[root@master-01 ~]# docker ps -a
+CONTAINER ID   IMAGE                   COMMAND                   CREATED          STATUS          PORTS     NAMES
+4c7d11de49e5   registry:2              "/entrypoint.sh /etc…"   13 minutes ago   Up 13 minutes             local_registry
+ca88938b4d45   easzlab/kubeasz:3.6.5   "tail -f /dev/null"       3 months ago     Up 2 weeks                kubeasz
+
+# 查询镜像分类
+[root@master-01 ~]# curl http://easzlab.io.local:5000/v2/_catalog | jq .
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100   576  100   576    0     0  56860      0 --:--:-- --:--:-- --:--:-- 64000
+{
+  "repositories": [
+    "calico/cni",
+    "calico/kube-controllers",
+    "calico/node",
+    "coredns/coredns",
+    "easzlab/k8s-dns-node-cache",
+    "easzlab/metrics-server",
+    "easzlab/pause",
+    "flannel/flannel",
+    "flannel/flannel-cni-plugin",
+    "grafana/grafana",
+    "kubernetesui/dashboard",
+    "kubernetesui/metrics-scraper",
+    "prometheus/alertmanager",
+    "prometheus/grafana",
+    "prometheus/k8s-sidecar",
+    "prometheus/kube-state-metrics",
+    "prometheus/kube-webhook-certgen",
+    "prometheus/node-exporter",
+    "prometheus/prometheus",
+    "prometheus/prometheus-config-reloader",
+    "prometheus/prometheus-operator",
+    "rancher/local-path-provisioner"
+  ]
+}
+
+# 查询镜像
+[root@master-01 ~]# curl http://easzlab.io.local:5000/v2/calico/cni/tags/list  | jq .
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100    41  100    41    0     0   8577      0 --:--:-- --:--:-- --:--:-- 10250
+{
+  "name": "calico/cni",
+  "tags": [
+    "v3.28.2"
+  ]
+}
+```
 
 ## kubeadm 使用
 - kubeadm init 创建新的控制平面节点

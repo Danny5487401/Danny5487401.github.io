@@ -42,11 +42,56 @@ PCI有三种地址空间：PCI I/O空间、PCI内存地址空间和PCI配置空�
 
 /proc/iomem 描写叙述了系统中全部的设备I/O在内存地址空间上的映射。
 
-40000000-400003ff : 0000:00:1f.1 解释
-一个PCI设备，40000000-400003ff是它所映射的内存地址空间，占领了内存地址空间的1024 bytes的位置，而 0000:00:1f.1 则是一个PCI外设的地址,它以冒号和逗号分隔为4个部分
+一个PCI设备 40000000-400003ff : 0000:00:1f.1 解释
+* 40000000-400003ff是它所映射的内存地址空间，占领了内存地址空间的1024 bytes的位置，而
+* 0000:00:1f.1 则是一个PCI外设的地址,它以冒号和逗号分隔为4个部分，第一个16位表示域，第二个8位表示一个总线编号，第三个5位表示一 个设备号，最后是3位，表示功能号.PCI设备的地址格式为<总线号>:<插槽号>.<功能号>
 
 
 一般一类设备在出厂的时候会有相同的一串classid,而classid记录在/sys/bus/pci/devices/*/class文件中
+
+
+```shell
+# lspci help
+Usage: lspci [<switches>]
+
+Basic display modes:
+-mm             Produce machine-readable output (single -m for an obsolete format)
+-t              Show bus tree
+
+Display options:
+-v              Be verbose (-vv or -vvv for higher verbosity)
+-k              Show kernel drivers handling each device
+-x              Show hex-dump of the standard part of the config space
+-xxx            Show hex-dump of the whole config space (dangerous; root only)
+-xxxx           Show hex-dump of the 4096-byte extended config space (root only)
+-b              Bus-centric view (addresses and IRQ's as seen by the bus)
+-D              Always show domain numbers
+-P              Display bridge path in addition to bus and device number
+-PP             Display bus path in addition to bus and device number
+
+Resolving of device ID's to names:
+-n              Show numeric ID's 
+-nn             Show both textual and numeric ID's (names & numbers)
+-q              Query the PCI ID database for unknown ID's via DNS
+-qq             As above, but re-query locally cached entries
+-Q              Query the PCI ID database for all ID's via DNS
+
+Selection of devices:
+-s [[[[<domain>]:]<bus>]:][<slot>][.[<func>]]   Show only devices in selected slots
+-d [<vendor>]:[<device>][:<class>]              Show only devices with specified ID's
+
+Other options:
+-i <file>       Use specified ID database instead of /usr/share/hwdata/pci.ids
+-p <file>       Look up kernel modules in a given file instead of default modules.pcimap
+-M              Enable `bus mapping' mode (dangerous; root only)
+
+PCI access options:
+-A <method>     Use the specified PCI access method (see `-A help' for a list)
+-O <par>=<val>  Set PCI access parameter (see `-O help' for a list)
+-G              Enable PCI access debugging
+-F <file>       Read PCI configuration dump from a given file
+```
+
 
 
 ### PCIe(Peripheral Component Interconnect Express)
@@ -109,17 +154,78 @@ Differentiated service 差分服务模型: 将网络流量分成多个类，不�
 
 
 ```shell
-# lspci是查看设备上pcie设备信息的命令: 查看 SR-IOV 设备
-$ lspci -v | grep -i SR-IOV
-
-        Capabilities: [bcc] Single Root I/O Virtualization (SR-IOV)
-        Capabilities: [160] Single Root I/O Virtualization (SR-IOV)
-        Capabilities: [160] Single Root I/O Virtualization (SR-IOV)
-        Capabilities: [160] Single Root I/O Virtualization (SR-IOV)
-        Capabilities: [160] Single Root I/O Virtualization (SR-IOV)
-
+# 根据domain bus号等信息，查看指定pcie设备的信息，可搭配表1任意参数使用
+$ lspci -s 0000:7d:00.0 -vv
+7d:00.0 Ethernet controller: Huawei Technologies Co., Ltd. HNS GE/10GE/25GE RDMA Network Controller (rev 21)
+        Subsystem: Huawei Technologies Co., Ltd. Device 0454
+        Control: I/O- Mem+ BusMaster+ SpecCycle- MemWINV- VGASnoop- ParErr- Stepping- SERR- FastB2B- DisINTx-
+        Status: Cap+ 66MHz- UDF- FastB2B- ParErr- DEVSEL=fast >TAbort- <TAbort- <MAbort- >SERR- <PERR- INTx-
+        Latency: 0
+        NUMA node: 0
+        Region 0: Memory at 128c00000 (64-bit, prefetchable) [size=64K]
+        Region 2: Memory at 120000000 (64-bit, prefetchable) [size=1M]
+        Capabilities: [40] Express (v2) Endpoint, MSI 00
+                DevCap: MaxPayload 128 bytes, PhantFunc 0, Latency L0s <64ns, L1 <1us
+                        ExtTag+ AttnBtn- AttnInd- PwrInd- RBE+ FLReset+ SlotPowerLimit 0.000W
+                DevCtl: CorrErr- NonFatalErr- FatalErr- UnsupReq-
+                        RlxdOrd+ ExtTag+ PhantFunc- AuxPwr- NoSnoop- FLReset-
+                        MaxPayload 128 bytes, MaxReadReq 512 bytes
+                DevSta: CorrErr- NonFatalErr- FatalErr- UnsupReq- AuxPwr- TransPend-
+                LnkCap: Port #0, Speed 2.5GT/s, Width x1, ASPM not supported
+                        ClockPM- Surprise- LLActRep- BwNot- ASPMOptComp+
+                LnkCtl: ASPM Disabled; RCB 64 bytes Disabled- CommClk-
+                        ExtSynch- ClockPM- AutWidDis- BWInt- AutBWInt-
+                LnkSta: Speed 2.5GT/s (ok), Width x1 (ok)
+                        TrErr- Train- SlotClk- DLActive- BWMgmt- ABWMgmt-
+                DevCap2: Completion Timeout: Not Supported, TimeoutDis+, NROPrPrP-, LTR-
+                         10BitTagComp-, 10BitTagReq-, OBFF Not Supported, ExtFmt-, EETLPPrefix-
+                         EmergencyPowerReduction Not Supported, EmergencyPowerReductionInit-
+                         FRS-, TPHComp-, ExtTPHComp-
+                         AtomicOpsCap: 32bit- 64bit- 128bitCAS-
+                DevCtl2: Completion Timeout: 50us to 50ms, TimeoutDis-, LTR-, OBFF Disabled
+                         AtomicOpsCtl: ReqEn-
+                LnkCtl2: Target Link Speed: 2.5GT/s, EnterCompliance- SpeedDis-
+                         Transmit Margin: Normal Operating Range, EnterModifiedCompliance- ComplianceSOS-
+                         Compliance De-emphasis: -6dB
+                LnkSta2: Current De-emphasis Level: -6dB, EqualizationComplete-, EqualizationPhase1-
+                         EqualizationPhase2-, EqualizationPhase3-, LinkEqualizationRequest-
+        Capabilities: [a0] MSI-X: Enable+ Count=131 Masked-
+                Vector table: BAR=0 offset=00000000
+                PBA: BAR=0 offset=00008000
+        Capabilities: [b0] Power Management version 3
+                Flags: PMEClk- DSI- D1- D2- AuxCurrent=0mA PME(D0-,D1-,D2-,D3hot-,D3cold-)
+                Status: D0 NoSoftRst- PME-Enable- DSel=0 DScale=0 PME-
+        Capabilities: [100 v1] Access Control Services
+                ACSCap: SrcValid- TransBlk- ReqRedir- CmpltRedir- UpstreamFwd- EgressCtrl- DirectTrans-
+                ACSCtl: SrcValid- TransBlk- ReqRedir- CmpltRedir- UpstreamFwd- EgressCtrl- DirectTrans-
+        Capabilities: [200 v1] Single Root I/O Virtualization (SR-IOV)
+                IOVCap: Migration-, Interrupt Message Number: 000
+                IOVCtl: Enable+ Migration- Interrupt- MSE+ ARIHierarchy+
+                IOVSta: Migration-
+                Initial VFs: 127, Total VFs: 127, Number of VFs: 127, Function Dependency Link: 00
+                VF offset: 8, stride: 1, Device ID: a22f
+                Supported Page Size: 00000553, System Page Size: 00000010
+                Region 0: Memory at 0000000128c10000 (64-bit, prefetchable)
+                Region 2: Memory at 0000000120100000 (64-bit, prefetchable)
+                VF Migration: offset: 00000000, BIR: 0
+        Capabilities: [300 v1] Transaction Processing Hints
+                Device specific mode supported
+                No steering table available
+        Capabilities: [450 v1] Alternative Routing-ID Interpretation (ARI)
+                ARICap: MFVC- ACS-, Next Function: 1
+                ARICtl: MFVC- ACS-, Function Group: 0
+        Kernel driver in use: hns3
+        Kernel modules: hclge, hns3, hns_roce_hw_v2
 ```
-其中 1 个 [bcc] 是 NVIDIA 显卡的 SR-IOV 设备，剩下的 4 个 [160] 是 Intel 网卡。
+![img.png](sr-iov_capacity.png) 
+capacity 字段介绍
+* Initial VFs - Indicates to the SR-PCIM the number of VFs that are initially associated with the PF.
+
+* Total VFs - Indicates the maximum number of VFs that can be associated with the PF.
+
+* Num VFs - Controls the number of VFs that are visible. Num VFs <= Initial VFs = Total VFs.
+
+
 
 ```shell
 # 列出网卡
@@ -131,7 +237,7 @@ ethX 是真实的物理网卡，bondX 是网络绑定 (bonding) 接口，lo 是�
 
 
 ```shell
-# ethtool命令用于获取以太网卡的配置信息, -i 显示网卡驱动的信息，如驱动的名称、版本等
+# ethtool命令用于获取以太网卡的配置信息, -i/--driver 显示网卡驱动的信息，如驱动的名称、版本等
 $ ethtool -i eno49
  
 driver: igb # 驱动
@@ -900,9 +1006,10 @@ func getVfInfo(vfPci string) (string, int, error) {
 - https://github.com/k8snetworkplumbingwg/sriov-cni
 - https://github.com/k8snetworkplumbingwg/sriov-network-device-plugin/blob/master/docs/vf-setup.md
 - https://www.howtoforge.com/tutorial/how-to-configure-high-availability-and-network-bonding-on-linux/
+- https://projectacrn.github.io/latest/tutorials/sriov_virtualization.html
 - [SR-IOV 技术及在 Pod 中使用](https://www.chenshaowen.com/blog/sr-iov-technique.html)
 - [SR-IOV vs DPDK](https://feisky.gitbooks.io/sdn/content/linux/sr-iov.html)
 - [BONDING_OPTS参数详细说明](https://blog.csdn.net/cuichongxin/article/details/116160277)
-- [LSPCI具体解释分析](https://www.cnblogs.com/yxwkf/p/3996202.html)
+- [PCI 解释](https://www.cnblogs.com/yxwkf/p/3996202.html)
 - [Single Root IO Virtualization (SR-IOV)二：SR-IOV 配置](https://blog.csdn.net/lincolnjunior_lj/article/details/131683558)
 - [Linux 内核 Modalias 解析详尽教程](https://my.oschina.net/emacs_8808488/blog/17312648)
