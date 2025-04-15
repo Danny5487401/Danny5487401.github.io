@@ -13,7 +13,7 @@ tags:
 
 
 审计功能使得集群管理员能够回答以下问题：
-
+{{<figure src="./audit_response.png#center" width=800px >}}
 - 发生了什么？
 - 什么时候发生的？
 - 谁触发的？
@@ -21,9 +21,25 @@ tags:
 - 在哪观察到的？
 - 它从哪触发的？
 - 活动的后续处理行为是什么？
+
+比较常见场景
+
+- 资源被删掉了，什么时候删掉的，被“谁”删掉的？
+- 服务出现问题，什么时候做过版本变更？
+- Apiserver 的响应延时变长，或者出现大量 5XX 响应 Status Code，Apiserver 负载变高，是什么导致的？
+- Apiserver 返回 401/403 请求，究竟是证书过期，非法访问，还是 RBAC 配置错误等。
+- Apiserver 收到大量来自外网 IP 对敏感资源的访问请求，这种请求是否合理，是否存在安全风险；
   
 每个请求在不同执行阶段都会生成审计事件；这些审计事件会根据特定策略被预处理并写入后端。策略确定要记录的内容，当前的后端支持日志文件和 webhook。
 
+## 审计来源
+在 Kubernetes 中，所有对集群状态的查询和修改都是通过向 Apiserver 发送请求，对 Apiserver 的请求来源可以分为4类
+{{<figure src="./audit_source.png#center" width=800px >}}
+
+- 控制面组件，例如 Scheduler，各种 Controller，Apiserver 自身
+- 节点上的各种 Agent，例如 Kubelet、Kube-proxy 等
+- 集群的其它服务，例如 Coredns、Ingress-controller、各种第三方的 Operator 等
+- 外部用户，例如运维人员通过 Kubectl
 
 ## 审计策略配置
 
@@ -118,7 +134,6 @@ const (
 
 ```
 
-
 "level": "Request" 案例
 ```json
 
@@ -160,6 +175,7 @@ const (
   }
 }
 ```
+
 "level": "Metadata"  例子
 ```json
 {
@@ -694,8 +710,11 @@ func (b *backend) processEvents(ev ...*auditinternal.Event) error {
 
 ## 应用
 - 示例1：对容器执行命令时告警: kubectl exec 进入到容器内部执行的命令的审计
+- 示例2： 排查 Apiserver 响应变慢的问题
+
 
 
 ## 参考
-- [官方 zh 文档](https://kubernetes.io/zh-cn/docs/tasks/debug/debug-cluster/audit/)
+- [官方中文文档](https://kubernetes.io/zh-cn/docs/tasks/debug/debug-cluster/audit/)
 - [Kubernetes 审计（Auditing）功能详解](https://www.cnblogs.com/zhangmingcheng/p/16539514.html)
+- [如何使用 K8s 两大利器"审计"和"事件"帮你摆脱运维困境？](https://www.cnblogs.com/tencent-cloud-native/p/14097545.html)
