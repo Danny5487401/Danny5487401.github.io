@@ -115,6 +115,96 @@ rules:
       - "RequestReceived"
 ```
 
+policy 配置写法
+```go
+type Policy struct {
+	metav1.TypeMeta
+	// ObjectMeta is included for interoperability with API infrastructure.
+	// +optional
+	metav1.ObjectMeta
+
+	// Rules specify the audit Level a request should be recorded at.
+	// A request may match multiple rules, in which case the FIRST matching rule is used.
+	// The default audit level is None, but can be overridden by a catch-all rule at the end of the list.
+	// PolicyRules are strictly ordered.
+	Rules []PolicyRule
+
+	// OmitStages is a list of stages for which no events are created. Note that this can also
+	// be specified per rule in which case the union of both are omitted.
+	// +optional
+	OmitStages []Stage
+
+	// OmitManagedFields indicates whether to omit the managed fields of the request
+	// and response bodies from being written to the API audit log.
+	// This is used as a global default - a value of 'true' will omit the managed fileds,
+	// otherwise the managed fields will be included in the API audit log.
+	// Note that this can also be specified per rule in which case the value specified
+	// in a rule will override the global default.
+	// +optional
+	OmitManagedFields bool
+}
+
+
+type PolicyRule struct {
+	// The Level that requests matching this rule are recorded at.
+	Level Level
+
+	// The users (by authenticated user name) this rule applies to.
+	// An empty list implies every user.
+	// +optional
+	Users []string
+	// The user groups this rule applies to. A user is considered matching
+	// if it is a member of any of the UserGroups.
+	// An empty list implies every user group.
+	// +optional
+	UserGroups []string
+
+	// The verbs that match this rule.
+	// An empty list implies every verb.
+	// +optional
+	Verbs []string
+
+	// Rules can apply to API resources (such as "pods" or "secrets"),
+	// non-resource URL paths (such as "/api"), or neither, but not both.
+	// If neither is specified, the rule is treated as a default for all URLs.
+
+	// Resources that this rule matches. An empty list implies all kinds in all API groups.
+	// +optional
+	Resources []GroupResources
+	// Namespaces that this rule matches.
+	// The empty string "" matches non-namespaced resources.
+	// An empty list implies every namespace.
+	// +optional
+	Namespaces []string
+
+	// NonResourceURLs is a set of URL paths that should be audited.
+	// *s are allowed, but only as the full, final step in the path.
+	// Examples:
+	//  "/metrics" - Log requests for apiserver metrics
+	//  "/healthz*" - Log all health checks
+	// +optional
+	NonResourceURLs []string
+
+	// OmitStages is a list of stages for which no events are created. Note that this can also
+	// be specified policy wide in which case the union of both are omitted.
+	// An empty list means no restrictions will apply.
+	// +optional
+	OmitStages []Stage
+
+	// OmitManagedFields indicates whether to omit the managed fields of the request
+	// and response bodies from being written to the API audit log.
+	// - a value of 'true' will drop the managed fields from the API audit log
+	// - a value of 'false' indicates that the managed fileds should be included
+	//   in the API audit log
+	// Note that the value, if specified, in this rule will override the global default
+	// If a value is not specified then the global default specified in
+	// Policy.OmitManagedFields will stand.
+	// +optional
+	OmitManagedFields *bool
+}
+
+```
+
 审计策略定义了关于应记录哪些事件以及应包含哪些数据的规则。 审计策略对象结构定义在 audit.k8s.io API 组。 处理事件时，将按顺序与规则列表进行比较。第一个匹配规则设置事件的审计级别（Audit Level）。已定义的审计级别有：
 ```go
 // Level defines the amount of information logged during auditing
@@ -711,6 +801,33 @@ func (b *backend) processEvents(ev ...*auditinternal.Event) error {
 ## 应用
 - 示例1：对容器执行命令时告警: kubectl exec 进入到容器内部执行的命令的审计
 - 示例2： 排查 Apiserver 响应变慢的问题
+
+```go
+// 写入延迟信息到 Event的annotation 
+func writeLatencyToAnnotation(ctx context.Context, ev *auditinternal.Event) {
+	// we will track latency in annotation only when the total latency
+	// of the given request exceeds 500ms, this is in keeping with the
+	// traces in rest/handlers for create, delete, update,
+	// get, list, and deletecollection.
+	const threshold = 500 * time.Millisecond
+	latency := ev.StageTimestamp.Time.Sub(ev.RequestReceivedTimestamp.Time)
+	if latency <= threshold {
+		return
+	}
+
+	// if we are tracking latency incurred inside different layers within
+	// the apiserver, add these as annotation to the audit event object.
+	layerLatencies := request.AuditAnnotationsFromLatencyTrackers(ctx)
+	if len(layerLatencies) == 0 {
+		// latency tracking is not enabled for this request
+		return
+	}
+
+	// record the total latency for this request, for convenience.
+	layerLatencies["apiserver.latency.k8s.io/total"] = latency.String()
+	audit.AddAuditAnnotationsMap(ctx, layerLatencies)
+}
+```
 
 
 

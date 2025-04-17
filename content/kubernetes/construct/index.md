@@ -115,7 +115,64 @@ Client关闭跟Server的连接后，也有可能很快再次跟Server之间建�
 
 
 还有另外一个选项tcp_tw_recycle来控制TIME_WAIT状态，但是该选项是很危险的，因为它可能会引起意料不到的问题，比如可能会引起NAT环境下的丢包问题。
-net.ipv4.tcp_tw_recycle = 0  因为打开该选项后引起了太多的问题，所以4.12内核开始就索性删掉了这个配置选项：
+net.ipv4.tcp_tw_recycle = 0  因为打开该选项后引起了太多的问题，所以4.12内核开始就索性删掉了这个配置选项
+
+
+## 系统预留
+默认情况下 Pod 能够使用节点全部可用容量，同样就会伴随一个新的问题，pod消耗的内存会挤占掉系统服务本身的资源，这就好比我们在宿主机上运行java服务一样，会出现java程序将宿主机上的资源（内存、cpu）耗尽，从而导致系统登陆不上或者卡顿现象。
+
+{{<figure src="./node_capacity.png#center" width=800px >}}
+```shell
+Node Allocatable Resource = Node Capacity - Kube-reserved - system-reserved - eviction-threshold
+
+```
+* Node Capacity：Node的所有硬件资源，kube-reserved是给kube组件预留的资源
+* Kube-reserved：kube 组件预留的资源
+* system-reserved：给system进程预留的资源
+* eviction-threshold（阈值）：kubelet eviction(收回)的阈值设定
+```yaml
+# kubeasz/roles/kube-node/templates/kubelet-config.yaml.j2
+
+# 配置硬驱逐阈值
+evictionHard:
+  imagefs.available: 15%
+  memory.available: 300Mi
+  nodefs.available: 10%
+  nodefs.inodesFree: 5%
+
+
+enforceNodeAllocatable:
+- pods
+{% if KUBE_RESERVED_ENABLED == "yes" %}
+- kube-reserved
+{% endif %}
+{% if SYS_RESERVED_ENABLED == "yes" %}
+- system-reserved
+{% endif %}
+
+# 配置 kube 资源预留
+{% if KUBE_RESERVED_ENABLED == "yes" %}
+kubeReservedCgroup: /podruntime.slice
+kubeReserved:
+  cpu: 500m
+  memory: 1000Mi
+  pid: "1000"
+{% endif %}
+
+# 配置系统资源预留
+{% if SYS_RESERVED_ENABLED == "yes" %}
+systemReservedCgroup: /system.slice
+systemReserved:
+  cpu: 500m
+  memory: 1000Mi
+  pid: "5000"
+{% endif %}
+```
+
+如果没有资源预留，k8s 默认认为宿主机上所有的资源（RAM、CPU）都是可以分配给 Pod 类进程。
+因为非 Pod 类进程也需要占用一定的资源，当 Pod 创建很多时，就有可能出现资源不足的情况。宿主机中kubelet、kube-proxy 等进程被 kill 掉，最后导致整个 Node 节点不可用。
+我们知道，当 Pod 里面内存不足时，会触发 Cgroup 把 Pod 里面的进程杀死；
+当系统内存不足时，就有可能触发系统OOM，这时候根据 oom score 来确定优先杀死哪个进程，而 oom_score_adj 又是影响 oom score 的重要参数，其值越低，表示 oom 的优先级越低.
 
 ## kubeasz 使用
 

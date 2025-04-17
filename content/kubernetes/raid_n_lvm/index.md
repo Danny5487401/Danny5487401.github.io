@@ -90,6 +90,14 @@ ENV{key}：设置设备属性
 
 在 Linux 系统中，/dev/disk 目录下的 by-* 文件夹是 udev 规则创建的符号链接
 
+
+### LVM 精简卷(Thinly-Provisioned Logical Volumes)
+
+在创建Thin“瘦”卷时，预分配一个虚拟的逻辑卷容量大小，而只是在实际写入数据时才分配物理空间给这个卷。
+这样我们可以轻易的创建出总逻辑容量超出物理磁盘空间的多个“精简卷”，而无须为将来可能达到的数据量提前“买单”。
+在应用产生的数据确实需要增加驱动器时，我们也可以灵活地在线调整卷的大小。
+
+
 ## 基本命令
 
 ### lsblk (list block)
@@ -931,6 +939,7 @@ Node          SN              Model                       Namespace Usage       
 - [LVM的基本概念和部署](http://xintq.net/2014/07/30/LVM%E7%9A%84%E5%9F%BA%E6%9C%AC%E6%A6%82%E5%BF%B5%E5%92%8C%E9%83%A8%E7%BD%B2/)
 - [fdisk,gdisk,parted 三种分区工具比较](https://www.cnblogs.com/zhaojiedi1992/p/zhaojiedi_linux_039_fdisk_gdisk_parted.html)
 - [LVM管理](https://www.cnblogs.com/diantong/p/10554831.html)
+- [LVM精简卷(Thinly-Provisioned Logical Volumes)操作](https://blog.csdn.net/IndexMan/article/details/120267326)
 - [RAID及mdadm命令](https://cloud.tencent.com/developer/article/1108103)
 - [mdadm命令](https://www.cnblogs.com/apexchu/p/6512341.html)
 - [使用 mdadm 工具创建软 RAID 0 ](https://golinux.gitbooks.io/raid/content/chapter2.html)
