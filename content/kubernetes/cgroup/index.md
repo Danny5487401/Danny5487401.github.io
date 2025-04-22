@@ -237,6 +237,24 @@ const (
 - cpu.rt_runtime_us：设置运行时间，表示在周期时间内 cgroup 中任务能访问 CPU 的时间。这个限制是针对单个 CPU 核数的，如果是多核，需要乘以对应的核数
 
 
+#### cpu 监控
+
+container_cpu_cfs_throttled_periods_total 通过这指标排查.
+
+
+举个例子，假设一个API服务在响应请求时需要使用A, B两个线程（2个核），分别使用60ms和80ms，其中B线程晚触发20ms，我们看到API服务在100ms后可给出响应：
+{{<figure src="./without_cpu_limit.png#center" width=800px >}}
+
+
+如果CPU limit被设为0.8核，即每100ms内最多使用80ms CPU时间，API服务的线程B会受到一次限流（灰色部分），服务在140ms后响应：
+{{<figure src="./limit_0.8_core.png#center" width=800px >}}
+
+
+
+如果CPU limit被设为0.6核，即每100ms内最多使用60ms CPU时间，API服务的线程A会受到一次限流（灰色部分），线程B受到两次限流，服务在220ms后响应：
+{{<figure src="./limit_0.6_core.png#center" width=800px >}}
+
+
 ### memory：限制内存使用
 
 - memory.limit_in_bytes：cgroup 能使用的内存上限值，默认为字节；也可以添加 k/K、m/M 和 g/G 单位后缀。往文件中写入 -1 来移除设置的上限，表示不对内存做限制
@@ -354,8 +372,9 @@ $ sudo apt-get install cgroup-tools
 
 ## 参考
 
+- https://www.kernel.org/doc/html/v5.10/admin-guide/cgroup-v2.html
 - [一篇搞懂容器技术的基石: cgroup](https://zhuanlan.zhihu.com/p/434731896)
 - [docker 容器基础技术：linux cgroup 简介](https://cizixs.com/2017/08/25/linux-cgroup/)
 - [详解Cgroup V2](https://zorrozou.github.io/docs/%E8%AF%A6%E8%A7%A3Cgroup%20V2.html)
-- https://www.kernel.org/doc/html/v5.10/admin-guide/cgroup-v2.html
 - [cgroup v1与cgroup v2的区别](https://www.alibabacloud.com/help/zh/alinux/support/differences-between-cgroup-v1-and-cgroup-v2#921d08df2c654)
+- [k8s CPU limit和throttling的迷思](https://zhuanlan.zhihu.com/p/433065108)

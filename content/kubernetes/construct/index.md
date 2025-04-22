@@ -6,6 +6,8 @@ categories:
   - kubernetes
 tags:
   - k8s
+  - kubeasz
+  - kubeadm
 ---
 
 
@@ -175,11 +177,14 @@ systemReserved:
 当系统内存不足时，就有可能触发系统OOM，这时候根据 oom score 来确定优先杀死哪个进程，而 oom_score_adj 又是影响 oom score 的重要参数，其值越低，表示 oom 的优先级越低.
 
 ## kubeasz 使用
+架构图。
+{{<figure src="./featured.png#center" width=800px >}}
 
 [AllinOne部署](https://github.com/easzlab/kubeasz/blob/master/docs/setup/quickStart.md),然后再添加 master,node.
 
 
-
+### 镜像仓库
+方式一: registry:2 镜像
 ```shell
 # 这里使用 registry:2 镜像
 [root@master-01 ~]# docker ps -a
@@ -231,6 +236,13 @@ ca88938b4d45   easzlab/kubeasz:3.6.5   "tail -f /dev/null"       3 months ago   
   ]
 }
 ```
+
+方式二: 单机安装harbor 服务
+特性包括：友好的用户界面，基于角色的访问控制，水平扩展，同步复制，AD/LDAP集成以及审计日志等。
+
+https://github.com/easzlab/kubeasz/blob/3.6.6/docs/guide/harbor.md
+
+
 
 ## kubeadm 使用
 - kubeadm init 创建新的控制平面节点

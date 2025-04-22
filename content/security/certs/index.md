@@ -101,3 +101,36 @@ type Name struct {
 	ExtraNames []AttributeTypeAndValue
 }
 ```
+
+## CloudFlare 开源证书管理工具 cfssl
+
+```shell
+[root@master-01 bin]# ./cfssl version
+Version: dev
+Runtime: go1.22.8
+```
+
+
+```shell
+[root@master-01 bin]# ./cfssl --help
+version # 查看 cfssl 版本
+selfsign # 生成一个新的自签名密钥和签名证书
+certinfo # 输出给定证书的证书信息， 跟 cfssl-certinfo 工具作用一样
+print-defaults # 打印json格式的模板-ca签名配置文件和客户端证书请求文件
+  # config：生成ca配置模板文件
+  # csr：生成证书请求模板文件
+gencert # 生成新的key(密钥)和签名证书
+  # -initca：初始化一个新ca （默认false，需要指定ca证书用以前面其他证书）
+  # -ca：ca的证书
+  # -ca-key：ca的私钥文件
+  # -config：请求证书的json文件
+  # -profile：与-config中的profile对应，是指根据config中的profile段来生成证书的相关信息
+sign # 签名一个客户端证书，通过给定的CA和CA密钥，和主机名
+revoke # 吊销证书
+info # 获取签名者信息
+bundle # 创建包含客户端证书的证书包
+serve # 启动一个HTTP API服务
+genkey  # 生成一个key(私钥)和csr(证书签名请求)
+gencsr # 生成新的证书请求文件
+gencrl # 生成新的证书吊销列表
+```
