@@ -11,7 +11,10 @@ main:
     pageRef: tags/
     weight: 20
   - name: Golang
-    pageRef: golang/
+    url: https://github.com/Danny5487401/go_advanced_code
+    weight: 30
+  - name: AI
+    pageRef: ai/
     weight: 30
   - name: Kubernetes
     pageRef: kubernetes/

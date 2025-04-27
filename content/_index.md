@@ -20,6 +20,7 @@ sections:
           - kubernetes
           - security
           - golang
+          - ai
     design:
       spacing:
         padding: ['3rem', 0, '6rem', 0]

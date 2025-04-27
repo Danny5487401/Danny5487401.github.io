@@ -238,9 +238,15 @@ ca88938b4d45   easzlab/kubeasz:3.6.5   "tail -f /dev/null"       3 months ago   
 ```
 
 方式二: 单机安装harbor 服务
+
 特性包括：友好的用户界面，基于角色的访问控制，水平扩展，同步复制，AD/LDAP集成以及审计日志等。
 
 https://github.com/easzlab/kubeasz/blob/3.6.6/docs/guide/harbor.md
+
+
+{{<figure src="./harbor_structure.png#center" width=800px >}}
+
+结构:https://github.com/goharbor/harbor/wiki/Architecture-Overview-of-Harbor
 
 
 

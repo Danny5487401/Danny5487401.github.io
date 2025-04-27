@@ -104,6 +104,9 @@ type Name struct {
 
 ## CloudFlare 开源证书管理工具 cfssl
 
+
+
+### cfssl 第三方使用--kubeasz 部署 k8s 集群 
 ```shell
 [root@master-01 bin]# ./cfssl version
 Version: dev
@@ -134,3 +137,120 @@ genkey  # 生成一个key(私钥)和csr(证书签名请求)
 gencsr # 生成新的证书请求文件
 gencrl # 生成新的证书吊销列表
 ```
+
+准备的配置: https://github.com/easzlab/kubeasz/blob/4910805e1bfc2de6b239a082b056290bb54d311a/roles/deploy/templates/ca-csr.json.j2
+```json
+{
+  "CN": "kubernetes-ca",
+  "key": {
+    "algo": "rsa",
+    "size": 2048
+  },
+  "names": [
+    {
+      "C": "CN",
+      "ST": "HangZhou",
+      "L": "XS",
+      "O": "k8s",
+      "OU": "System"
+    }
+  ],
+  "ca": {
+    "expiry": "{{ CA_EXPIRY }}"
+  }
+}
+
+```
+
+https://github.com/easzlab/kubeasz/blob/41c047b3f098cbbbb3fadd93e1749345a487b8b9/roles/deploy/templates/ca-config.json.j2
+```json
+{
+  "signing": {
+    "default": {
+      "expiry": "{{ CERT_EXPIRY }}"
+    },
+    "profiles": {
+      "kubernetes": {
+        "usages": [
+            "signing",
+            "key encipherment",
+            "server auth",
+            "client auth"
+        ],
+        "expiry": "{{ CERT_EXPIRY }}"
+      },
+      "kcfg": {
+        "usages": [
+            "signing",
+            "key encipherment",
+            "client auth"
+        ],
+        "expiry": "{{ CUSTOM_EXPIRY }}"
+      }
+    }
+  }
+}
+
+```
+
+https://github.com/easzlab/kubeasz/blob/b51f7222020cb39477b574d354fd5e9460061f63/roles/deploy/templates/admin-csr.json.j2
+```json
+{
+  "CN": "admin",
+  "hosts": [],
+  "key": {
+    "algo": "rsa",
+    "size": 2048
+  },
+  "names": [
+    {
+      "C": "CN",
+      "ST": "HangZhou",
+      "L": "XS",
+      "O": "system:masters",
+      "OU": "System"
+    }
+  ]
+}
+
+```
+
+
+
+生成 CA 证书
+```yaml
+# https://github.com/easzlab/kubeasz/blob/ebf4f1e5072aedddf1786f6857d79a23403faa57/roles/deploy/tasks/main.yml
+
+- name: 准备CA配置文件和签名请求
+  template: src={{ item }}.j2 dest={{ cluster_dir }}/ssl/{{ item }}
+  with_items:
+    - "ca-config.json"
+    - "ca-csr.json"
+  when: "p.stat.isreg is not defined or CHANGE_CA|bool"
+  tags: force_change_certs
+  
+- name: 生成 CA 证书和私钥
+  when: "p.stat.isreg is not defined or CHANGE_CA|bool"
+  tags: force_change_certs
+  shell: "cd {{ cluster_dir }}/ssl && \
+	 {{ base_dir }}/bin/cfssl gencert -initca ca-csr.json | {{ base_dir }}/bin/cfssljson -bare ca" 
+```
+
+客户端证书生成
+```yaml
+# https://github.com/easzlab/kubeasz/blob/16b98e41ff61b186df4111a3d13b93a1ba29569f/roles/deploy/tasks/create-kubectl-kubeconfig.yml
+- name: 准备kubectl使用的admin证书签名请求
+  template: src=admin-csr.json.j2 dest={{ cluster_dir }}/ssl/admin-csr.json
+
+- name: 创建admin证书与私钥
+  shell: "cd {{ cluster_dir }}/ssl && {{ base_dir }}/bin/cfssl gencert \
+        -ca=ca.pem \
+        -ca-key=ca-key.pem \
+        -config=ca-config.json \
+        -profile=kubernetes admin-csr.json | {{ base_dir }}/bin/cfssljson -bare admin"
+```
+
+
+## 参考
+
+- [CloudFlare 开源证书管理工具 cfssl 详细使用教程](https://zhuanlan.zhihu.com/p/596891203)

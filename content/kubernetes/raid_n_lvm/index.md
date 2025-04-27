@@ -98,6 +98,7 @@ ENV{key}：设置设备属性
 在应用产生的数据确实需要增加驱动器时，我们也可以灵活地在线调整卷的大小。
 
 
+
 ## 基本命令
 
 ### lsblk (list block)
@@ -306,7 +307,44 @@ LVM是建立在硬盘和 分区之上的一个逻辑层，来提高磁盘分区�
 | reduce 减少 |           | vgreduce |lvreduce |
 
 
+
+```shell
+# 安装
+$ sudo yum install lvm2
+```
+
 lvcreate 使用
+
+```shell
+# 命令行使用
+[root@master-01 ~]# lvcreate --help
+  lvcreate - Create a logical volume
+
+  Create a linear LV.
+  lvcreate -L|--size Size[m|UNIT] VG
+	[ -l|--extents Number[PERCENT] ]
+	[    --type linear ]
+	[ COMMON_OPTIONS ]
+	[ PV ... ]
+	
+ ......
+ Create a thin LV, first creating a thin pool for it,
+  where the new thin pool is named by the --thinpool arg.
+  lvcreate --type thin -V|--virtualsize Size[m|UNIT] -L|--size Size[m|UNIT] --thinpool LV_new
+	[ -l|--extents Number[PERCENT] ]
+	[ -T|--thin ]
+	[ -c|--chunksize Size[k|UNIT] ]
+	[ -i|--stripes Number ]
+	[ -I|--stripesize Size[k|UNIT] ]
+	[    --poolmetadatasize Size[m|UNIT] ]
+	[    --poolmetadataspare y|n ]
+	[    --discards passdown|nopassdown|ignore ]
+	[    --errorwhenfull y|n ]
+	[ COMMON_OPTIONS ]
+	[ PV ... ]
+```
+
+csi lvm-localpv 中使用
 ```go
 // https://github.com/openebs/lvm-localpv/blob/9e0ac5b4a8bacb9dc771d8d6c33293070df71507/pkg/lvm/lvm_util.go
 
@@ -939,6 +977,7 @@ Node          SN              Model                       Namespace Usage       
 - [LVM的基本概念和部署](http://xintq.net/2014/07/30/LVM%E7%9A%84%E5%9F%BA%E6%9C%AC%E6%A6%82%E5%BF%B5%E5%92%8C%E9%83%A8%E7%BD%B2/)
 - [fdisk,gdisk,parted 三种分区工具比较](https://www.cnblogs.com/zhaojiedi1992/p/zhaojiedi_linux_039_fdisk_gdisk_parted.html)
 - [LVM管理](https://www.cnblogs.com/diantong/p/10554831.html)
+- [lvm.conf配置文件描述](https://www.cnblogs.com/chencantian/articles/16676769.html)
 - [LVM精简卷(Thinly-Provisioned Logical Volumes)操作](https://blog.csdn.net/IndexMan/article/details/120267326)
 - [RAID及mdadm命令](https://cloud.tencent.com/developer/article/1108103)
 - [mdadm命令](https://www.cnblogs.com/apexchu/p/6512341.html)
