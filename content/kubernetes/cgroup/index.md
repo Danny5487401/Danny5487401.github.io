@@ -225,9 +225,144 @@ const (
 #### CFS 调优参数
 
 设置 CPU 数字的单位都是微秒（microsecond），用 us 表示
+```go
+// https://github.com/kubernetes/kubernetes/blob/07af1bab707c16c7fde936dca6579002405159ac/vendor/github.com/opencontainers/runc/libcontainer/cgroups/fs/cpu.go
+
+// cgroup v1 接口
+func (s *CpuGroup) Set(path string, r *configs.Resources) error {
+	if r.CpuShares != 0 {
+		shares := r.CpuShares
+		if err := cgroups.WriteFile(path, "cpu.shares", strconv.FormatUint(shares, 10)); err != nil {
+			return err
+		}
+		// read it back
+		sharesRead, err := fscommon.GetCgroupParamUint(path, "cpu.shares")
+		if err != nil {
+			return err
+		}
+		// ... and check
+		if shares > sharesRead {
+			return fmt.Errorf("the maximum allowed cpu-shares is %d", sharesRead)
+		} else if shares < sharesRead {
+			return fmt.Errorf("the minimum allowed cpu-shares is %d", sharesRead)
+		}
+	}
+
+	var period string
+	if r.CpuPeriod != 0 {
+		period = strconv.FormatUint(r.CpuPeriod, 10)
+		if err := cgroups.WriteFile(path, "cpu.cfs_period_us", period); err != nil {
+			// Sometimes when the period to be set is smaller
+			// than the current one, it is rejected by the kernel
+			// (EINVAL) as old_quota/new_period exceeds the parent
+			// cgroup quota limit. If this happens and the quota is
+			// going to be set, ignore the error for now and retry
+			// after setting the quota.
+			if !errors.Is(err, unix.EINVAL) || r.CpuQuota == 0 {
+				return err
+			}
+		} else {
+			period = ""
+		}
+	}
+	if r.CpuQuota != 0 {
+		if err := cgroups.WriteFile(path, "cpu.cfs_quota_us", strconv.FormatInt(r.CpuQuota, 10)); err != nil {
+			return err
+		}
+		if period != "" {
+			if err := cgroups.WriteFile(path, "cpu.cfs_period_us", period); err != nil {
+				return err
+			}
+		}
+	}
+	return s.SetRtSched(path, r)
+}
+```
 - cpu.cfs_quota_us：每个周期 cgroup 中所有任务能使用的 CPU 时间，默认为 -1，表示不限制 CPU 使用。需要配合 cpu.cfs_period_us 一起使用，一般设置为 100000（docker 中设置的值）
 - cpu.cfs_period_us：每个周期中 cgroup 任务可以使用的时间周期，如果想要限制 cgroup 任务每秒钟使用 0.5 秒 CPU，可以在 cpu.cfs_quota_us 为 100000 的情况下把它设置为 50000。如果它的值比 cfs_quota_us 大，表明进程可以使用多个核 CPU，比如 200000 表示进程能够使用 2.0 核
+
+
 - cpu.stat：CPU 使用的统计数据，nr_periods 表示已经过去的时间周期；nr_throttled 表示 cgroup 中任务被限制使用 CPU 的次数（因为超过了规定的上限）；throttled_time 表示被限制的总时间
+
+```go
+// https://github.com/kubernetes/kubernetes/blob/07af1bab707c16c7fde936dca6579002405159ac/vendor/github.com/opencontainers/runc/libcontainer/cgroups/fs/cpu.go
+
+// cgroup v1 
+func (s *CpuGroup) GetStats(path string, stats *cgroups.Stats) error {
+	const file = "cpu.stat"
+	f, err := cgroups.OpenFile(path, file, os.O_RDONLY)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		t, v, err := fscommon.ParseKeyValue(sc.Text())
+		if err != nil {
+			return &parseError{Path: path, File: file, Err: err}
+		}
+		switch t {
+		case "nr_periods":
+			stats.CpuStats.ThrottlingData.Periods = v
+
+		case "nr_throttled":
+			stats.CpuStats.ThrottlingData.ThrottledPeriods = v
+
+		case "throttled_time":
+			stats.CpuStats.ThrottlingData.ThrottledTime = v
+		}
+	}
+	return nil
+}
+```
+```go
+// https://github.com/kubernetes/kubernetes/blob/07af1bab707c16c7fde936dca6579002405159ac/vendor/github.com/opencontainers/runc/libcontainer/cgroups/fs2/cpu.go
+
+// cgroup v2 案例统计
+func statCpu(dirPath string, stats *cgroups.Stats) error {
+	const file = "cpu.stat"
+	f, err := cgroups.OpenFile(dirPath, file, os.O_RDONLY)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		t, v, err := fscommon.ParseKeyValue(sc.Text())
+		if err != nil {
+			return &parseError{Path: dirPath, File: file, Err: err}
+		}
+		switch t {
+		case "usage_usec":
+			stats.CpuStats.CpuUsage.TotalUsage = v * 1000
+
+		case "user_usec":
+			stats.CpuStats.CpuUsage.UsageInUsermode = v * 1000
+
+		case "system_usec":
+			stats.CpuStats.CpuUsage.UsageInKernelmode = v * 1000
+
+		case "nr_periods":
+			stats.CpuStats.ThrottlingData.Periods = v
+
+		case "nr_throttled":
+			stats.CpuStats.ThrottlingData.ThrottledPeriods = v
+
+		case "throttled_usec":
+			stats.CpuStats.ThrottlingData.ThrottledTime = v * 1000
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return &parseError{Path: dirPath, File: file, Err: err}
+	}
+	return nil
+}
+```
 - cpu.shares：cgroup 使用 CPU 时间的权重值。如果两个 cgroup 的权重都设置为 100，那么它们里面的任务同时运行时，使用 CPU 的时间应该是一样的；如果把其中一个权重改为 200，那么它能使用的 CPU 时间将是对方的两倍
 
 
@@ -238,6 +373,136 @@ const (
 
 
 #### cpu 监控
+
+```go
+// https://github.com/kubernetes/kubernetes/blob/761dd3640e4e11741c342fcf5fc869e09901cdb1/vendor/github.com/google/cadvisor/metrics/prometheus.go
+func NewPrometheusCollector(i infoProvider, f ContainerLabelsFunc, includedMetrics container.MetricSet, now clock.Clock, opts v2.RequestOptions) *PrometheusCollector {
+	if f == nil {
+		f = DefaultContainerLabels
+	}
+	c := &PrometheusCollector{
+		infoProvider:        i,
+		containerLabelsFunc: f,
+		errors: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "container",
+			Name:      "scrape_error",
+			Help:      "1 if there was an error while getting container metrics, 0 otherwise",
+		}),
+		containerMetrics: []containerMetric{
+			{
+				name:      "container_last_seen",
+				help:      "Last time a container was seen by the exporter",
+				valueType: prometheus.GaugeValue,
+				getValues: func(s *info.ContainerStats) metricValues {
+					return metricValues{{
+						value:     float64(now.Now().Unix()),
+						timestamp: now.Now(),
+					}}
+				},
+			},
+		},
+		includedMetrics: includedMetrics,
+		opts:            opts,
+	}
+	if includedMetrics.Has(container.CpuUsageMetrics) {
+		c.containerMetrics = append(c.containerMetrics, []containerMetric{
+			{
+				name:      "container_cpu_user_seconds_total",
+				help:      "Cumulative user cpu time consumed in seconds.",
+				valueType: prometheus.CounterValue,
+				getValues: func(s *info.ContainerStats) metricValues {
+					return metricValues{
+						{
+							value:     float64(s.Cpu.Usage.User) / float64(time.Second),
+							timestamp: s.Timestamp,
+						},
+					}
+				},
+			}, {
+				name:      "container_cpu_system_seconds_total",
+				help:      "Cumulative system cpu time consumed in seconds.",
+				valueType: prometheus.CounterValue,
+				getValues: func(s *info.ContainerStats) metricValues {
+					return metricValues{
+						{
+							value:     float64(s.Cpu.Usage.System) / float64(time.Second),
+							timestamp: s.Timestamp,
+						},
+					}
+				},
+			}, {
+				name:        "container_cpu_usage_seconds_total",
+				help:        "Cumulative cpu time consumed in seconds.",
+				valueType:   prometheus.CounterValue,
+				extraLabels: []string{"cpu"},
+				getValues: func(s *info.ContainerStats) metricValues {
+					if len(s.Cpu.Usage.PerCpu) == 0 {
+						if s.Cpu.Usage.Total > 0 {
+							return metricValues{{
+								value:     float64(s.Cpu.Usage.Total) / float64(time.Second),
+								labels:    []string{"total"},
+								timestamp: s.Timestamp,
+							}}
+						}
+					}
+					values := make(metricValues, 0, len(s.Cpu.Usage.PerCpu))
+					for i, value := range s.Cpu.Usage.PerCpu {
+						if value > 0 {
+							values = append(values, metricValue{
+								value:     float64(value) / float64(time.Second),
+								labels:    []string{fmt.Sprintf("cpu%02d", i)},
+								timestamp: s.Timestamp,
+							})
+						}
+					}
+					return values
+				},
+			}, {
+				name:      "container_cpu_cfs_periods_total",
+				help:      "Number of elapsed enforcement period intervals.",
+				valueType: prometheus.CounterValue,
+				condition: func(s info.ContainerSpec) bool { return s.Cpu.Quota != 0 },
+				getValues: func(s *info.ContainerStats) metricValues {
+					return metricValues{
+						{
+							value:     float64(s.Cpu.CFS.Periods),
+							timestamp: s.Timestamp,
+						}}
+				},
+			}, {
+				name:      "container_cpu_cfs_throttled_periods_total",
+				help:      "Number of throttled period intervals.",
+				valueType: prometheus.CounterValue,
+				condition: func(s info.ContainerSpec) bool { return s.Cpu.Quota != 0 },
+				getValues: func(s *info.ContainerStats) metricValues {
+					return metricValues{
+						{
+							value:     float64(s.Cpu.CFS.ThrottledPeriods),
+							timestamp: s.Timestamp,
+						}}
+				},
+			}, {
+				name:      "container_cpu_cfs_throttled_seconds_total",
+				help:      "Total time duration the container has been throttled.",
+				valueType: prometheus.CounterValue,
+				condition: func(s info.ContainerSpec) bool { return s.Cpu.Quota != 0 },
+				getValues: func(s *info.ContainerStats) metricValues {
+					return metricValues{
+						{
+							value:     float64(s.Cpu.CFS.ThrottledTime) / float64(time.Second),
+							timestamp: s.Timestamp,
+						}}
+				},
+			},
+		}...)
+	}
+	
+    // ...
+	
+	return c
+}
+
+```
 
 container_cpu_cfs_throttled_periods_total 通过这指标排查.
 
@@ -307,12 +572,124 @@ $ ls -l /sys/fs/cgroup/memory/kubepods/burstable/podfbc202d3-da21-11e8-ab5e-4201
 ```
 
 
+```go
+// https://github.com/kubernetes/kubernetes/blob/4096c9209cbf20c51d184e83ab6ffa3853bd2ee6/pkg/kubelet/cm/helpers_linux.go
+
+func ResourceConfigForPod(pod *v1.Pod, enforceCPULimits bool, cpuPeriod uint64, enforceMemoryQoS bool) *ResourceConfig {
+    // ...
+
+	cpuRequests := int64(0)
+	cpuLimits := int64(0)
+	memoryLimits := int64(0)
+	if request, found := reqs[v1.ResourceCPU]; found {
+		cpuRequests = request.MilliValue()
+	}
+	if limit, found := limits[v1.ResourceCPU]; found {
+		cpuLimits = limit.MilliValue()
+	}
+	if limit, found := limits[v1.ResourceMemory]; found {
+		memoryLimits = limit.Value()
+	}
+
+	// convert to CFS values
+	cpuShares := MilliCPUToShares(cpuRequests)
+	cpuQuota := MilliCPUToQuota(cpuLimits, int64(cpuPeriod))
+
+	// quota is not capped when cfs quota is disabled
+	if !enforceCPULimits {
+		cpuQuota = int64(-1)
+	}
+
+	// determine the qos class
+	qosClass := v1qos.GetPodQOS(pod)
+
+	// build the result
+	result := &ResourceConfig{}
+	if qosClass == v1.PodQOSGuaranteed {
+		result.CPUShares = &cpuShares
+		result.CPUQuota = &cpuQuota
+		result.CPUPeriod = &cpuPeriod
+		result.Memory = &memoryLimits
+	} else if qosClass == v1.PodQOSBurstable {
+		result.CPUShares = &cpuShares
+		if cpuLimitsDeclared {
+			result.CPUQuota = &cpuQuota
+			result.CPUPeriod = &cpuPeriod
+		}
+		if memoryLimitsDeclared {
+			result.Memory = &memoryLimits
+		}
+	} else {
+		shares := uint64(MinShares)
+		result.CPUShares = &shares
+	}
+	result.HugePageLimit = hugePageLimits
+
+	if enforceMemoryQoS {
+		memoryMin := int64(0)
+		if request, found := reqs[v1.ResourceMemory]; found {
+			memoryMin = request.Value()
+		}
+		if memoryMin > 0 {
+			result.Unified = map[string]string{
+				MemoryMin: strconv.FormatInt(memoryMin, 10),
+			}
+		}
+	}
+
+	return result
+}
+
+
+const (
+    // These limits are defined in the kernel:
+    // https://github.com/torvalds/linux/blob/0bddd227f3dc55975e2b8dfa7fc6f959b062a2c7/kernel/sched/sched.h#L427-L428
+    MinShares = 2
+    MaxShares = 262144
+    
+    SharesPerCPU  = 1024
+    MilliCPUToCPU = 1000
+    
+    // 100000 microseconds is equivalent to 100ms
+    QuotaPeriod = 100000
+    // 1000 microseconds is equivalent to 1ms
+    // defined here:
+    // https://github.com/torvalds/linux/blob/cac03ac368fabff0122853de2422d4e17a32de08/kernel/sched/core.c#L10546
+    MinQuotaPeriod = 1000
+)
+
+
+
+// cpu 转换
+// MilliCPUToShares converts the milliCPU to CFS shares.
+func MilliCPUToShares(milliCPU int64) uint64 {
+	if milliCPU == 0 {
+		// Docker converts zero milliCPU to unset, which maps to kernel default
+		// for unset: 1024. Return 2 here to really match kernel default for
+		// zero milliCPU.
+		return MinShares
+	}
+	// Conceptually (milliCPU / milliCPUToCPU) * sharesPerCPU, but factored to improve rounding.
+	shares := (milliCPU * SharesPerCPU) / MilliCPUToCPU
+	if shares < MinShares {
+		return MinShares
+	}
+	if shares > MaxShares {
+		return MaxShares
+	}
+	return uint64(shares)
+}
+
+```
+
+
 
 ## cgroup v1 与 cgroup v2
 
 最初 cgroups 的版本被称为 v1，这个版本的 cgroups 设计并不友好，理解起来非常困难。
 后续的开发工作由 Tejun Heo 接管，他重新设计并重写了 cgroups，新版本被称为 v2，并首次出现在 kernel 4.5 版本。
 
+[cgroup v1与cgroup v2 子系统的区别](https://www.alibabacloud.com/help/zh/alinux/support/differences-between-cgroup-v1-and-cgroup-v2#921d08df2c654)
 
 ```shell
 # 系统同时挂载了 cgroup 和 cgroup2
@@ -358,6 +735,36 @@ drwxr-xr-x   3 root root   0 user.slice/
 Kubernetes 自 v1.25 起 cgroup2 特性正式 stable.
 
 
+```go
+// https://github.com/kubernetes/kubernetes/blob/e599722bc59280bc5899b32957ff088ef97c33fa/vendor/github.com/opencontainers/runc/libcontainer/cgroups/utils.go
+
+const (
+    CgroupProcesses   = "cgroup.procs"
+    unifiedMountpoint = "/sys/fs/cgroup"
+    hybridMountpoint  = "/sys/fs/cgroup/unified"
+)
+
+
+// 判断是否是 cgroup2
+func IsCgroup2UnifiedMode() bool {
+	isUnifiedOnce.Do(func() {
+		var st unix.Statfs_t
+		err := unix.Statfs(unifiedMountpoint, &st)
+		if err != nil {
+			if os.IsNotExist(err) && userns.RunningInUserNS() {
+				// ignore the "not found" error if running in userns
+				logrus.WithError(err).Debugf("%s missing, assuming cgroup v1", unifiedMountpoint)
+				isUnified = false
+				return
+			}
+			panic(fmt.Sprintf("cannot statfs cgroup root: %s", err))
+		}
+		isUnified = st.Type == unix.CGROUP2_SUPER_MAGIC
+	})
+	return isUnified
+}
+```
+
 
 ## 工具
 
@@ -376,5 +783,5 @@ $ sudo apt-get install cgroup-tools
 - [一篇搞懂容器技术的基石: cgroup](https://zhuanlan.zhihu.com/p/434731896)
 - [docker 容器基础技术：linux cgroup 简介](https://cizixs.com/2017/08/25/linux-cgroup/)
 - [详解Cgroup V2](https://zorrozou.github.io/docs/%E8%AF%A6%E8%A7%A3Cgroup%20V2.html)
-- [cgroup v1与cgroup v2的区别](https://www.alibabacloud.com/help/zh/alinux/support/differences-between-cgroup-v1-and-cgroup-v2#921d08df2c654)
 - [k8s CPU limit和throttling的迷思](https://zhuanlan.zhihu.com/p/433065108)
+- [Pod的Qos类](https://blog.csdn.net/weixin_43539320/article/details/137913942)
