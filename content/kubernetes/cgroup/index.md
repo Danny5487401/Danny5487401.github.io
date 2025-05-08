@@ -431,6 +431,7 @@ func NewPrometheusCollector(i infoProvider, f ContainerLabelsFunc, includedMetri
 					}
 				},
 			}, {
+				// 实际的容器运行时间
 				name:        "container_cpu_usage_seconds_total",
 				help:        "Cumulative cpu time consumed in seconds.",
 				valueType:   prometheus.CounterValue,
@@ -537,6 +538,7 @@ net_cls.classid：包含一个整数值。从文件中读取是的十进制，�
 这个值的格式为 0xAAAABBBB，一共 32 位，分成前后两个部分，前置的 0 可以忽略，因此 0x10001 和 0x00010001 一样，表示为 1:1
 
 ## 容器中映射关系
+
 ### docker 中资源的表示
 ```shell
 ➜  ~ docker run --rm -d  --cpus=2 --memory=2g --name=2c2g redis:alpine 
@@ -557,9 +559,35 @@ e420a97835d9692df5b90b47e7951bc3fad48269eb2c8b1fa782527e0ae91c8e
 
 ### kubernetes 资源的表示
 对于CPU
-- resource.requests 经过转换之后会写入 cpu.share， 表示这个 cgroups最少可以使用的 CPU,在Kubernetes中一个CPU线程相当于1024 share
-- resource.limits 则通过 cpu.cfs_quota_us和cpu.cfs_period_us 两个文件来控制，表示cgroups最多可以使用的 CPU。如果 cgroups 中任务在每 1 秒内有 0.2 秒，可对单独 CPU 进行存取，可以将 cpu.cfs_quota_us 设定为 200000，cpu.cfs_period_us 设定为 1000000。
+- resource.requests 经过转换之后会写入 cpu.share， 表示这个 cgroups最少可以使用的 CPU,在Kubernetes中一个CPU线程相当于1024 share. 实际指标是 container_spec_cpu_shares
+- resource.limits 则通过 cpu.cfs_quota_us和cpu.cfs_period_us 两个文件来控制，表示cgroups最多可以使用的 CPU。
+如果 cgroups 中任务在每 1 秒内有 0.2 秒，可对单独 CPU 进行存取，可以将 cpu.cfs_quota_us 设定为 200000，cpu.cfs_period_us 设定为 1000000。
+实际指标是 container_spec_cpu_period 和 container_spec_cpu_quota.
 
+
+
+```go
+// https://github.com/kubernetes/kubernetes/blob/761dd3640e4e11741c342fcf5fc869e09901cdb1/vendor/github.com/google/cadvisor/metrics/prometheus.go
+
+// 指标写入
+func (c *PrometheusCollector) collectContainersInfo(ch chan<- prometheus.Metric) {
+	    // ...
+
+		if cont.Spec.HasCpu {
+			// 指标映射关系
+			desc = prometheus.NewDesc("container_spec_cpu_period", "CPU period of the container.", labels, nil)
+			ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, float64(cont.Spec.Cpu.Period), values...)
+			if cont.Spec.Cpu.Quota != 0 {
+				desc = prometheus.NewDesc("container_spec_cpu_quota", "CPU quota of the container.", labels, nil)
+				ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, float64(cont.Spec.Cpu.Quota), values...)
+			}
+			desc := prometheus.NewDesc("container_spec_cpu_shares", "CPU share of the container.", labels, nil)
+			ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, float64(cont.Spec.Cpu.Limit), values...)
+
+		}
+		// ..
+}
+```
 
 
 对于内存
@@ -683,6 +711,60 @@ func MilliCPUToShares(milliCPU int64) uint64 {
 ```
 
 
+cgroup 设置
+```go
+// cgroup v1 cpu 设置
+func (s *CpuGroup) Set(path string, r *configs.Resources) error {
+	if r.CpuShares != 0 {
+		shares := r.CpuShares
+		if err := cgroups.WriteFile(path, "cpu.shares", strconv.FormatUint(shares, 10)); err != nil {
+			return err
+		}
+		// read it back
+		sharesRead, err := fscommon.GetCgroupParamUint(path, "cpu.shares")
+		if err != nil {
+			return err
+		}
+		// ... and check
+		if shares > sharesRead {
+			return fmt.Errorf("the maximum allowed cpu-shares is %d", sharesRead)
+		} else if shares < sharesRead {
+			return fmt.Errorf("the minimum allowed cpu-shares is %d", sharesRead)
+		}
+	}
+
+	var period string
+	if r.CpuPeriod != 0 {
+		period = strconv.FormatUint(r.CpuPeriod, 10)
+		if err := cgroups.WriteFile(path, "cpu.cfs_period_us", period); err != nil {
+			// Sometimes when the period to be set is smaller
+			// than the current one, it is rejected by the kernel
+			// (EINVAL) as old_quota/new_period exceeds the parent
+			// cgroup quota limit. If this happens and the quota is
+			// going to be set, ignore the error for now and retry
+			// after setting the quota.
+			if !errors.Is(err, unix.EINVAL) || r.CpuQuota == 0 {
+				return err
+			}
+		} else {
+			period = ""
+		}
+	}
+	if r.CpuQuota != 0 {
+		if err := cgroups.WriteFile(path, "cpu.cfs_quota_us", strconv.FormatInt(r.CpuQuota, 10)); err != nil {
+			return err
+		}
+		if period != "" {
+			if err := cgroups.WriteFile(path, "cpu.cfs_period_us", period); err != nil {
+				return err
+			}
+		}
+	}
+	return s.SetRtSched(path, r)
+}
+```
+
+
 
 ## cgroup v1 与 cgroup v2
 
@@ -785,3 +867,4 @@ $ sudo apt-get install cgroup-tools
 - [详解Cgroup V2](https://zorrozou.github.io/docs/%E8%AF%A6%E8%A7%A3Cgroup%20V2.html)
 - [k8s CPU limit和throttling的迷思](https://zhuanlan.zhihu.com/p/433065108)
 - [Pod的Qos类](https://blog.csdn.net/weixin_43539320/article/details/137913942)
+- [如何计算Kubernetes容器CPU使用率](https://www.cnblogs.com/apink/p/15767687.html)
