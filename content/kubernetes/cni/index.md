@@ -502,7 +502,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	result := &current.Result{CNIVersion: cniVersion, Interfaces: []*current.Interface{brInterface, hostInterface, containerInterface}}
 
 	if isLayer3 {
-		// 运行IPAM插件，并获取结果
+		// 运行 IPAM 插件，并获取结果
 		r, err := ipam.ExecAdd(n.IPAM.Type, args.StdinData)
 		if err != nil {
 			return err
@@ -894,7 +894,7 @@ func loadFromConfDir(c *libcni, max int) error {
 			ifName: getIfName(c.prefix, i),
 		})
 		i++
-		if i == max {
+		if i == max { // 最多读取配置数量,默认是 	DefaultMaxConfNum    = 1
 			break
 		}
 	}

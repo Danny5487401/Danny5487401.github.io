@@ -343,13 +343,40 @@ ip netns exec ns1 ip addr add 10.1.1.2/24 dev vethDemo0
 - <BROADCAST,MULTICAST,UP,LOWER_UP> 是 net_device flags 网络设备的状态标识: UP 表示网卡处于启动的状态；BROADCAST 表示这个网卡有广播地址，可以发送广播包；MULTICAST 表示网卡可以发送多播包；LOWER_UP 表示 L1 是启动的，也即网线插着呢。
 
 
-
 ## Flannel的大致流程
 
 {{<figure src="./cri_n_cni.png#center" width=800px >}}
 
 
-1. flannel利用Kubernetes API或者etcd用于存储整个集群的网络配置，其中最主要的内容为设置集群的网络地址空间。例如，设定整个集群内所有容器的IP都取自网段“10.1.0.0/16”。
+1. flannel利用Kubernetes API或者etcd用于存储整个集群的网络配置，其中最主要的内容为设置集群的网络地址空间。flannel上各Node的IP子网分配均基于K8S Node的spec.podCIDR属性. 例如k8s为node-1节点分配的podCIDR为:10.244.8.0/24）
+```shell
+$ kubectl get node worker-02 -o yaml
+apiVersion: v1
+kind: Node
+metadata:
+  annotations:
+    flannel.alpha.coreos.com/backend-data: '{"VNI":1,"VtepMAC":"c6:73:f2:93:70:0a"}'
+    flannel.alpha.coreos.com/backend-type: vxlan
+    flannel.alpha.coreos.com/kube-subnet-manager: "true"
+    flannel.alpha.coreos.com/public-ip: 172.16.7.32
+    node.alpha.kubernetes.io/ttl: "0"
+    volumes.kubernetes.io/controller-managed-attach-detach: "true"
+  creationTimestamp: "2025-02-27T14:08:53Z"
+  labels:
+    beta.kubernetes.io/arch: amd64
+    beta.kubernetes.io/os: linux
+    kubernetes.io/arch: amd64
+    kubernetes.io/hostname: worker-02
+    kubernetes.io/os: linux
+    kubernetes.io/role: node
+  name: worker-02
+  resourceVersion: "12437160"
+  uid: 09211d92-6344-4561-877a-91899f1490bc
+spec:
+  podCIDR: 192.168.2.0/24
+  podCIDRs:
+  - 192.168.2.0/24
+```
 ```go
 func newSubnetManager(ctx context.Context) (subnet.Manager, error) {
 	if opts.kubeSubnetMgr { // api 的方式
@@ -378,7 +405,7 @@ func newSubnetManager(ctx context.Context) (subnet.Manager, error) {
 	return etcd.NewLocalManager(ctx, cfg, prevSubnet, prevIPv6Subnet, opts.subnetLeaseRenewMargin)
 }
 ```
-2. flannel在每个主机中运行flanneld作为agent，它会为所在主机从集群的网络地址空间中，获取一个小的网段subnet，本主机内所有容器的IP地址都将从中分配。
+2. flannel在每个主机中运行 flanneld 作为agent，它会为所在主机从集群的网络地址空间中，获取一个小的网段subnet，本主机内所有容器的IP地址都将从中分配。
 ```go
 // https://github.com/flannel-io/flannel/blob/8a6570f4e4411473d59538e101ddf95173ab9f07/pkg/subnet/kube/kube.go
 
@@ -402,7 +429,7 @@ FLANNEL_SUBNET=192.168.1.1/24
 FLANNEL_MTU=1450
 FLANNEL_IPMASQ=true
 ```
-3. flanneld再将本主机获取的subnet以及用于主机间通信的Public IP，同样通过kubernetes API或者etcd存储起来。
+3. flanneld 再将本主机获取的subnet以及用于主机间通信的Public IP，同样通过kubernetes API或者etcd存储起来。
 4. flannel利用各种backend ，例如udp，vxlan，host-gw等等，跨主机转发容器间的网络流量，完成容器间的跨主机通信。
 ```shell
 [root@master-01 ~]# cat /etc/cni/net.d/10-flannel.conflist
@@ -426,18 +453,23 @@ FLANNEL_IPMASQ=true
   ]
 }
 ```
+
+插件二进制调用
 ```go
+// https://github.com/flannel-io/cni-plugin/blob/088da1a9c0def0cb57fb77e53da4979fe41d8494/flannel.go
 func cmdAdd(args *skel.CmdArgs) error {
 	n, err := loadFlannelNetConf(args.StdinData)
 	if err != nil {
 		return fmt.Errorf("loadFlannelNetConf failed: %w", err)
 	}
+	
+	// 获取 subnet.env 信息
 	fenv, err := loadFlannelSubnetEnv(n.SubnetFile)
 	if err != nil {
 		return fmt.Errorf("loadFlannelSubnetEnv failed: %w", err)
 	}
 
-    // 校验操作
+    // 校验操作..
 
 	return doCmdAdd(args, n, fenv)
 }
@@ -445,31 +477,22 @@ func cmdAdd(args *skel.CmdArgs) error {
 func doCmdAdd(args *skel.CmdArgs, n *NetConf, fenv *subnetEnv) error {
 	n.Delegate["name"] = n.Name
 
-	// 默认使用 bridge 进行下一步
+
 	if !hasKey(n.Delegate, "type") {
+		// 不存在,默认调用 type:bridge 进行操作
 		n.Delegate["type"] = "bridge"
 	}
 
-	if !hasKey(n.Delegate, "ipMasq") {
-		// if flannel is not doing ipmasq, we should
-		ipmasq := !*fenv.ipmasq
-		n.Delegate["ipMasq"] = ipmasq
-	}
-
-	if !hasKey(n.Delegate, "mtu") {
-		mtu := fenv.mtu
-		n.Delegate["mtu"] = mtu
-	}
+    // ...
 
 	if n.Delegate["type"].(string) == "bridge" {
 		if !hasKey(n.Delegate, "isGateway") {
 			n.Delegate["isGateway"] = true
 		}
 	}
-	if n.CNIVersion != "" {
-		n.Delegate["cniVersion"] = n.CNIVersion
-	}
+    // ..
 
+	// 获取 ipam 分配插件
 	ipam, err := getDelegateIPAM(n, fenv)
 	if err != nil {
 		return fmt.Errorf("failed to assemble Delegate IPAM: %w", err)
@@ -477,8 +500,80 @@ func doCmdAdd(args *skel.CmdArgs, n *NetConf, fenv *subnetEnv) error {
 	n.Delegate["ipam"] = ipam
 	fmt.Fprintf(os.Stderr, "\n%#v\n", n.Delegate)
 
-	// 这里实际调用 bridge 进行操作
+	
 	return delegateAdd(args.ContainerID, n.DataDir, n.Delegate)
+}
+
+
+func delegateAdd(cid, dataDir string, netconf map[string]interface{}) error {
+	netconfBytes, err := json.Marshal(netconf)
+	fmt.Fprintf(os.Stderr, "delegateAdd: netconf sent to delegate plugin:\n")
+	os.Stderr.Write(netconfBytes)
+	if err != nil {
+		return fmt.Errorf("error serializing delegate netconf: %v", err)
+	}
+
+	// save the rendered netconf for cmdDel
+	if err = saveScratchNetConf(cid, dataDir, netconfBytes); err != nil {
+		return err
+	}
+
+	// 调用 type 指定的插件
+	result, err := invoke.DelegateAdd(context.TODO(), netconf["type"].(string), netconfBytes, nil)
+	if err != nil {
+		err = fmt.Errorf("failed to delegate add: %w", err)
+		return err
+	}
+	return result.Print()
+}
+```
+
+```go
+func getDelegateIPAM(n *NetConf, fenv *subnetEnv) (map[string]interface{}, error) {
+	ipam := n.IPAM
+	if ipam == nil {
+		ipam = map[string]interface{}{}
+	}
+
+	// 如果没有指定的化使用 host-local
+	if !hasKey(ipam, "type") {
+		ipam["type"] = "host-local"
+	}
+
+	var rangesSlice [][]map[string]interface{}
+
+	if fenv.sn != nil && fenv.sn.String() != "" {
+		rangesSlice = append(rangesSlice, []map[string]interface{}{
+			{"subnet": fenv.sn.String()},
+		},
+		)
+	}
+
+	if fenv.ip6Sn != nil && fenv.ip6Sn.String() != "" {
+		rangesSlice = append(rangesSlice, []map[string]interface{}{
+			{"subnet": fenv.ip6Sn.String()},
+		},
+		)
+	}
+
+	ipam["ranges"] = rangesSlice
+
+	rtes, err := getIPAMRoutes(n)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read IPAM routes: %w", err)
+	}
+
+	for _, nw := range fenv.nws {
+		if nw != nil {
+			rtes = append(rtes, types.Route{Dst: *nw})
+		}
+	}
+
+    // ...
+
+	ipam["routes"] = rtes
+
+	return ipam, nil
 }
 
 ```
@@ -595,11 +690,8 @@ func (be *VXLANBackend) RegisterNetwork(ctx context.Context, wg *sync.WaitGroup,
 			return nil, fmt.Errorf("failed to configure interface %s: %w", dev.link.Attrs().Name, err)
 		}
 	}
-	if config.EnableIPv6 {
-		if err := v6Dev.ConfigureIPv6(ip.IP6Net{IP: lease.IPv6Subnet.IP, PrefixLen: 128}, config.IPv6Network); err != nil {
-			return nil, fmt.Errorf("failed to configure interface %s: %w", v6Dev.link.Attrs().Name, err)
-		}
-	}
+    // ...
+	
 	return newNetwork(be.subnetMgr, be.extIface, dev, v6Dev, ip.IP4Net{}, lease, cfg.MTU)
 }
 
@@ -888,6 +980,8 @@ blackhole 192.168.37.192/26 proto bird
 
 
 ## 参考
+- https://github.com/flannel-io/flannel
+- https://github.com/flannel-io/cni-plugin
 - [图文并茂VLAN详解](https://cloud.tencent.com/developer/article/1412795)
 - [VXLAN-原理介绍+报文分析+配置实例 ](https://www.cnblogs.com/FengXingZhe008/p/17335124.html)
 - [Flannel Vxlan封包原理剖析](https://izsk.me/2022/03/25/Kubernetes-Flannel-Vxlan/)
