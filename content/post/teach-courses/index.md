@@ -1,3 +1,17 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [Video](#video)
+- [Podcast](#podcast)
+- [Test students](#test-students)
+- [Math](#math)
+- [Code](#code)
+- [Inline Images](#inline-images)
+- [Did you find this page helpful? Consider sharing it 🙌](#did-you-find-this-page-helpful-consider-sharing-it-)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 ---
 title: 👩🏼‍🏫 Teach academic courses
 summary: Embed videos, podcasts, code, LaTeX math, and even test students!

@@ -1,3 +1,18 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [基本概念](#%E5%9F%BA%E6%9C%AC%E6%A6%82%E5%BF%B5)
+  - [服务器证书分类](#%E6%9C%8D%E5%8A%A1%E5%99%A8%E8%AF%81%E4%B9%A6%E5%88%86%E7%B1%BB)
+  - [数字证书编码格式](#%E6%95%B0%E5%AD%97%E8%AF%81%E4%B9%A6%E7%BC%96%E7%A0%81%E6%A0%BC%E5%BC%8F)
+  - [扩展名](#%E6%89%A9%E5%B1%95%E5%90%8D)
+- [go 语言  x509 包](#go-%E8%AF%AD%E8%A8%80--x509-%E5%8C%85)
+- [CloudFlare 开源证书管理工具 cfssl](#cloudflare-%E5%BC%80%E6%BA%90%E8%AF%81%E4%B9%A6%E7%AE%A1%E7%90%86%E5%B7%A5%E5%85%B7-cfssl)
+  - [cfssl 第三方使用--kubeasz 部署 k8s 集群](#cfssl-%E7%AC%AC%E4%B8%89%E6%96%B9%E4%BD%BF%E7%94%A8--kubeasz-%E9%83%A8%E7%BD%B2-k8s-%E9%9B%86%E7%BE%A4)
+- [参考](#%E5%8F%82%E8%80%83)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 ---
 title: "Certificate 证书"
 summary: 证书分为根证书、服务器证书、客户端证书。根证书文件（ca.crt）和根证书对应的私钥文件（ca.key）由 CA（证书授权中心，国际认可）生成和保管。那么服务器如何获得证书呢？向 CA 申请！

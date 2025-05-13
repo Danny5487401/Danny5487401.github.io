@@ -1,3 +1,19 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [审计来源](#%E5%AE%A1%E8%AE%A1%E6%9D%A5%E6%BA%90)
+- [审计策略配置](#%E5%AE%A1%E8%AE%A1%E7%AD%96%E7%95%A5%E9%85%8D%E7%BD%AE)
+- [审计后端](#%E5%AE%A1%E8%AE%A1%E5%90%8E%E7%AB%AF)
+  - [方式一: 事件写入到文件系统,然后再用 filebeat 收集](#%E6%96%B9%E5%BC%8F%E4%B8%80-%E4%BA%8B%E4%BB%B6%E5%86%99%E5%85%A5%E5%88%B0%E6%96%87%E4%BB%B6%E7%B3%BB%E7%BB%9F%E7%84%B6%E5%90%8E%E5%86%8D%E7%94%A8-filebeat-%E6%94%B6%E9%9B%86)
+  - [方式二: wewhook 后端](#%E6%96%B9%E5%BC%8F%E4%BA%8C-wewhook-%E5%90%8E%E7%AB%AF)
+- [监控及调整](#%E7%9B%91%E6%8E%A7%E5%8F%8A%E8%B0%83%E6%95%B4)
+  - [参数调整](#%E5%8F%82%E6%95%B0%E8%B0%83%E6%95%B4)
+- [应用](#%E5%BA%94%E7%94%A8)
+- [参考](#%E5%8F%82%E8%80%83)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 ---
 title: "Audit"
 date: 2025-02-11T10:32:34+08:00

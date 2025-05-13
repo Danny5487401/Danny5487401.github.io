@@ -1,3 +1,16 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [基本概念](#%E5%9F%BA%E6%9C%AC%E6%A6%82%E5%BF%B5)
+- [指标获取](#%E6%8C%87%E6%A0%87%E8%8E%B7%E5%8F%96)
+- [LoadVariationRiskBalancing 负载感知均衡调度](#loadvariationriskbalancing-%E8%B4%9F%E8%BD%BD%E6%84%9F%E7%9F%A5%E5%9D%87%E8%A1%A1%E8%B0%83%E5%BA%A6)
+- [TargetLoadPacking 负载上限调度](#targetloadpacking-%E8%B4%9F%E8%BD%BD%E4%B8%8A%E9%99%90%E8%B0%83%E5%BA%A6)
+- [LowRiskOverCommitment 资源限制感知调度](#lowriskovercommitment-%E8%B5%84%E6%BA%90%E9%99%90%E5%88%B6%E6%84%9F%E7%9F%A5%E8%B0%83%E5%BA%A6)
+- [参考](#%E5%8F%82%E8%80%83)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 ---
 title: "Trimaran"
 date: 2025-03-02T14:13:27+08:00

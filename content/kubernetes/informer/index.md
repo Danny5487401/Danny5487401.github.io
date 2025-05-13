@@ -1,3 +1,34 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [List-Watch 机制和 Informer 模块](#list-watch-%E6%9C%BA%E5%88%B6%E5%92%8C-informer-%E6%A8%A1%E5%9D%97)
+  - [基本概念](#%E5%9F%BA%E6%9C%AC%E6%A6%82%E5%BF%B5)
+  - [List-Watch 的设计理念](#list-watch-%E7%9A%84%E8%AE%BE%E8%AE%A1%E7%90%86%E5%BF%B5)
+  - [使用案例](#%E4%BD%BF%E7%94%A8%E6%A1%88%E4%BE%8B)
+  - [Reflector 的实现原理](#reflector-%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86)
+    - [结构体](#%E7%BB%93%E6%9E%84%E4%BD%93)
+    - [初始化](#%E5%88%9D%E5%A7%8B%E5%8C%96)
+    - [启动 reflector，监听处理 listAndWatch](#%E5%90%AF%E5%8A%A8-reflector%E7%9B%91%E5%90%AC%E5%A4%84%E7%90%86-listandwatch)
+    - [全量拉取](#%E5%85%A8%E9%87%8F%E6%8B%89%E5%8F%96)
+    - [增量监听](#%E5%A2%9E%E9%87%8F%E7%9B%91%E5%90%AC)
+  - [store -->deltaFIFO 队列](#store---deltafifo-%E9%98%9F%E5%88%97)
+    - [store 初始化](#store-%E5%88%9D%E5%A7%8B%E5%8C%96)
+    - [队列中的事件类型](#%E9%98%9F%E5%88%97%E4%B8%AD%E7%9A%84%E4%BA%8B%E4%BB%B6%E7%B1%BB%E5%9E%8B)
+    - [结构体定义](#%E7%BB%93%E6%9E%84%E4%BD%93%E5%AE%9A%E4%B9%89)
+    - [添加，修改，删除](#%E6%B7%BB%E5%8A%A0%E4%BF%AE%E6%94%B9%E5%88%A0%E9%99%A4)
+    - [消费元素](#%E6%B6%88%E8%B4%B9%E5%85%83%E7%B4%A0)
+  - [索引实现原理](#%E7%B4%A2%E5%BC%95%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86)
+    - [初始化](#%E5%88%9D%E5%A7%8B%E5%8C%96-1)
+    - [索引的数据结构](#%E7%B4%A2%E5%BC%95%E7%9A%84%E6%95%B0%E6%8D%AE%E7%BB%93%E6%9E%84)
+    - [增删改索引](#%E5%A2%9E%E5%88%A0%E6%94%B9%E7%B4%A2%E5%BC%95)
+  - [cache.controller 控制器实现原理](#cachecontroller-%E6%8E%A7%E5%88%B6%E5%99%A8%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86)
+  - [Informer 的实现原理](#informer-%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86)
+    - [informer 的创建](#informer-%E7%9A%84%E5%88%9B%E5%BB%BA)
+  - [参考](#%E5%8F%82%E8%80%83)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 ---
 title: "List-Watch 机制和 Informer 模块"
 summary: list-watch 实现原理及相关模块

@@ -1,3 +1,23 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [背景](#%E8%83%8C%E6%99%AF)
+- [基本概念](#%E5%9F%BA%E6%9C%AC%E6%A6%82%E5%BF%B5)
+  - [异构计算（Heterogeneous Computing）](#%E5%BC%82%E6%9E%84%E8%AE%A1%E7%AE%97heterogeneous-computing)
+  - [CUDA](#cuda)
+  - [CPU 对比 GPU（Graphics Processing Unit）](#cpu-%E5%AF%B9%E6%AF%94-gpugraphics-processing-unit)
+- [使用](#%E4%BD%BF%E7%94%A8)
+- [Device Plugin](#device-plugin)
+  - [Device Plugin 原理](#device-plugin-%E5%8E%9F%E7%90%86)
+  - [kubelet 注册 device plugin](#kubelet-%E6%B3%A8%E5%86%8C-device-plugin)
+- [基于 K8S 的 GPU 虚拟化框架](#%E5%9F%BA%E4%BA%8E-k8s-%E7%9A%84-gpu-%E8%99%9A%E6%8B%9F%E5%8C%96%E6%A1%86%E6%9E%B6)
+  - [容器侧：CUDA 工具集](#%E5%AE%B9%E5%99%A8%E4%BE%A7cuda-%E5%B7%A5%E5%85%B7%E9%9B%86)
+- [如何利用容器运行GPU程序](#%E5%A6%82%E4%BD%95%E5%88%A9%E7%94%A8%E5%AE%B9%E5%99%A8%E8%BF%90%E8%A1%8Cgpu%E7%A8%8B%E5%BA%8F)
+- [参考](#%E5%8F%82%E8%80%83)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 ---
 title: "Gpu Scheduler"
 date: 2024-10-16T10:37:57+08:00

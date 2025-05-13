@@ -1,3 +1,37 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [基本知识](#%E5%9F%BA%E6%9C%AC%E7%9F%A5%E8%AF%86)
+  - [udev-->Dynamic device management 设备管理工具](#udev--dynamic-device-management-%E8%AE%BE%E5%A4%87%E7%AE%A1%E7%90%86%E5%B7%A5%E5%85%B7)
+    - [udev 规则的 match 匹配键](#udev-%E8%A7%84%E5%88%99%E7%9A%84-match-%E5%8C%B9%E9%85%8D%E9%94%AE)
+    - [udev 的重要 assignment赋值键](#udev-%E7%9A%84%E9%87%8D%E8%A6%81-assignment%E8%B5%8B%E5%80%BC%E9%94%AE)
+  - [/dev/disk 目录](#devdisk-%E7%9B%AE%E5%BD%95)
+  - [LVM 精简卷(Thinly-Provisioned Logical Volumes)](#lvm-%E7%B2%BE%E7%AE%80%E5%8D%B7thinly-provisioned-logical-volumes)
+  - [dmsetup(Device mapper setup 管理硬盘映射器)](#dmsetupdevice-mapper-setup-%E7%AE%A1%E7%90%86%E7%A1%AC%E7%9B%98%E6%98%A0%E5%B0%84%E5%99%A8)
+  - [fuser](#fuser)
+- [基本命令](#%E5%9F%BA%E6%9C%AC%E5%91%BD%E4%BB%A4)
+  - [lsblk (list block)](#lsblk-list-block)
+  - [blkid (block id)](#blkid-block-id)
+  - [parted](#parted)
+  - [fuser - identify processer using files or sockets](#fuser---identify-processer-using-files-or-sockets)
+- [lvm(Logical Volume Manager)](#lvmlogical-volume-manager)
+  - [lvm 操作](#lvm-%E6%93%8D%E4%BD%9C)
+- [RAID(Redundant Array of Independent Disks 独立硬盘冗余阵列）](#raidredundant-array-of-independent-disks-%E7%8B%AC%E7%AB%8B%E7%A1%AC%E7%9B%98%E5%86%97%E4%BD%99%E9%98%B5%E5%88%97)
+  - [基本概念](#%E5%9F%BA%E6%9C%AC%E6%A6%82%E5%BF%B5)
+  - [raid 分类](#raid-%E5%88%86%E7%B1%BB)
+    - [raid 0](#raid-0)
+    - [RAID 1](#raid-1)
+    - [混合RAID: raid 10](#%E6%B7%B7%E5%90%88raid-raid-10)
+  - [raid 操作](#raid-%E6%93%8D%E4%BD%9C)
+    - [创建raid](#%E5%88%9B%E5%BB%BAraid)
+    - [卸载 raid](#%E5%8D%B8%E8%BD%BD-raid)
+- [NVMe(Non-Volatile Memory Express)](#nvmenon-volatile-memory-express)
+  - [nvme-cli 命令](#nvme-cli-%E5%91%BD%E4%BB%A4)
+- [参考](#%E5%8F%82%E8%80%83)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 ---
 title: "存储: Raid 和 lvm, NVMe"
 date: 2025-02-21T08:34:31+08:00
@@ -97,7 +131,18 @@ ENV{key}：设置设备属性
 这样我们可以轻易的创建出总逻辑容量超出物理磁盘空间的多个“精简卷”，而无须为将来可能达到的数据量提前“买单”。
 在应用产生的数据确实需要增加驱动器时，我们也可以灵活地在线调整卷的大小。
 
+### dmsetup(Device mapper setup 管理硬盘映射器)
 
+dmsetup命令是Linux系统平台中一个更加底层的逻辑卷管理工具，能够轻松从设备底层管理LVM逻辑卷管理器中各个设备卷，如果用lvcreate和lvremove无法正常对逻辑卷进行管理了，那么则可以用dmsetup试一下
+
+demsetup ls #列出所有逻辑设备
+
+demsetup status # 列出所有逻辑设备的状态信息
+
+desetup remove # 移除逻辑设备
+
+### fuser
+显示出当前哪个程序在使用磁盘上的某个文件、挂载点、甚至网络端口，并给出程序进程的详细信息。
 
 ## 基本命令
 
@@ -972,8 +1017,8 @@ Node          SN              Model                       Namespace Usage       
 
 
 ## 参考
-
 - https://www.diskinternals.com/raid-recovery/how-to-remove-software-raid-with-mdadm/
+- https://linux.die.net/man/8/dmsetup
 - [LVM的基本概念和部署](http://xintq.net/2014/07/30/LVM%E7%9A%84%E5%9F%BA%E6%9C%AC%E6%A6%82%E5%BF%B5%E5%92%8C%E9%83%A8%E7%BD%B2/)
 - [fdisk,gdisk,parted 三种分区工具比较](https://www.cnblogs.com/zhaojiedi1992/p/zhaojiedi_linux_039_fdisk_gdisk_parted.html)
 - [LVM管理](https://www.cnblogs.com/diantong/p/10554831.html)
@@ -985,3 +1030,4 @@ Node          SN              Model                       Namespace Usage       
 - [NVMe协议基础原理介绍](https://cloud.tencent.com/developer/article/2192563)
 - [NVMe存储 全解](https://cloud-atlas.readthedocs.io/zh-cn/latest/linux/storage/nvme/nvme.html)
 - [udev和rules使用规则](https://www.cnblogs.com/zhouhbing/p/4025748.html)
+- [dmsetup 命令](https://www.cnblogs.com/xzongblogs/p/14982032.html)

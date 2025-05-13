@@ -1,3 +1,23 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [CNI Plugin](#cni-plugin)
+  - [插件分类](#%E6%8F%92%E4%BB%B6%E5%88%86%E7%B1%BB)
+  - [macvlan](#macvlan)
+  - [host-local](#host-local)
+  - [bridge](#bridge)
+    - [hairpin mode](#hairpin-mode)
+  - [vlan](#vlan)
+- [实现一个 CNI 插件](#%E5%AE%9E%E7%8E%B0%E4%B8%80%E4%B8%AA-cni-%E6%8F%92%E4%BB%B6)
+- [cni 调用入口 cri](#cni-%E8%B0%83%E7%94%A8%E5%85%A5%E5%8F%A3-cri)
+  - [cni 调用方:pod 初始化 sandbox 时网络设置](#cni-%E8%B0%83%E7%94%A8%E6%96%B9pod-%E5%88%9D%E5%A7%8B%E5%8C%96-sandbox-%E6%97%B6%E7%BD%91%E7%BB%9C%E8%AE%BE%E7%BD%AE)
+  - [cni 被调用方: 启动配置解析](#cni-%E8%A2%AB%E8%B0%83%E7%94%A8%E6%96%B9-%E5%90%AF%E5%8A%A8%E9%85%8D%E7%BD%AE%E8%A7%A3%E6%9E%90)
+- [模拟 Kubernetes 的 CNI 环境](#%E6%A8%A1%E6%8B%9F-kubernetes-%E7%9A%84-cni-%E7%8E%AF%E5%A2%83)
+- [参考](#%E5%8F%82%E8%80%83)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 ---
 title: "Cni( Container Network Interface)"
 date: 2025-01-12T14:52:13+08:00

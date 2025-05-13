@@ -1,3 +1,34 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [scheduler 扩展方案](#scheduler-%E6%89%A9%E5%B1%95%E6%96%B9%E6%A1%88)
+  - [scheduler extender](#scheduler-extender)
+  - [scheduler framework 调度框架](#scheduler-framework-%E8%B0%83%E5%BA%A6%E6%A1%86%E6%9E%B6)
+    - [Extension Points 扩展点](#extension-points-%E6%89%A9%E5%B1%95%E7%82%B9)
+  - [核心数据结构](#%E6%A0%B8%E5%BF%83%E6%95%B0%E6%8D%AE%E7%BB%93%E6%9E%84)
+    - [scheduler framework 调度框架第三方应用](#scheduler-framework-%E8%B0%83%E5%BA%A6%E6%A1%86%E6%9E%B6%E7%AC%AC%E4%B8%89%E6%96%B9%E5%BA%94%E7%94%A8)
+- [插件分类](#%E6%8F%92%E4%BB%B6%E5%88%86%E7%B1%BB)
+  - [默认插件 in-tree plugins](#%E9%BB%98%E8%AE%A4%E6%8F%92%E4%BB%B6-in-tree-plugins)
+  - [第三方插件 out-of-tree plugins](#%E7%AC%AC%E4%B8%89%E6%96%B9%E6%8F%92%E4%BB%B6-out-of-tree-plugins)
+  - [插件注册](#%E6%8F%92%E4%BB%B6%E6%B3%A8%E5%86%8C)
+- [kube-scheduler](#kube-scheduler)
+  - [调度流程](#%E8%B0%83%E5%BA%A6%E6%B5%81%E7%A8%8B)
+  - [调度器性能](#%E8%B0%83%E5%BA%A6%E5%99%A8%E6%80%A7%E8%83%BD)
+  - [初始化](#%E5%88%9D%E5%A7%8B%E5%8C%96)
+  - [启动](#%E5%90%AF%E5%8A%A8)
+  - [scheduleOne() 核心逻辑:拿出一个 pod 来进行调度](#scheduleone-%E6%A0%B8%E5%BF%83%E9%80%BB%E8%BE%91%E6%8B%BF%E5%87%BA%E4%B8%80%E4%B8%AA-pod-%E6%9D%A5%E8%BF%9B%E8%A1%8C%E8%B0%83%E5%BA%A6)
+    - [schedulingCycle 调度阶段](#schedulingcycle-%E8%B0%83%E5%BA%A6%E9%98%B6%E6%AE%B5)
+      - [findNodesThatFitPod 过滤预选](#findnodesthatfitpod-%E8%BF%87%E6%BB%A4%E9%A2%84%E9%80%89)
+      - [prioritizeNodes 调度器的优选阶段](#prioritizenodes-%E8%B0%83%E5%BA%A6%E5%99%A8%E7%9A%84%E4%BC%98%E9%80%89%E9%98%B6%E6%AE%B5)
+      - [selectHost 从优选的 nodes 集合里获取分值 score 最高的 node](#selecthost-%E4%BB%8E%E4%BC%98%E9%80%89%E7%9A%84-nodes-%E9%9B%86%E5%90%88%E9%87%8C%E8%8E%B7%E5%8F%96%E5%88%86%E5%80%BC-score-%E6%9C%80%E9%AB%98%E7%9A%84-node)
+    - [bindingCycle 绑定阶段](#bindingcycle-%E7%BB%91%E5%AE%9A%E9%98%B6%E6%AE%B5)
+- [插件案例](#%E6%8F%92%E4%BB%B6%E6%A1%88%E4%BE%8B)
+  - [1 NodeResourcesFit](#1-noderesourcesfit)
+- [参考](#%E5%8F%82%E8%80%83)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 ---
 title: "kube-scheduler 及 Scheduler 扩展功能推荐方式: 调度框架（scheduling framework）"
 date: 2024-09-15T14:26:42+08:00
