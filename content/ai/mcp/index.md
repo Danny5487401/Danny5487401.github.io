@@ -1,12 +1,3 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
-
-- [流程](#%E6%B5%81%E7%A8%8B)
-- [待补充](#%E5%BE%85%E8%A1%A5%E5%85%85)
-- [参考](#%E5%8F%82%E8%80%83)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ---
 title: "MCP（ 模型上下文协议 Model Context Protocol)"

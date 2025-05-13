@@ -1,22 +1,4 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [sharedIndexInformer](#sharedindexinformer)
-  - [使用](#%E4%BD%BF%E7%94%A8)
-  - [结构体](#%E7%BB%93%E6%9E%84%E4%BD%93)
-  - [初始化](#%E5%88%9D%E5%A7%8B%E5%8C%96)
-  - [注册资源 InformerFor](#%E6%B3%A8%E5%86%8C%E8%B5%84%E6%BA%90-informerfor)
-  - [配置处理函数 eventHandler](#%E9%85%8D%E7%BD%AE%E5%A4%84%E7%90%86%E5%87%BD%E6%95%B0-eventhandler)
-  - [启动 sharedIndexInformer](#%E5%90%AF%E5%8A%A8-sharedindexinformer)
-  - [HandleDeltas 核心处理函数](#handledeltas-%E6%A0%B8%E5%BF%83%E5%A4%84%E7%90%86%E5%87%BD%E6%95%B0)
-    - [distribute 把事件通知给所有 listeners](#distribute-%E6%8A%8A%E4%BA%8B%E4%BB%B6%E9%80%9A%E7%9F%A5%E7%BB%99%E6%89%80%E6%9C%89-listeners)
-    - [processorListener 消费](#processorlistener-%E6%B6%88%E8%B4%B9)
-  - [启动 sharedInformerFactory](#%E5%90%AF%E5%8A%A8-sharedinformerfactory)
-  - [获取数据](#%E8%8E%B7%E5%8F%96%E6%95%B0%E6%8D%AE)
-  - [参考](#%E5%8F%82%E8%80%83)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ---
 title: "ShareInformer 模块"

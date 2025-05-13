@@ -1,27 +1,4 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [基本概念](#%E5%9F%BA%E6%9C%AC%E6%A6%82%E5%BF%B5)
-- [组成](#%E7%BB%84%E6%88%90)
-  - [常见的子系统（subsystem）](#%E5%B8%B8%E8%A7%81%E7%9A%84%E5%AD%90%E7%B3%BB%E7%BB%9Fsubsystem)
-- [四大功能](#%E5%9B%9B%E5%A4%A7%E5%8A%9F%E8%83%BD)
-- [cgroup 子资源参数详解](#cgroup-%E5%AD%90%E8%B5%84%E6%BA%90%E5%8F%82%E6%95%B0%E8%AF%A6%E8%A7%A3)
-  - [blkio: 限制设备 IO 访问](#blkio-%E9%99%90%E5%88%B6%E8%AE%BE%E5%A4%87-io-%E8%AE%BF%E9%97%AE)
-  - [cpu：限制进程组 CPU 使用](#cpu%E9%99%90%E5%88%B6%E8%BF%9B%E7%A8%8B%E7%BB%84-cpu-%E4%BD%BF%E7%94%A8)
-    - [CFS 调优参数](#cfs-%E8%B0%83%E4%BC%98%E5%8F%82%E6%95%B0)
-    - [RT 调度模式下的参数](#rt-%E8%B0%83%E5%BA%A6%E6%A8%A1%E5%BC%8F%E4%B8%8B%E7%9A%84%E5%8F%82%E6%95%B0)
-    - [cpu 监控](#cpu-%E7%9B%91%E6%8E%A7)
-  - [memory：限制内存使用](#memory%E9%99%90%E5%88%B6%E5%86%85%E5%AD%98%E4%BD%BF%E7%94%A8)
-  - [net_cls：为网络报文分类](#net_cls%E4%B8%BA%E7%BD%91%E7%BB%9C%E6%8A%A5%E6%96%87%E5%88%86%E7%B1%BB)
-- [容器中映射关系](#%E5%AE%B9%E5%99%A8%E4%B8%AD%E6%98%A0%E5%B0%84%E5%85%B3%E7%B3%BB)
-  - [docker 中资源的表示](#docker-%E4%B8%AD%E8%B5%84%E6%BA%90%E7%9A%84%E8%A1%A8%E7%A4%BA)
-  - [kubernetes 资源的表示](#kubernetes-%E8%B5%84%E6%BA%90%E7%9A%84%E8%A1%A8%E7%A4%BA)
-- [cgroup v1 与 cgroup v2](#cgroup-v1-%E4%B8%8E-cgroup-v2)
-- [工具](#%E5%B7%A5%E5%85%B7)
-- [参考](#%E5%8F%82%E8%80%83)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ---
 title: "Linux cgroups"

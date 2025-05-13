@@ -1,20 +1,4 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [控制器](#%E6%8E%A7%E5%88%B6%E5%99%A8)
-  - [控制器进化之旅](#%E6%8E%A7%E5%88%B6%E5%99%A8%E8%BF%9B%E5%8C%96%E4%B9%8B%E6%97%85)
-    - [第一阶段：控制器直接访问api-server](#%E7%AC%AC%E4%B8%80%E9%98%B6%E6%AE%B5%E6%8E%A7%E5%88%B6%E5%99%A8%E7%9B%B4%E6%8E%A5%E8%AE%BF%E9%97%AEapi-server)
-    - [第二阶段：控制器通过informer访问api-server](#%E7%AC%AC%E4%BA%8C%E9%98%B6%E6%AE%B5%E6%8E%A7%E5%88%B6%E5%99%A8%E9%80%9A%E8%BF%87informer%E8%AE%BF%E9%97%AEapi-server)
-    - [多个控制器共享informer访问api-server](#%E5%A4%9A%E4%B8%AA%E6%8E%A7%E5%88%B6%E5%99%A8%E5%85%B1%E4%BA%ABinformer%E8%AE%BF%E9%97%AEapi-server)
-    - [第四阶段：自定义控制器+自定义资源访问 api-server](#%E7%AC%AC%E5%9B%9B%E9%98%B6%E6%AE%B5%E8%87%AA%E5%AE%9A%E4%B9%89%E6%8E%A7%E5%88%B6%E5%99%A8%E8%87%AA%E5%AE%9A%E4%B9%89%E8%B5%84%E6%BA%90%E8%AE%BF%E9%97%AE-api-server)
-    - [Open Application Model(OAM)](#open-application-modeloam)
-  - [内置的控制器](#%E5%86%85%E7%BD%AE%E7%9A%84%E6%8E%A7%E5%88%B6%E5%99%A8)
-  - [案例-ReplicaSetController](#%E6%A1%88%E4%BE%8B-replicasetcontroller)
-    - [exceptions 预期集合](#exceptions-%E9%A2%84%E6%9C%9F%E9%9B%86%E5%90%88)
-  - [参考](#%E5%8F%82%E8%80%83)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ---
 title: "Controller"

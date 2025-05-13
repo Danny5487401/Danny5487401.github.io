@@ -1,19 +1,4 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [传统限流方法的缺点](#%E4%BC%A0%E7%BB%9F%E9%99%90%E6%B5%81%E6%96%B9%E6%B3%95%E7%9A%84%E7%BC%BA%E7%82%B9)
-- [开启配置](#%E5%BC%80%E5%90%AF%E9%85%8D%E7%BD%AE)
-- [混洗分片（Shuffle-Sharding）](#%E6%B7%B7%E6%B4%97%E5%88%86%E7%89%87shuffle-sharding)
-- [API Priority and Fairness](#api-priority-and-fairness)
-  - [prioritylevelconfigurations 配置使用](#prioritylevelconfigurations-%E9%85%8D%E7%BD%AE%E4%BD%BF%E7%94%A8)
-  - [FlowSchemas 配置使用](#flowschemas-%E9%85%8D%E7%BD%AE%E4%BD%BF%E7%94%A8)
-  - [查看效果](#%E6%9F%A5%E7%9C%8B%E6%95%88%E6%9E%9C)
-- [处理流程](#%E5%A4%84%E7%90%86%E6%B5%81%E7%A8%8B)
-- [指标](#%E6%8C%87%E6%A0%87)
-- [参考](#%E5%8F%82%E8%80%83)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ---
 title: "kube-apiserver APF(API Priority and Fairness 优先级和公平性)"

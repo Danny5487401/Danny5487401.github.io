@@ -1,17 +1,4 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [组件说明](#%E7%BB%84%E4%BB%B6%E8%AF%B4%E6%98%8E)
-- [流程](#%E6%B5%81%E7%A8%8B)
-- [数据来源](#%E6%95%B0%E6%8D%AE%E6%9D%A5%E6%BA%90)
-- [syncLoop 循环监听管道信息](#syncloop-%E5%BE%AA%E7%8E%AF%E7%9B%91%E5%90%AC%E7%AE%A1%E9%81%93%E4%BF%A1%E6%81%AF)
-- [syncPod 同步 pod 状态](#syncpod-%E5%90%8C%E6%AD%A5-pod-%E7%8A%B6%E6%80%81)
-- [syncPod 真正创建pod](#syncpod-%E7%9C%9F%E6%AD%A3%E5%88%9B%E5%BB%BApod)
-- [Sandbox 沙箱](#sandbox-%E6%B2%99%E7%AE%B1)
-- [参考](#%E5%8F%82%E8%80%83)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ---
 title: "Kubelet"

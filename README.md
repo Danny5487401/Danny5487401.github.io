@@ -1,26 +1,4 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [Danny 博客](#danny-%E5%8D%9A%E5%AE%A2)
-  - [基本知识](#%E5%9F%BA%E6%9C%AC%E7%9F%A5%E8%AF%86)
-    - [Front-matter 前言](#front-matter-%E5%89%8D%E8%A8%80)
-    - [page bundle: https://gohugo.io/content-management/page-bundles/](#page-bundle-httpsgohugoiocontent-managementpage-bundles)
-  - [配置](#%E9%85%8D%E7%BD%AE)
-    - [配置文件](#%E9%85%8D%E7%BD%AE%E6%96%87%E4%BB%B6)
-    - [索引页面: _index.md](#%E7%B4%A2%E5%BC%95%E9%A1%B5%E9%9D%A2-_indexmd)
-    - [菜单 menu](#%E8%8F%9C%E5%8D%95-menu)
-  - [markdown 使用: https://docs.hugoblox.com/reference/markdown/](#markdown-%E4%BD%BF%E7%94%A8-httpsdocshugobloxcomreferencemarkdown)
-    - [图片处理](#%E5%9B%BE%E7%89%87%E5%A4%84%E7%90%86)
-  - [命令使用](#%E5%91%BD%E4%BB%A4%E4%BD%BF%E7%94%A8)
-    - [添加内容](#%E6%B7%BB%E5%8A%A0%E5%86%85%E5%AE%B9)
-    - [本地调试](#%E6%9C%AC%E5%9C%B0%E8%B0%83%E8%AF%95)
-    - [发布](#%E5%8F%91%E5%B8%83)
-  - [升级 Hugo Themes or Plugins](#%E5%8D%87%E7%BA%A7-hugo-themes-or-plugins)
-  - [扩展:https://docs.hugoblox.com/reference/extend/](#%E6%89%A9%E5%B1%95httpsdocshugobloxcomreferenceextend)
-  - [参考](#%E5%8F%82%E8%80%83)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 # Danny 博客
 

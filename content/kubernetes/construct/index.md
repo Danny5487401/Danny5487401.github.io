@@ -1,23 +1,4 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [部署工具](#%E9%83%A8%E7%BD%B2%E5%B7%A5%E5%85%B7)
-- [系统内核参数设置](#%E7%B3%BB%E7%BB%9F%E5%86%85%E6%A0%B8%E5%8F%82%E6%95%B0%E8%AE%BE%E7%BD%AE)
-  - [tcp 相关](#tcp-%E7%9B%B8%E5%85%B3)
-    - [net.ipv4.tcp_max_syn_backlog = 16384](#netipv4tcp_max_syn_backlog--16384)
-    - [net.ipv4.tcp_syncookies = 1](#netipv4tcp_syncookies--1)
-    - [net.ipv4.tcp_syn_retries = 2](#netipv4tcp_syn_retries--2)
-    - [net.core.somaxconn = 16384](#netcoresomaxconn--16384)
-    - [net.ipv4.tcp_fin_timeout = 2](#netipv4tcp_fin_timeout--2)
-    - [net.ipv4.tcp_tw_reuse = 1](#netipv4tcp_tw_reuse--1)
-- [系统预留](#%E7%B3%BB%E7%BB%9F%E9%A2%84%E7%95%99)
-- [kubeasz 使用](#kubeasz-%E4%BD%BF%E7%94%A8)
-  - [镜像仓库](#%E9%95%9C%E5%83%8F%E4%BB%93%E5%BA%93)
-- [kubeadm 使用](#kubeadm-%E4%BD%BF%E7%94%A8)
-- [参考](#%E5%8F%82%E8%80%83)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ---
 title: "k8s 部署"

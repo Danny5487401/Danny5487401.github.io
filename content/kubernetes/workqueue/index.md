@@ -1,21 +1,3 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
-
-- [workqueue 工作队列](#workqueue-%E5%B7%A5%E4%BD%9C%E9%98%9F%E5%88%97)
-  - [需求](#%E9%9C%80%E6%B1%82)
-  - [WorkQueue 分类](#workqueue-%E5%88%86%E7%B1%BB)
-    - [FIFO 队列](#fifo-%E9%98%9F%E5%88%97)
-      - [流程](#%E6%B5%81%E7%A8%8B)
-      - [结构体](#%E7%BB%93%E6%9E%84%E4%BD%93)
-      - [并发场景描述及源码解释](#%E5%B9%B6%E5%8F%91%E5%9C%BA%E6%99%AF%E6%8F%8F%E8%BF%B0%E5%8F%8A%E6%BA%90%E7%A0%81%E8%A7%A3%E9%87%8A)
-    - [延迟队列 DelayingInterface](#%E5%BB%B6%E8%BF%9F%E9%98%9F%E5%88%97-delayinginterface)
-      - [数据结构定义](#%E6%95%B0%E6%8D%AE%E7%BB%93%E6%9E%84%E5%AE%9A%E4%B9%89)
-    - [限速队列](#%E9%99%90%E9%80%9F%E9%98%9F%E5%88%97)
-      - [RateLimiter 的具体的实现](#ratelimiter-%E7%9A%84%E5%85%B7%E4%BD%93%E7%9A%84%E5%AE%9E%E7%8E%B0)
-  - [参考](#%E5%8F%82%E8%80%83)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ---
 title: "Workqueue"

@@ -1,18 +1,4 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [Overview](#overview)
-  - [Get Started](#get-started)
-- [Crowd-funded open-source software](#crowd-funded-open-source-software)
-  - [❤️ Click here to become a sponsor and help support Hugo Blox's future ❤️](#-click-here-to-become-a-sponsor-and-help-support-hugo-bloxs-future-)
-- [Ecosystem](#ecosystem)
-- [Inspiration](#inspiration)
-- [Features](#features)
-- [Themes](#themes)
-- [License](#license)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ---
 title: 🎉 Easily create your own simple yet highly customizable blog

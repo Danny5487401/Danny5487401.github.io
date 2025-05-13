@@ -1,23 +1,4 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [架构解析](#%E6%9E%B6%E6%9E%84%E8%A7%A3%E6%9E%90)
-  - [API请求流过程](#api%E8%AF%B7%E6%B1%82%E6%B5%81%E8%BF%87%E7%A8%8B)
-- [GenericAPIServer 通用配置](#genericapiserver-%E9%80%9A%E7%94%A8%E9%85%8D%E7%BD%AE)
-  - [Authentication 认证](#authentication-%E8%AE%A4%E8%AF%81)
-  - [Authorization 授权模块](#authorization-%E6%8E%88%E6%9D%83%E6%A8%A1%E5%9D%97)
-    - [RBAC鉴权器](#rbac%E9%89%B4%E6%9D%83%E5%99%A8)
-  - [admission 准入机制: 提供回调钩子，资源持久化前对资源的值做改动或者验证等操作](#admission-%E5%87%86%E5%85%A5%E6%9C%BA%E5%88%B6-%E6%8F%90%E4%BE%9B%E5%9B%9E%E8%B0%83%E9%92%A9%E5%AD%90%E8%B5%84%E6%BA%90%E6%8C%81%E4%B9%85%E5%8C%96%E5%89%8D%E5%AF%B9%E8%B5%84%E6%BA%90%E7%9A%84%E5%80%BC%E5%81%9A%E6%94%B9%E5%8A%A8%E6%88%96%E8%80%85%E9%AA%8C%E8%AF%81%E7%AD%89%E6%93%8D%E4%BD%9C)
-- [启动](#%E5%90%AF%E5%8A%A8)
-  - [CreateServerChain: API 层 创建 Three Servers](#createserverchain-api-%E5%B1%82-%E5%88%9B%E5%BB%BA-three-servers)
-  - [prepared.Run](#preparedrun)
-  - [apiExtensionsServer](#apiextensionsserver)
-  - [kubeAPIServer](#kubeapiserver)
-  - [aggregatorServer](#aggregatorserver)
-- [参考](#%E5%8F%82%E8%80%83)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ---
 title: "Kube ApiServer"

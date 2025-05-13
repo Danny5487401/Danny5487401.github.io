@@ -1,34 +1,4 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [SR-IOV 优点](#sr-iov-%E4%BC%98%E7%82%B9)
-- [基本知识](#%E5%9F%BA%E6%9C%AC%E7%9F%A5%E8%AF%86)
-  - [PCI(Peripheral Component Interconnect 外围设备互联)](#pciperipheral-component-interconnect-%E5%A4%96%E5%9B%B4%E8%AE%BE%E5%A4%87%E4%BA%92%E8%81%94)
-  - [PCIe(Peripheral Component Interconnect Express)](#pcieperipheral-component-interconnect-express)
-  - [Modalias](#modalias)
-  - [/sys/bus/pci/devices 目录介绍](#sysbuspcidevices-%E7%9B%AE%E5%BD%95%E4%BB%8B%E7%BB%8D)
-  - [/etc/sysconfig/netwrok-scripts/ 目录介绍](#etcsysconfignetwrok-scripts-%E7%9B%AE%E5%BD%95%E4%BB%8B%E7%BB%8D)
-  - [QoS(Quality of Service 服务质量)](#qosquality-of-service-%E6%9C%8D%E5%8A%A1%E8%B4%A8%E9%87%8F)
-  - [VLAN 优先级](#vlan-%E4%BC%98%E5%85%88%E7%BA%A7)
-- [SR-IOV 基本操作](#sr-iov-%E5%9F%BA%E6%9C%AC%E6%93%8D%E4%BD%9C)
-- [网卡绑定 bond](#%E7%BD%91%E5%8D%A1%E7%BB%91%E5%AE%9A-bond)
-  - [Bond 七种模式](#bond-%E4%B8%83%E7%A7%8D%E6%A8%A1%E5%BC%8F)
-    - [Mode 0 - Balance-RR（轮询模式 round-robin）](#mode-0---balance-rr%E8%BD%AE%E8%AF%A2%E6%A8%A1%E5%BC%8F-round-robin)
-    - [Mode 1 - Active-Backup（主备模式）](#mode-1---active-backup%E4%B8%BB%E5%A4%87%E6%A8%A1%E5%BC%8F)
-    - [Mode 2 - Balance-XOR（平衡异或模式）](#mode-2---balance-xor%E5%B9%B3%E8%A1%A1%E5%BC%82%E6%88%96%E6%A8%A1%E5%BC%8F)
-    - [Mode 3 - Broadcast（广播模式）](#mode-3---broadcast%E5%B9%BF%E6%92%AD%E6%A8%A1%E5%BC%8F)
-    - [Mode 4 - 802.3ad（LACP模式）](#mode-4---8023adlacp%E6%A8%A1%E5%BC%8F)
-    - [Mode 5 - Balance-TLB（自适应传输负载均衡模式）](#mode-5---balance-tlb%E8%87%AA%E9%80%82%E5%BA%94%E4%BC%A0%E8%BE%93%E8%B4%9F%E8%BD%BD%E5%9D%87%E8%A1%A1%E6%A8%A1%E5%BC%8F)
-    - [Mode 6 - Balance-ALB（自适应负载均衡模式）](#mode-6---balance-alb%E8%87%AA%E9%80%82%E5%BA%94%E8%B4%9F%E8%BD%BD%E5%9D%87%E8%A1%A1%E6%A8%A1%E5%BC%8F)
-  - [参数介绍](#%E5%8F%82%E6%95%B0%E4%BB%8B%E7%BB%8D)
-  - [bond 创建的一般流程](#bond-%E5%88%9B%E5%BB%BA%E7%9A%84%E4%B8%80%E8%88%AC%E6%B5%81%E7%A8%8B)
-- [SR-IOV 在 k8s 中应用](#sr-iov-%E5%9C%A8-k8s-%E4%B8%AD%E5%BA%94%E7%94%A8)
-  - [sriov-device-plugin-->vf 分配](#sriov-device-plugin--vf-%E5%88%86%E9%85%8D)
-  - [sriov-cni-->将SR-IOV VF 放入容器Namespace](#sriov-cni--%E5%B0%86sr-iov-vf-%E6%94%BE%E5%85%A5%E5%AE%B9%E5%99%A8namespace)
-- [参考](#%E5%8F%82%E8%80%83)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ---
 title: "SR-IOV（Single Root I/O Virtualization)"

@@ -1,17 +1,4 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [为什么需要Scheme](#%E4%B8%BA%E4%BB%80%E4%B9%88%E9%9C%80%E8%A6%81scheme)
-- [案例](#%E6%A1%88%E4%BE%8B)
-- [数据结构](#%E6%95%B0%E6%8D%AE%E7%BB%93%E6%9E%84)
-- [AddKnownTypeWithName 注册资源：建立资源 Group/Version/Kind 和 model资源类型的相互映射关系](#addknowntypewithname-%E6%B3%A8%E5%86%8C%E8%B5%84%E6%BA%90%E5%BB%BA%E7%AB%8B%E8%B5%84%E6%BA%90-groupversionkind-%E5%92%8C-model%E8%B5%84%E6%BA%90%E7%B1%BB%E5%9E%8B%E7%9A%84%E7%9B%B8%E4%BA%92%E6%98%A0%E5%B0%84%E5%85%B3%E7%B3%BB)
-- [内外部版本介绍--deployment](#%E5%86%85%E5%A4%96%E9%83%A8%E7%89%88%E6%9C%AC%E4%BB%8B%E7%BB%8D--deployment)
-- [资源 convert](#%E8%B5%84%E6%BA%90-convert)
-- [kube-apiserver 使用 scheme](#kube-apiserver-%E4%BD%BF%E7%94%A8-scheme)
-- [参考](#%E5%8F%82%E8%80%83)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ---
 title: "资源注册表(scheme)"

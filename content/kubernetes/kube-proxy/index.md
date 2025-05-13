@@ -1,22 +1,4 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [基本知识](#%E5%9F%BA%E6%9C%AC%E7%9F%A5%E8%AF%86)
-  - [ipvsadm 命令](#ipvsadm-%E5%91%BD%E4%BB%A4)
-  - [iptables](#iptables)
-  - [ipset 命令](#ipset-%E5%91%BD%E4%BB%A4)
-- [问题](#%E9%97%AE%E9%A2%98)
-  - [kube-proxy 是否可以不用安装，是否有其他替代品?](#kube-proxy-%E6%98%AF%E5%90%A6%E5%8F%AF%E4%BB%A5%E4%B8%8D%E7%94%A8%E5%AE%89%E8%A3%85%E6%98%AF%E5%90%A6%E6%9C%89%E5%85%B6%E4%BB%96%E6%9B%BF%E4%BB%A3%E5%93%81)
-- [ProxyServer 初始化](#proxyserver-%E5%88%9D%E5%A7%8B%E5%8C%96)
-- [iptables 模式](#iptables-%E6%A8%A1%E5%BC%8F)
-  - [proxier 初始化](#proxier-%E5%88%9D%E5%A7%8B%E5%8C%96)
-  - [更新规则 syncProxyRules](#%E6%9B%B4%E6%96%B0%E8%A7%84%E5%88%99-syncproxyrules)
-- [ipvs 模式](#ipvs-%E6%A8%A1%E5%BC%8F)
-  - [初始化](#%E5%88%9D%E5%A7%8B%E5%8C%96)
-- [参考](#%E5%8F%82%E8%80%83)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ---
 title: "kube-proxy"

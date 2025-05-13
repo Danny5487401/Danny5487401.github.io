@@ -1,22 +1,4 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [存储架构和csi架构](#%E5%AD%98%E5%82%A8%E6%9E%B6%E6%9E%84%E5%92%8Ccsi%E6%9E%B6%E6%9E%84)
-  - [PersistentVolumeController](#persistentvolumecontroller)
-    - [默认插件](#%E9%BB%98%E8%AE%A4%E6%8F%92%E4%BB%B6)
-  - [attachDetachController](#attachdetachcontroller)
-- [第三方插件](#%E7%AC%AC%E4%B8%89%E6%96%B9%E6%8F%92%E4%BB%B6)
-  - [CSI Controller](#csi-controller)
-  - [CSI Node & CSI Identity](#csi-node--csi-identity)
-- [SideCar 组件](#sidecar-%E7%BB%84%E4%BB%B6)
-- [工作流程](#%E5%B7%A5%E4%BD%9C%E6%B5%81%E7%A8%8B)
-  - [Provision 创盘](#provision-%E5%88%9B%E7%9B%98)
-  - [Attach 将 volume 附着到节点](#attach-%E5%B0%86-volume-%E9%99%84%E7%9D%80%E5%88%B0%E8%8A%82%E7%82%B9)
-  - [Mounting 将 volume 挂载到 pod 里](#mounting-%E5%B0%86-volume-%E6%8C%82%E8%BD%BD%E5%88%B0-pod-%E9%87%8C)
-- [参考](#%E5%8F%82%E8%80%83)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ---
 title: "Csi(container-storage-interface)架构和原理"

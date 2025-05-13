@@ -1,36 +1,4 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [基本知识](#%E5%9F%BA%E6%9C%AC%E7%9F%A5%E8%AF%86)
-  - [udev-->Dynamic device management 设备管理工具](#udev--dynamic-device-management-%E8%AE%BE%E5%A4%87%E7%AE%A1%E7%90%86%E5%B7%A5%E5%85%B7)
-    - [udev 规则的 match 匹配键](#udev-%E8%A7%84%E5%88%99%E7%9A%84-match-%E5%8C%B9%E9%85%8D%E9%94%AE)
-    - [udev 的重要 assignment赋值键](#udev-%E7%9A%84%E9%87%8D%E8%A6%81-assignment%E8%B5%8B%E5%80%BC%E9%94%AE)
-  - [/dev/disk 目录](#devdisk-%E7%9B%AE%E5%BD%95)
-  - [LVM 精简卷(Thinly-Provisioned Logical Volumes)](#lvm-%E7%B2%BE%E7%AE%80%E5%8D%B7thinly-provisioned-logical-volumes)
-  - [dmsetup(Device mapper setup 管理硬盘映射器)](#dmsetupdevice-mapper-setup-%E7%AE%A1%E7%90%86%E7%A1%AC%E7%9B%98%E6%98%A0%E5%B0%84%E5%99%A8)
-  - [fuser](#fuser)
-- [基本命令](#%E5%9F%BA%E6%9C%AC%E5%91%BD%E4%BB%A4)
-  - [lsblk (list block)](#lsblk-list-block)
-  - [blkid (block id)](#blkid-block-id)
-  - [parted](#parted)
-  - [fuser - identify processer using files or sockets](#fuser---identify-processer-using-files-or-sockets)
-- [lvm(Logical Volume Manager)](#lvmlogical-volume-manager)
-  - [lvm 操作](#lvm-%E6%93%8D%E4%BD%9C)
-- [RAID(Redundant Array of Independent Disks 独立硬盘冗余阵列）](#raidredundant-array-of-independent-disks-%E7%8B%AC%E7%AB%8B%E7%A1%AC%E7%9B%98%E5%86%97%E4%BD%99%E9%98%B5%E5%88%97)
-  - [基本概念](#%E5%9F%BA%E6%9C%AC%E6%A6%82%E5%BF%B5)
-  - [raid 分类](#raid-%E5%88%86%E7%B1%BB)
-    - [raid 0](#raid-0)
-    - [RAID 1](#raid-1)
-    - [混合RAID: raid 10](#%E6%B7%B7%E5%90%88raid-raid-10)
-  - [raid 操作](#raid-%E6%93%8D%E4%BD%9C)
-    - [创建raid](#%E5%88%9B%E5%BB%BAraid)
-    - [卸载 raid](#%E5%8D%B8%E8%BD%BD-raid)
-- [NVMe(Non-Volatile Memory Express)](#nvmenon-volatile-memory-express)
-  - [nvme-cli 命令](#nvme-cli-%E5%91%BD%E4%BB%A4)
-- [参考](#%E5%8F%82%E8%80%83)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ---
 title: "存储: Raid 和 lvm, NVMe"

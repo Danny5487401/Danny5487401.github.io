@@ -1,16 +1,4 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [背景](#%E8%83%8C%E6%99%AF)
-- [基本概念](#%E5%9F%BA%E6%9C%AC%E6%A6%82%E5%BF%B5)
-  - [Linux namespace](#linux-namespace)
-- [功能](#%E5%8A%9F%E8%83%BD)
-- [pause 源码分析](#pause-%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90)
-- [sandbox 启动流程](#sandbox-%E5%90%AF%E5%8A%A8%E6%B5%81%E7%A8%8B)
-- [参考](#%E5%8F%82%E8%80%83)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ---
 title: "Pause 容器"

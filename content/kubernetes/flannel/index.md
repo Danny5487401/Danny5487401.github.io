@@ -1,23 +1,3 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
-
-- [基本知识](#%E5%9F%BA%E6%9C%AC%E7%9F%A5%E8%AF%86)
-  - [VLAN（Virtual Local Area Network 虚拟局域网）](#vlanvirtual-local-area-network-%E8%99%9A%E6%8B%9F%E5%B1%80%E5%9F%9F%E7%BD%91)
-    - [VLAN的使用场景](#vlan%E7%9A%84%E4%BD%BF%E7%94%A8%E5%9C%BA%E6%99%AF)
-  - [Vxlan(Virtual Extensible LAN 虚拟可扩展局域网）](#vxlanvirtual-extensible-lan-%E8%99%9A%E6%8B%9F%E5%8F%AF%E6%89%A9%E5%B1%95%E5%B1%80%E5%9F%9F%E7%BD%91)
-    - [报文解析](#%E6%8A%A5%E6%96%87%E8%A7%A3%E6%9E%90)
-  - [ARP（Address Resolution Protocol地址解析协议）](#arpaddress-resolution-protocol%E5%9C%B0%E5%9D%80%E8%A7%A3%E6%9E%90%E5%8D%8F%E8%AE%AE)
-  - [FDB表(Forwarding Database 转发数据库)](#fdb%E8%A1%A8forwarding-database-%E8%BD%AC%E5%8F%91%E6%95%B0%E6%8D%AE%E5%BA%93)
-  - [ip 命令](#ip-%E5%91%BD%E4%BB%A4)
-- [Flannel的大致流程](#flannel%E7%9A%84%E5%A4%A7%E8%87%B4%E6%B5%81%E7%A8%8B)
-- [三种主要的 backend](#%E4%B8%89%E7%A7%8D%E4%B8%BB%E8%A6%81%E7%9A%84-backend)
-  - [vxlan 模式](#vxlan-%E6%A8%A1%E5%BC%8F)
-    - [实现原理](#%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86)
-  - [hostgw](#hostgw)
-- [参考](#%E5%8F%82%E8%80%83)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ---
 title: "Flannel"

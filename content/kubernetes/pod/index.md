@@ -1,12 +1,4 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [总体图](#%E6%80%BB%E4%BD%93%E5%9B%BE)
-- [pod 启动过程简写版本](#pod-%E5%90%AF%E5%8A%A8%E8%BF%87%E7%A8%8B%E7%AE%80%E5%86%99%E7%89%88%E6%9C%AC)
-- [参考](#%E5%8F%82%E8%80%83)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ---
 title: "Pod creation"

@@ -1,20 +1,4 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [问题](#%E9%97%AE%E9%A2%98)
-  - [client-go实现一个监听deployments 变化的功能，如何判断kubernetes资源的变化?](#client-go%E5%AE%9E%E7%8E%B0%E4%B8%80%E4%B8%AA%E7%9B%91%E5%90%ACdeployments-%E5%8F%98%E5%8C%96%E7%9A%84%E5%8A%9F%E8%83%BD%E5%A6%82%E4%BD%95%E5%88%A4%E6%96%ADkubernetes%E8%B5%84%E6%BA%90%E7%9A%84%E5%8F%98%E5%8C%96)
-  - [client获取事件的机制，etcd是使用轮询模式还是推送模式呢？两者各有什么优缺点？](#client%E8%8E%B7%E5%8F%96%E4%BA%8B%E4%BB%B6%E7%9A%84%E6%9C%BA%E5%88%B6etcd%E6%98%AF%E4%BD%BF%E7%94%A8%E8%BD%AE%E8%AF%A2%E6%A8%A1%E5%BC%8F%E8%BF%98%E6%98%AF%E6%8E%A8%E9%80%81%E6%A8%A1%E5%BC%8F%E5%91%A2%E4%B8%A4%E8%80%85%E5%90%84%E6%9C%89%E4%BB%80%E4%B9%88%E4%BC%98%E7%BC%BA%E7%82%B9)
-  - [事件是如何存储的？ 会保留多久？watch命令中的版本号具有什么作用？](#%E4%BA%8B%E4%BB%B6%E6%98%AF%E5%A6%82%E4%BD%95%E5%AD%98%E5%82%A8%E7%9A%84-%E4%BC%9A%E4%BF%9D%E7%95%99%E5%A4%9A%E4%B9%85watch%E5%91%BD%E4%BB%A4%E4%B8%AD%E7%9A%84%E7%89%88%E6%9C%AC%E5%8F%B7%E5%85%B7%E6%9C%89%E4%BB%80%E4%B9%88%E4%BD%9C%E7%94%A8)
-  - [当client和server端出现短暂网络波动等异常因素后，导致事件堆积时，server端会丢弃事件吗？若你监听的历史版本号server端不存在了，你的代码该如何处理？](#%E5%BD%93client%E5%92%8Cserver%E7%AB%AF%E5%87%BA%E7%8E%B0%E7%9F%AD%E6%9A%82%E7%BD%91%E7%BB%9C%E6%B3%A2%E5%8A%A8%E7%AD%89%E5%BC%82%E5%B8%B8%E5%9B%A0%E7%B4%A0%E5%90%8E%E5%AF%BC%E8%87%B4%E4%BA%8B%E4%BB%B6%E5%A0%86%E7%A7%AF%E6%97%B6server%E7%AB%AF%E4%BC%9A%E4%B8%A2%E5%BC%83%E4%BA%8B%E4%BB%B6%E5%90%97%E8%8B%A5%E4%BD%A0%E7%9B%91%E5%90%AC%E7%9A%84%E5%8E%86%E5%8F%B2%E7%89%88%E6%9C%AC%E5%8F%B7server%E7%AB%AF%E4%B8%8D%E5%AD%98%E5%9C%A8%E4%BA%86%E4%BD%A0%E7%9A%84%E4%BB%A3%E7%A0%81%E8%AF%A5%E5%A6%82%E4%BD%95%E5%A4%84%E7%90%86)
-  - [如果你创建了上万个watcher监听key变化，当server端收到一个写请求后，etcd是如何根据变化的key快速找到监听它的watcher呢？](#%E5%A6%82%E6%9E%9C%E4%BD%A0%E5%88%9B%E5%BB%BA%E4%BA%86%E4%B8%8A%E4%B8%87%E4%B8%AAwatcher%E7%9B%91%E5%90%ACkey%E5%8F%98%E5%8C%96%E5%BD%93server%E7%AB%AF%E6%94%B6%E5%88%B0%E4%B8%80%E4%B8%AA%E5%86%99%E8%AF%B7%E6%B1%82%E5%90%8Eetcd%E6%98%AF%E5%A6%82%E4%BD%95%E6%A0%B9%E6%8D%AE%E5%8F%98%E5%8C%96%E7%9A%84key%E5%BF%AB%E9%80%9F%E6%89%BE%E5%88%B0%E7%9B%91%E5%90%AC%E5%AE%83%E7%9A%84watcher%E5%91%A2)
-- [可靠事件推送机制的三个子问题](#%E5%8F%AF%E9%9D%A0%E4%BA%8B%E4%BB%B6%E6%8E%A8%E9%80%81%E6%9C%BA%E5%88%B6%E7%9A%84%E4%B8%89%E4%B8%AA%E5%AD%90%E9%97%AE%E9%A2%98)
-  - [最新事件](#%E6%9C%80%E6%96%B0%E4%BA%8B%E4%BB%B6)
-  - [异常场景重试机制](#%E5%BC%82%E5%B8%B8%E5%9C%BA%E6%99%AF%E9%87%8D%E8%AF%95%E6%9C%BA%E5%88%B6)
-  - [历史事件推送机制](#%E5%8E%86%E5%8F%B2%E4%BA%8B%E4%BB%B6%E6%8E%A8%E9%80%81%E6%9C%BA%E5%88%B6)
-- [参考](#%E5%8F%82%E8%80%83)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ---
 title: "Watch 实现原理及 etcd 源码分析"
