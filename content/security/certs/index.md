@@ -1,10 +1,7 @@
-
-
 ---
 title: "Certificate 证书"
 summary: 证书分为根证书、服务器证书、客户端证书。根证书文件（ca.crt）和根证书对应的私钥文件（ca.key）由 CA（证书授权中心，国际认可）生成和保管。那么服务器如何获得证书呢？向 CA 申请！
 date: 2023-12-20T09:36:06+08:00
-draft: false
 tags:
   - Security
 ---

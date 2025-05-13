@@ -29,7 +29,10 @@ MCP 由三个核心组件构成：Host、Client 和 Server。
 
 {{<figure src="./mcp_process.png#center" width=800px >}}
 
-{{<figure src="./mcp-process_example.png#center" width=800px >}}
+{{<figure src="./mcp_process_example.png#center" width=800px >}}
+
+
+## 手动开发 MCP 开发
 
 ## 待补充
 
