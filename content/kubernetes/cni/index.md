@@ -1,5 +1,3 @@
-
-
 ---
 title: "Cni( Container Network Interface)"
 date: 2025-01-12T14:52:13+08:00
@@ -808,13 +806,68 @@ func createVlan(conf *NetConf, ifName string, netns ns.NetNS) (*current.Interfac
 ## 实现一个 CNI 插件
 实现一个 CNI 插件首先需要一个 JSON 格式的配置文件，配置文件需要放到每个节点的 /etc/cni/net.d/ 目录，一般命名为 <数字>-<CNI-plugin>.conf.
 
+初始化
+```go
+func (c *criService) initPlatform() (err error) {
+	//...
+	
+	// Pod needs to attach to at least loopback network and a non host network,
+	// hence networkAttachCount is 2. If there are more network configs the
+	// pod will be attached to all the networks but we will only use the ip
+	// of the default network interface as the pod IP.
+    i, err := cni.New(cni.WithMinNetworkCount(networkAttachCount),
+                cni.WithPluginConfDir(dir),
+                cni.WithPluginMaxConfNum(max),
+                cni.WithPluginDir([]string{c.config.NetworkPluginBinDir}))
+    c.netPlugin[name] = i
+	// ...
+}
+```
 默认配置及二进制目录
+```go
+func New(config ...Opt) (CNI, error) {
+	// 默认配置
+	cni := defaultCNIConfig()
+	var err error
+	for _, c := range config {
+		if err = c(cni); err != nil {
+			return nil, err
+		}
+	}
+	return cni, nil
+}
+
+func defaultCNIConfig() *libcni {
+	return &libcni{
+		config: config{
+			pluginDirs:       []string{DefaultCNIDir},
+			pluginConfDir:    DefaultNetDir,
+			pluginMaxConfNum: DefaultMaxConfNum,
+			prefix:           DefaultPrefix,
+		},
+		cniConfig: cnilibrary.NewCNIConfig(
+			[]string{
+				DefaultCNIDir,
+			},
+			&invoke.DefaultExec{
+				RawExec:       &invoke.RawExec{Stderr: os.Stderr},
+				PluginDecoder: version.PluginDecoder{},
+			},
+		),
+		networkCount: 1,
+	}
+}
+```
+对应默认的常量
 ```go
 // https://github.com/containerd/containerd/blob/8ff5827e98ee6efeee161421abdc6da48c8f27b4/vendor/github.com/containerd/go-cni/types.go
 const (
-	CNIPluginName        = "cni"
-	DefaultNetDir        = "/etc/cni/net.d"
-	DefaultCNIDir        = "/opt/cni/bin"
+    CNIPluginName        = "cni"
+    DefaultNetDir        = "/etc/cni/net.d"
+    DefaultCNIDir        = "/opt/cni/bin"
+    DefaultMaxConfNum    = 1
+    VendorCNIDirTemplate = "%s/opt/%s/bin"
+    DefaultPrefix        = "eth"
 )
 ```
 
@@ -864,6 +917,40 @@ const (
 
 ## cni 调用入口 cri
 {{<figure src="./cni-process.png#center" width=800px >}}
+
+```go
+func NewCRIService(config criconfig.Config, client *containerd.Client, warn warning.Service) (CRIService, error) {
+    // ...
+
+	c.cniNetConfMonitor = make(map[string]*cniNetConfSyncer)
+	for name, i := range c.netPlugin {
+		path := c.config.NetworkPluginConfDir
+		if name != defaultNetworkPlugin {
+			if rc, ok := c.config.Runtimes[name]; ok {
+				path = rc.NetworkPluginConfDir
+			}
+		}
+		if path != "" {
+			m, err := newCNINetConfSyncer(path, i, c.cniLoadOptions())
+			if err != nil {
+				return nil, fmt.Errorf("failed to create cni conf monitor for %s: %w", name, err)
+			}
+			c.cniNetConfMonitor[name] = m
+		}
+	}
+
+    // ..
+
+	return c, nil
+}
+```
+默认 cni 加载选项
+```go
+func (c *criService) cniLoadOptions() []cni.Opt {
+	// 本地回环 + 默认配置
+	return []cni.Opt{cni.WithLoNetwork, cni.WithDefaultConf}
+}
+```
 
 加载配置初始化 network: 数据用来传给 cni 插件
 ```go
@@ -961,7 +1048,7 @@ func ConfListFromBytes(bytes []byte) (*NetworkConfigList, error) {
 }
 ```
 
-### cni 调用方:pod 初始化 sandbox 时网络设置
+### cni 调用方: pod 初始化 sandbox 时网络设置
 ```go
 // https://github.com/containerd/containerd/blob/6c6cc5ec107f10ccf4d4acbfe89d572a52d58a92/pkg/cri/server/sandbox_run.go
 func (c *criService) setupPodNetwork(ctx context.Context, sandbox *sandboxstore.Sandbox) error {
