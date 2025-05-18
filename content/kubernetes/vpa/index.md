@@ -19,6 +19,7 @@ draft: true
 
 
 ## VPA 组成
+{{<figure src="./vpa_structure.png#center" width=800px >}}
 
 三部分
 - admission-controller（准入控制器）
@@ -28,6 +29,7 @@ draft: true
 
 ### 准入控制器（Admission Controller）
 
+
 VPA Admission Controller 拦截 Pod 创建请求。如果 Pod 与 VPA 配置匹配且模式未设置为 off，则控制器通过将建议的资源应用于 Pod spec 来重写资源请求。
 
 
@@ -35,6 +37,13 @@ VPA Admission Controller 拦截 Pod 创建请求。如果 Pod 与 VPA 配置匹�
 
 Recommender 是 VPA 的主要组成部分。它负责计算推荐的资源。在启动时，Recommender 获取所有 Pod 的历史资源利用率（无论它们是否使用 VPA ）以及历史存储中的 Pod OOM 事件的历史记录。
 它聚合这些数据并将其保存在内存中。
+
+
+pRecommender的推荐算法深受Google Borg Autopilot的moving window推荐器的启发，moving window推荐器的原理可以看下Autopilot论文。
+Vertical Pod Autoscaler的推荐器vpa-recommend为每个vpa对象的每个container创建存储cpu和memory使用值的decay histogram对象，定期从prometheus中拉取所有pod的资源使用情况，将container的usage写入histogram中。
+decay histogram的桶的大小是按照指数增长的，cpu第一个桶的大小（firstBucketSize）是0.01，memory是1e7，指数值ratio是1.05
+
+
 
 
 ### 更新器（Updater）
@@ -60,7 +69,133 @@ VPA的成熟度还不足 : 更新正在运行的 Pod 资源配置是 VPA 的一�
 
 多个 VPA 同时匹配同一个 Pod 会造成未定义的行为
 
+
+
+## 业务Pod发生OOM事件，自动调整资源的limit值
+
+Recommender 通过 watch 机制监听集群中 Pod 驱逐事件。在发生 OOM(out of memory)事件时，Recommender 认为当前容器对 memory 资源实际需求是超出观测到的使用量的，利用下列公式估计容器对 memory 资源实际需求。
+
+方法是将 OOM 事件转换为内存使用样本来建模，将“安全边际”乘数 (“safety margin” multiplier ) 应用于最后一次观察到的使用情况，即选择 OOMMinBumpUp 和 OOMBumpUpRatio 计算后较大的结果，以避免 VPA 推荐值过小，从而造成容器反复 OOM。
+
+```go
+// https://github.com/kubernetes/autoscaler/blob/f953f5c8fabbb633bb2e161fddb6e94f747f718a/vertical-pod-autoscaler/pkg/recommender/model/container.go
+func (container *ContainerState) RecordOOM(timestamp time.Time, requestedMemory ResourceAmount) error {
+    // ...
+	// Get max of the request and the recent usage-based memory peak.
+	// Omitting oomPeak here to protect against recommendation running too high on subsequent OOMs.
+	memoryUsed := ResourceAmountMax(requestedMemory, container.memoryPeak)
+	
+	// memoryNeeded = max(memoryUsed+ 100MB,memoryUsed*1.2 )
+	memoryNeeded := ResourceAmountMax(memoryUsed+MemoryAmountFromBytes(GetAggregationsConfig().OOMMinBumpUp),
+		ScaleResource(memoryUsed, GetAggregationsConfig().OOMBumpUpRatio))
+
+	oomMemorySample := ContainerUsageSample{
+		MeasureStart: timestamp,
+		Usage:        memoryNeeded,
+		Resource:     ResourceMemory,
+	}
+	if !container.addMemorySample(&oomMemorySample, true) {
+		return fmt.Errorf("adding OOM sample failed")
+	}
+	return nil
+}
+```
+
+
+监听 OOM 事件
+
+```go
+func WatchEvictionEventsWithRetries(kubeClient kube_client.Interface, observer oom.Observer, namespace string) {
+	go func() {
+		options := metav1.ListOptions{
+			FieldSelector: "reason=Evicted",
+		}
+
+		watchEvictionEventsOnce := func() {
+			watchInterface, err := kubeClient.CoreV1().Events(namespace).Watch(context.TODO(), options)
+			if err != nil {
+				klog.Errorf("Cannot initialize watching events. Reason %v", err)
+				return
+			}
+			watchEvictionEvents(watchInterface.ResultChan(), observer)
+		}
+		for {
+			watchEvictionEventsOnce()
+			// Wait between attempts, retrying too often breaks API server.
+			waitTime := wait.Jitter(evictionWatchRetryWait, evictionWatchJitterFactor)
+			klog.V(1).Infof("An attempt to watch eviction events finished. Waiting %v before the next one.", waitTime)
+			time.Sleep(waitTime)
+		}
+	}()
+}
+```
+
+
+
+解析 event 
+```go
+func (o *observer) OnEvent(event *apiv1.Event) {
+	klog.V(1).Infof("OOM Observer processing event: %+v", event)
+	for _, oomInfo := range parseEvictionEvent(event) {
+		// 放入 event
+		o.observedOomsChannel <- oomInfo
+	}
+}
+
+/// 解析驱逐的 event
+func parseEvictionEvent(event *apiv1.Event) []OomInfo {
+	if event.Reason != "Evicted" ||
+		event.InvolvedObject.Kind != "Pod" {
+		return []OomInfo{}
+	}
+	extractArray := func(annotationsKey string) []string {
+		str, found := event.Annotations[annotationsKey]
+		if !found {
+			return []string{}
+		}
+		return strings.Split(str, ",")
+	}
+	offendingContainers := extractArray("offending_containers")
+	offendingContainersUsage := extractArray("offending_containers_usage")
+	starvedResource := extractArray("starved_resource")
+	if len(offendingContainers) != len(offendingContainersUsage) ||
+		len(offendingContainers) != len(starvedResource) {
+		return []OomInfo{}
+	}
+
+	result := make([]OomInfo, 0, len(offendingContainers))
+
+	for i, container := range offendingContainers {
+		if starvedResource[i] != "memory" {
+			continue
+		}
+		memory, err := resource.ParseQuantity(offendingContainersUsage[i])
+		if err != nil {
+			klog.Errorf("Cannot parse resource quantity in eviction event %v. Error: %v", offendingContainersUsage[i], err)
+			continue
+		}
+		oomInfo := OomInfo{
+			Timestamp: event.CreationTimestamp.Time.UTC(),
+			Memory:    model.ResourceAmount(memory.Value()),
+			ContainerID: model.ContainerID{
+				PodID: model.PodID{
+					Namespace: event.InvolvedObject.Namespace,
+					PodName:   event.InvolvedObject.Name,
+				},
+				ContainerName: container,
+			},
+		}
+		result = append(result, oomInfo)
+	}
+	return result
+}
+
+```
+
+
 ## 参考
 - https://github.com/kubernetes/autoscaler/tree/vertical-pod-autoscaler-1.3.1/cluster-autoscaler
 - [Kubernetes 垂直自动伸缩走向何方](https://mp.weixin.qq.com/s/ykWgx1WJxBFSPidD1To53Q)
 - [B站容器云平台VPA技术实践](https://mp.weixin.qq.com/s/LFytnn2m732aOwbHEtc1Mg)
+- [vpa Recommender 设计理念](https://juejin.cn/post/7117936807622230053)
+- [深入理解 VPA Recommender](https://www.infoq.cn/article/z40lmwmtoyvecq6tpoik)
