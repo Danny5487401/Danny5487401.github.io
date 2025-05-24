@@ -104,12 +104,16 @@ _index.md索引页面在Hugo内容中是个特殊角色。它允许您在列表�
 
 
 1. 使用 [shortcodes](https://gohugo.io/content-management/shortcodes/#figure)
+
 ```markdown
-{{<figure src="informer.png#center" width=800px >}}
+{{<figure src="informer.png#center" width=800px title="informer 信息" >}}
 ```
 
 2. 引用全局资源
+```markdown
 ![deltaFIFO 队列架构](deltafifo.png "deltaFIFO 队列")
+```
+
 
 
 ## 命令使用

@@ -12,29 +12,27 @@ date: 2025-03-11T20:47:47+08:00
 - 一些节点过度使用
 - 节点添加污点或则labels后,节点上的pod 不不符合要求
 - 当新节点被添加到集群
+-
 
 ## descheduler 目前支持的策略
 
 
-|                    策略                    |                                                                              描述                                                                              | 表头 |
-| :-----------------------------------------: | :------------------------------------------------------------------------------------------------------------------------------------------------------------: | :--: |
-|              RemoveDuplicates              |                    将节点上同类型的Pod进行迁移，确保只有一个Pod与同一节点上运行的ReplicaSet、Replication Controller、StatefulSet或者Job关联                    | 内容 |
-|             LowNodeUtilization             |  将 requests 比率较高节点上的Pod进行迁移，该策略主要用于查找未充分利用的节点，并从其他节点驱逐 Pod，以便 kube-scheudler 重新将它们调度到未充分利用的节点上。  | 内容 |
-|             HighNodeUtilization             |                                                            将 requests 比率较低节点上的Pod进行迁移                                                            | 内容 |
-|   RemovePodsViolatingInterPodAntiAffinity   |                                                                 将不满足反亲和性的Pod进行迁移                                                                 | 内容 |
-|       RemovePodsViolatingNodeAffinity       |                                                            将不满足节点节点亲和性策略的Pod进行迁移                                                            | 内容 |
-|        RemovePodsViolatingNodeTaints        |                                                               将不满足节点污点策略的Pod进行迁移                                                               | 内容 |
-| RemovePodsViolatingTopologySpreadConstraint | 该策略确保从节点驱逐违反拓扑分布约束的 Pods，具体来说，它试图驱逐将拓扑域平衡到每个约束的 maxSkew 内所需的最小 Pod 数，不过该策略需要 k8s 版本高于1.18才能使用 | 内容 |
-|       RemovePodsHavingTooManyRestarts       |                                                                  将重启次数过多的Pod进行迁移                                                                  | 内容 |
-|                 PodLifeTime                 |                          该策略用于驱逐比 maxPodLifeTimeSeconds 更旧的 Pods，可以通过 podStatusPhases 来配置哪类状态的 Pods 会被驱逐                          | 内容 |
-|              RemoveFailedPods              |                                                                    将运行失败的Pod进行迁移                                                                    | 内容 |
-
-
+|                    策略                    |                                                                              描述                                                                              | 
+| :-----------------------------------------: | :------------------------------------------------------------------------------------------------------------------------------------------------------------: |
+|              RemoveDuplicates              |                    将节点上同类型的Pod进行迁移，确保只有一个Pod与同一节点上运行的ReplicaSet、Replication Controller、StatefulSet或者Job关联                    | 
+|             LowNodeUtilization             |  将 requests 比率较高节点上的Pod进行迁移，该策略主要用于查找未充分利用的节点，并从其他节点驱逐 Pod，以便 kube-scheudler 重新将它们调度到未充分利用的节点上。  | 
+|             HighNodeUtilization             |                                                            将 requests 比率较低节点上的Pod进行迁移                                                            | 
+|   RemovePodsViolatingInterPodAntiAffinity   |                                                                 将不满足反亲和性的Pod进行迁移                                                                 | 
+|       RemovePodsViolatingNodeAffinity       |                                                            将不满足节点节点亲和性策略的Pod进行迁移                                                            | 
+|        RemovePodsViolatingNodeTaints        |                                                               将不满足节点污点策略的Pod进行迁移                                                               | 
+| RemovePodsViolatingTopologySpreadConstraint | 该策略确保从节点驱逐违反拓扑分布约束的 Pods，具体来说，它试图驱逐将拓扑域平衡到每个约束的 maxSkew 内所需的最小 Pod 数，不过该策略需要 k8s 版本高于1.18才能使用 | 
+|       RemovePodsHavingTooManyRestarts       |                                                                  将重启次数过多的Pod进行迁移                                                                  |
+|                 PodLifeTime                 |                          该策略用于驱逐比 maxPodLifeTimeSeconds 更旧的 Pods，可以通过 podStatusPhases 来配置哪类状态的 Pods 会被驱逐                          | 
+|              RemoveFailedPods              |                                                                    将运行失败的Pod进行迁移                                                                    | 
 
 ### LowNodeUtilization
 
 该策略主要用于查找未充分利用资源的节点，并从其他节点驱逐 Pod 将它们重新调度到这些未充分利用的节点上。
-
 
 - targetThresholds: 大于它,被认为需要被驱逐
 - thresholds: 小于它,被认为需要调度到这
@@ -43,12 +41,9 @@ date: 2025-03-11T20:47:47+08:00
 
 注意点: descheduler 默认基于 requests 和 limits,并未基于节点真实负载, 目的是保持与 kube-scheduler 一致 。
 
-
-
 支持以下三种资源类型：cpu、memory、pods, 其他(包括GPU).
 
 [v0.33.0 特性](https://github.com/kubernetes-sigs/descheduler/releases/tag/v0.33.0): 可以增加对于节点的监控，基于真实负载进行重调度调整,相关 commit : https://github.com/kubernetes-sigs/descheduler/pull/1533
-
 
 LowNodeUtilization 初始化
 
@@ -126,8 +121,6 @@ func NewLowNodeUtilization(
 	}, nil
 }
 ```
-
-
 
 ```go
 // https://github.com/kubernetes-sigs/descheduler/blob/98e6ed65874eb223ba1f6861df87eb9a574e3f2c/pkg/framework/plugins/nodeutilization/lownodeutilization.go
@@ -287,7 +280,6 @@ func (l *LowNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fra
 }
 
 ```
-
 
 ## 参考
 

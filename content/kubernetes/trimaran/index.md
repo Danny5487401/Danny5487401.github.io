@@ -1,5 +1,3 @@
-
-
 ---
 title: "Trimaran"
 date: 2025-03-02T14:13:27+08:00
@@ -28,6 +26,8 @@ tags:
 
 ## 基本概念
 
+### 调度类型
+
 重调度（Descheduling): 通常是指将部署在某个节点上调度不合理的Pod重新调度到另一个节点.
 在集群利用率不均而产生热点节点、节点属性变化导致存量Pod调度规则不匹配等场景下，您可以使用重调度来优化资源使用，确保Pod在最佳节点上运行，从而保障集群的高可用性和工作负载的高效运行。
 
@@ -39,7 +39,17 @@ Gang scheduling(帮派调度) : 是一种调度算法，主要的原则是保证
 
 拓扑感知调度: 在机器学习和大数据分析类作业中，Pod间通常有较大的网络通信需求。默认情况下，原生Kubernetes调度器会将Pod均匀打散在集群中，增加了通信距离，导致作业完成时间变长。您可以将Pod部署在同一可用区或机架上，减少通信跳数和时延以优化作业执行时间。
 
+
+### mu（均值） 和  sigma（标准差）
+
+在正态分布中， mu 表示分布的中心位置，也就是平均值。
+
+sigma 表示分布的宽度，也就是数据点偏离均值的标准距离。
+
+
+
 ## 指标获取
+
 通过 load-watcher,可以是service部署,或则直接作为客户端库嵌入.
 
 ```go
@@ -56,7 +66,6 @@ func NewCollector(logger klog.Logger, trimaranSpec *pluginConfig.TrimaranSpec) (
 		// 作为service
 		client, _ = loadwatcherapi.NewServiceClient(trimaranSpec.WatcherAddress)
 	} else {
-		
 		// 作为库
 		opts := watcher.MetricsProviderOpts{
 			Name:               string(trimaranSpec.MetricProvider.Type),
@@ -116,16 +125,178 @@ func NewLibraryClient(opts watcher.MetricsProviderOpts) (Client, error) {
 
 ```
 
+获取数据
+
+```go
+func (w *Watcher) StartWatching() {
+	w.mutex.RLock()
+	if w.isStarted {
+		w.mutex.RUnlock()
+		return
+	}
+	w.mutex.RUnlock()
+
+	fetchOnce := func(duration string) {
+		curWindow, metric := w.getCurrentWindow(duration)
+		// 获取所有主机数据
+		hostMetrics, err := w.client.FetchAllHostsMetrics(curWindow)
+
+		if err != nil {
+			log.Errorf("received error while fetching metrics: %v", err)
+			return
+		}
+		log.Debugf("fetched metrics for window: %v", curWindow)
+
+		// TODO： add tags, etc.
+		watcherMetrics := metricMapToWatcherMetrics(hostMetrics, w.client.Name(), *curWindow)
+		w.appendWatcherMetrics(metric, &watcherMetrics)
+	}
+
+	windowWatcher := func(duration string) {
+		for {
+			fetchOnce(duration)
+			// This is assuming fetching of metrics won't exceed more than 1 minute. If it happens we need to throttle rate of fetches
+			time.Sleep(time.Minute)
+		}
+	}
+
+	durations := [3]string{FifteenMinutes, TenMinutes, FiveMinutes}
+	for _, duration := range durations {
+		// Populate cache initially before returning
+		fetchOnce(duration)
+		go windowWatcher(duration)
+	}
+    
+	// 暴露 /watcher 接口 导出数据
+	http.HandleFunc(BaseUrl, w.handler)
+	http.HandleFunc(HealthCheckUrl, w.healthCheckHandler)
+	server := &http.Server{
+		Addr:    ":2020",
+		Handler: http.DefaultServeMux,
+	}
+
+	go func() {
+		log.Warn(server.ListenAndServe())
+	}()
+
+	signal.Notify(w.shutdown, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-w.shutdown
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			log.Errorf("Unable to shutdown server: %v", err)
+		}
+	}()
+
+	w.mutex.Lock()
+	w.isStarted = true
+	w.mutex.Unlock()
+	log.Info("Started watching metrics")
+}
+```
+
+
+这里 prometheus 为例
+
+```go
+func (s promClient) FetchAllHostsMetrics(window *watcher.Window) (map[string][]watcher.Metric, error) {
+	hostMetrics := make(map[string][]watcher.Metric)
+	var anyerr error
+
+	for _, method := range []string{promAvg, promStd} { // 平均值 avg_over_time 和 标准值  stddev_over_time"
+		for _, metric := range []string{promCpuMetric, promMemMetric, promTransBandMetric, promTransBandDropMetric, promRecBandMetric, promRecBandDropMetric, promDiskIOMetric} {
+			promQuery := s.buildPromQuery(allHosts, metric, method, window.Duration)
+			promResults, err := s.getPromResults(promQuery)
+
+			if err != nil {
+				log.Errorf("error querying Prometheus for query %v: %v\n", promQuery, err)
+				anyerr = err
+				continue
+			}
+			// 指标数据处理
+			curMetricMap := s.promResults2MetricMap(promResults, metric, method, window.Duration)
+
+			for k, v := range curMetricMap { // 构建以主机为key的map
+				hostMetrics[k] = append(hostMetrics[k], v...)
+			}
+		}
+	}
+
+	return hostMetrics, anyerr
+}
+
+```
+
+
 
 ## LoadVariationRiskBalancing 负载感知均衡调度
-LoadVariationRiskBalancing 插件的算法是利用节点负载在某段时间内（滑动窗口）的平均值（M）和标准差(V)这两个指标，假设集群所有节点的CPU利用率的M+V是0.3(30%)，那么每个节点的cpu利用率的M+V越接近0.3，得分应该越小。
-
-LoadVariationRiskBalancing是分别计算每种资源的得分，再取得分的最小值，例：假设CPU得分0，内存得分10，则节点的最终得分是0。
+因为没有考虑到突发性的变化，基于实际平均负载的策略有时是有风险的。LoadVariationRiskBalancing插件不仅可以平衡实际平均负载，还可以降低负载突发性变化引发的风险。
 
 
-算法步骤：
+LoadVariationRiskBalancing 插件的算法是利用节点负载在某段时间内（滑动窗口）的平均值（M）和标准差(V)这两个指标，
 
-1. 获取待调度的Pod 的request的资源，设为r 。
+
+假设集群所有节点的CPU利用率的M+V是0.3(30%)，那么每个节点的cpu利用率的M+V越接近0.3，得分应该越小。
+
+LoadVariationRiskBalancing是分别计算每种资源的得分，再取得分的最小值，例：假设CPU得分2，内存得分10，则节点的最终得分是2。
+
+```go
+// https://github.com/kubernetes-sigs/scheduler-plugins/blob/59a8b1ca68d0256d10239a588d69ab0ba28d4076/pkg/trimaran/loadvariationriskbalancing/loadvariationriskbalancing.go
+
+// 打分
+func (pl *LoadVariationRiskBalancing) Score(ctx context.Context, cycleState *framework.CycleState, pod *v1.Pod, nodeName string) (int64, *framework.Status) {
+	logger := klog.FromContext(ctx)
+	logger.V(6).Info("Calculating score", "pod", klog.KObj(pod), "nodeName", nodeName)
+	score := framework.MinNodeScore
+	nodeInfo, err := pl.handle.SnapshotSharedLister().NodeInfos().Get(nodeName)
+	if err != nil {
+		return score, framework.NewStatus(framework.Error, fmt.Sprintf("getting node %q from Snapshot: %v", nodeName, err))
+	}
+	// 获取 node 的 metrics 
+	metrics, _ := pl.collector.GetNodeMetrics(logger, nodeName)
+	if metrics == nil {
+		logger.Info("Failed to get metrics for node; using minimum score", "nodeName", nodeName)
+		return score, nil
+	}
+	// 算法步骤：
+	// 1. 获取待调度的Pod 的request的资源，设为r 。
+	podRequest := trimaran.GetResourceRequested(pod)
+	node := nodeInfo.Node()
+
+	// 2. 获取当前节点所有类型的资源（CPU、Memory等）的利用率的百分比（0到1），并根据计算的滑动窗口的平均数（V）和标准差（M），进行打分。
+	// 计算 CPU 分数
+	var cpuScore float64 = 0
+	cpuStats, cpuOK := trimaran.CreateResourceStats(logger, metrics, node, podRequest, v1.ResourceCPU, watcher.CPU)
+	if cpuOK {
+		// 3. 计算当前节点对各类资源的得分：Si = M + r + V 
+		cpuScore = computeScore(logger, cpuStats, pl.args.SafeVarianceMargin, pl.args.SafeVarianceSensitivity)
+	}
+	logger.V(6).Info("Calculating CPUScore", "pod", klog.KObj(pod), "nodeName", nodeName, "cpuScore", cpuScore)
+	// 计算 Memory 分数
+	var memoryScore float64 = 0
+	memoryStats, memoryOK := trimaran.CreateResourceStats(logger, metrics, node, podRequest, v1.ResourceMemory, watcher.Memory)
+	if memoryOK {
+		memoryScore = computeScore(logger, memoryStats, pl.args.SafeVarianceMargin, pl.args.SafeVarianceSensitivity)
+	}
+	logger.V(6).Info("Calculating MemoryScore", "pod", klog.KObj(pod), "nodeName", nodeName, "memoryScore", memoryScore)
+	
+	// 计算总分
+	var totalScore float64 = 0
+	if memoryOK && cpuOK { // 两者存在去最小值
+		totalScore = math.Min(memoryScore, cpuScore)
+	} else { 
+		totalScore = math.Max(memoryScore, cpuScore)
+	}
+	score = int64(math.Round(totalScore))
+	logger.V(6).Info("Calculating totalScore", "pod", klog.KObj(pod), "nodeName", nodeName, "totalScore", score)
+	return score, framework.NewStatus(framework.Success, "")
+}
+```
+
+
+
 ```go
 // pkg/trimaran/resourcestats.go
 
@@ -137,17 +308,18 @@ func GetResourceRequested(pod *v1.Pod) *framework.Resource {
 }
 
 ```
-2. 获取当前节点所有类型的资源（CPU、Memory等）的利用率的百分比（0到1），并根据计算的滑动窗口的平均数（V）和标准差（M），进行打分。
+
+
 ```go
 func CreateResourceStats(logger klog.Logger, metrics []watcher.Metric, node *v1.Node, podRequest *framework.Resource,
 	resourceName v1.ResourceName, watcherType string) (rs *ResourceStats, isValid bool) {
-	// get resource usage statistics
+	// 获取资源统计
 	nodeUtil, nodeStd, metricFound := GetResourceData(metrics, watcherType)
 	if !metricFound {
 		logger.V(6).Info("Resource usage statistics for node : no valid data", "node", klog.KObj(node))
 		return nil, false
 	}
-	// get resource capacity
+	// 获取节点的可分配资源
 	rs = &ResourceStats{}
 	allocatableResources := node.Status.Allocatable
 	am := allocatableResources[resourceName]
@@ -170,9 +342,11 @@ func CreateResourceStats(logger klog.Logger, metrics []watcher.Metric, node *v1.
 	return rs, true
 }
 ```
-3. 计算当前节点对各类资源的得分：Si = M + r + V 
+
+
+
 ```go
-// computeScore : compute score given usage statistics
+// 计算分数
 // - risk = [ average + margin * stDev^{1/sensitivity} ] / 2
 // - score = ( 1 - risk ) * maxScore
 func computeScore(logger klog.Logger, rs *trimaran.ResourceStats, margin float64, sensitivity float64) float64 {
@@ -192,10 +366,10 @@ func computeScore(logger klog.Logger, rs *trimaran.ResourceStats, margin float64
 
 	// apply root power
 	if sensitivity >= 0 {
-		sigma = math.Pow(sigma, 1/sensitivity)
+		sigma = math.Pow(sigma, 1/sensitivity) // sigma^{1/sensitivity}
 	}
 	// apply multiplier
-	sigma *= margin
+	sigma *= margin   // margin*sigma^{1/sensitivity}
 	sigma = math.Max(math.Min(sigma, 1), 0)
 
 	// evaluate overall risk factor
@@ -204,6 +378,18 @@ func computeScore(logger klog.Logger, rs *trimaran.ResourceStats, margin float64
 	return (1. - risk) * float64(framework.MaxNodeScore)
 }
 
+
+// GetMuSigma : get average and standard deviation from statistics
+func GetMuSigma(rs *ResourceStats) (float64, float64) {
+	if rs.Capacity <= 0 {
+		return 0, 0
+	}
+	mu := (rs.UsedAvg + rs.Req) / rs.Capacity
+	mu = math.Max(math.Min(mu, 1), 0)
+	sigma := rs.UsedStdev / rs.Capacity
+	sigma = math.Max(math.Min(sigma, 1), 0)
+	return mu, sigma
+}
 ```
 4. 获取每种类型资源的分数并将其绑定到 [0,1]，意思就是最小值为0，最大值为1，小于最小值取最小值，大于最大值取最大值：Si = min(Si,1.0)
 5. 计算当前节点每种资源的优先级得分：Ui = (1-Si) x MaxPriority。

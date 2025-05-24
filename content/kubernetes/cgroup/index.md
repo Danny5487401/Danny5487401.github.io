@@ -321,6 +321,7 @@ func (s *CpuGroup) GetStats(path string, stats *cgroups.Stats) error {
 	return nil
 }
 ```
+
 ```go
 // https://github.com/kubernetes/kubernetes/blob/07af1bab707c16c7fde936dca6579002405159ac/vendor/github.com/opencontainers/runc/libcontainer/cgroups/fs2/cpu.go
 
@@ -531,6 +532,17 @@ container_cpu_cfs_throttled_periods_total 通过这指标排查.
 - memory.memsw.failcnt：任务使用内存加 swap 量达到 memsw.limit_in_bytes 上限的次数
 - memory.soft_limit_in_bytes：设置内存软上限。如果内存充足， cgroup 中的任务可以用到 memory.limit_in_bytes 设定的内存上限；当时当内存资源不足时，内核会让任务使用的内存不超过 soft_limit_in_bytes 中的值。文件内容的格式和 limit_in_bytes 一样
 - memory.swappiness：设置内核 swap out 进程内存（而不是从 page cache 中回收页） 的倾向。默认值为 60，低于 60 表示降低倾向，高于 60 表示增加倾向；如果值高于 100，表示允许内核 swap out 进程地址空间的页。如果值为 0 表示倾向很低，而不是禁止该行为
+
+
+#### memory 监控
+
+{{<figure src="./wss-n-rss-n-usage_bytes.png#center" width=800px >}}
+
+- container_memory_usage_bytes — 表示总内存使用量
+- container_memory_rss（Resident Set Size） — 表示进程在主内存中具有的不对应于磁盘上任何内容的物理内存量。通常包括堆栈、堆和匿名内存映射。Cadvisor 从文件 /sys/fs/cgroup/<cgroup_path>/memory.stat 中的特定容器 cgroup 的“anon”参数中获取 rss 值。
+- container_memory_wss（Working Set Size） — 表示进程在一段时间内保持工作所需的内存量。
+
+
 
 ### net_cls：为网络报文分类
 net_cls 子资源能够给网络报文打上一个标记（classid），这样内核的 tc（traffic control）模块就能根据这个标记做流量控制。

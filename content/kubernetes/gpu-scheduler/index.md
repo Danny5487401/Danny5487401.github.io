@@ -1,5 +1,3 @@
-
-
 ---
 title: "Gpu Scheduler"
 date: 2024-10-16T10:37:57+08:00
@@ -25,7 +23,13 @@ tags:
 异构计算平台就是“CPU＋GPU”以及“CPU＋FPGA” 架构。这些典型异构计算架构最大的优点是具有比传统CPU并行计算更高效率和低延迟的计算性能.
 
 ### CUDA
-2006年，NVIDIA公司发布了CUDA(Compute Unified Device Architecture)，是一种新的操作GPU计算的硬件和软件架构，是建立在NVIDIA的GPUs上的一个通用并行计算平台和编程模型，它提供了GPU编程的简易接口，基于CUDA编程可以构建基于GPU计算的应用程序，利用GPUs的并行计算引擎来更加高效地解决比较复杂的计算难题。
+
+在 2006 年，英伟达和 ATI 分别推出了 CUDA（Compute Unified Device Architecture）和 CTM（CLOSE TO THE METAL）编程环境。
+
+这一举措打破了 GPU 仅限于图形语言的局限，将 GPU 变成了真正的并行数据处理超级加速器。
+CUDA 和 CTM 的推出使得开发者可以更灵活地利用 GPU 的计算能力，为科学计算、数据分析等领域提供了更多可能性。
+
+2008 年，苹果公司推出了一个通用的并行计算编程平台 OPENCL（Open Computing Language）。与 CUDA 不同，OPENCL 并不与特定的硬件绑定，而是与具体的计算设备无关，这使得它迅速成为移动端 GPU 的编程环境业界标准。
 
 
 {{<figure src="./cuda_structure.png#center" width=800px >}}
@@ -48,16 +52,18 @@ CUDA软件堆栈中的驱动层API和运行时层API的区别如下
 4. 将device上的运算结果拷贝到host上；
 5. 释放device和host上分配的内存。
 
-### CPU 对比 GPU（Graphics Processing Unit）
+### CPU 对比 GPU
 {{<figure src="./gpu_vs_cpu.png#center" width=800px >}}
 
 CPU（Central Processing Unit）是一块超大规模的集成电路，是一台计算机的运算核心（Core）和控制核心（ Control Unit）。它的功能主要是解释计算机指令以及处理计算机软件中的数据
 
 
-CPU主要包括运算器（算术逻辑运算单元，ALU，Arithmetic Logic Unit）、控制单元（CU, Control Unit）、寄存器（Register）、和高速缓冲存储器（Cache）及实现它们之间联系的数据（Data）、控制及状态的总线（Bus）。简单来说就是：计算单元、控制单元和存储单元。CPU遵循的是冯诺依曼架构，其核心就是：存储程序，顺序执行。
+CPU主要包括运算器（算术逻辑运算单元，ALU，Arithmetic Logic Unit）、控制单元（CU, Control Unit）、寄存器（Register）、和高速缓冲存储器（Cache）及实现它们之间联系的数据（Data）、控制及状态的总线（Bus）。
+简单来说就是：计算单元、控制单元和存储单元。CPU遵循的是冯诺依曼架构，其核心就是：存储程序，顺序执行。
 
 
-GPU这个概念由NVIDIA公司于1999年提出。GPU是显卡上的一块芯片，就像CPU是主板上的一块芯片
+GPU （Graphics Processing Unit）这个概念由NVIDIA公司于1999年提出。GPU是显卡上的一块芯片，就像CPU是主板上的一块芯片.
+GPU采用了数量众多的计算单元和超长的流水线，但只有非常简单的控制逻辑并省去了Cache。
 
 
 ## 使用
@@ -371,6 +377,7 @@ GPU共享资源隔离方案
 ## 参考
 
 - https://kubernetes.io/docs/concepts/extend-kubernetes/compute-storage-net/device-plugins/
+- [GPU 英伟达GPU架构回顾](https://blog.csdn.net/u012294613/article/details/142672842)
 - [Kubernetes容器平台下的 GPU 集群算力管控](https://mp.weixin.qq.com/s/KzyXgXAsGde_OeF-5TMd2A)
 - [自定义资源支持：K8s Device Plugin 从原理到实现](https://www.lixueduan.com/posts/kubernetes/21-device-plugin/)
 - [GPU 环境搭建指南：如何在裸机、Docker、K8s 等环境中使用 GPU](https://www.lixueduan.com/posts/ai/01-how-to-use-gpu/)
