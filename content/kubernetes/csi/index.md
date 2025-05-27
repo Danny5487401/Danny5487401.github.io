@@ -1,5 +1,3 @@
-
-
 ---
 title: "Csi(container-storage-interface)架构和原理"
 date: 2025-01-11T10:51:59+08:00
@@ -36,7 +34,7 @@ var (
 
 
 
-## 存储架构和csi架构
+## 存储架构和 csi 架构
 
 
 - PersistentVolumeController：负责 PV/PVC 的绑定，并根据需求进行数据卷的 Provision/Delete 操作
@@ -396,7 +394,13 @@ func (e registrationServer) GetInfo(ctx context.Context, req *registerapi.InfoRe
 	}, nil
 }
 ```
-将 CSI driver 的信息通过 kubelet 的插件注册机制在对应节点的 kubelet 上进行注册
+将 CSI driver 的信息通过 kubelet 的插件注册机制在对应节点的 kubelet 上进行注册.
+
+总结两件事：
+1. rpc调用自研的csi-plugin插件，调用了GetPluginInfo方法，获取response.GetName即csiDriverName；
+2. 启动一个grpc server，并监听在宿主机上/var/lib/kubelet/plugins_registry/${csiDriverName}-reg.sock，供csi plugin handler来调用。
+
+
 
 
 ## 工作流程
@@ -754,3 +758,4 @@ func (c *csiAttacher) Attach(spec *volume.Spec, nodeName types.NodeName) (string
 - [一篇汇总k8s存储架构、csi原理和实现](https://blog.csdn.net/willinux20130812/article/details/120411540)
 - [浅析 CSI 工作原理](https://blog.hdls.me/16255765577465.html)
 - [CSI架构和原理](https://www.cnblogs.com/hgzero/p/17464313.html)
+- [CSI Plugin注册机制源码解析](https://juejin.cn/post/6930120558117912584)

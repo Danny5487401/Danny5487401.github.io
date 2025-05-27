@@ -1,5 +1,3 @@
-
-
 ---
 title: "Linux cgroups"
 date: 2024-10-23T22:24:23+08:00
@@ -23,6 +21,10 @@ cgroup 是一种以 hierarchical（树形层级）方式组织进程的机制（
 - 层级（hierarchy）： 一个大的控制组群树，归属于一个层级中，不同的控制组以层级区分开
 - 子系统（subsystem）： 一个的资源控制器，比如cpu子系统可以控制进程的cpu使用率，子系统需要附加（attach）到某个层级，然后该层级的所有控制组，均受到该子系统的控制
 
+
+
+
+
 ## 组成
 
 
@@ -32,7 +34,11 @@ cgroup 主要由两部分组成：
 - 控制器（controllers）：大部分控制器负责 cgroup 层级中 特定类型的系统资源的分配，少部分 utility 控制器用于其他目的。
 
 ### 常见的子系统（subsystem）
+
+Systemd 默认挂载的 cgroups 系统
+
 ```shell
+# 在系统的开机阶段，systemd 会把支持的 controllers (subsystem 子系统)挂载到默认的 /sys/fs/cgroup/ 目录下面
 ubuntu@VM-16-12-ubuntu:/sys/fs/cgroup$ ls
 blkio  cpu  cpuacct  cpu,cpuacct  cpuset  devices  freezer  hugetlb  memory  net_cls  net_cls,net_prio  net_prio  perf_event  pids  rdma  systemd  unified
 ```
@@ -47,6 +53,36 @@ blkio  cpu  cpuacct  cpu,cpuacct  cpuset  devices  freezer  hugetlb  memory  net
 - ns 子系统： 可以使不同 cgroups 下面的进程使用不同的 namespace。
 - freezer subsystem: 可以挂起或恢复 cgroup 中的 task
 - perf_event subsystem :使用后使得 cgroup 中的 task 可以进行统一的性能测试
+
+
+默认情况下，systemd 会自动创建 slice、scope 和 service unit 的层级(slice、scope 和 service 都是 systemd 的 unit 类型)，来为 cgroup 树提供统一的层级结构。
+
+```shell
+# 查看 cgroups 的层级结构
+# systemd-cgls - Recursively show control group contents
+
+systemd-cgls
+├─1 /usr/lib/systemd/systemd --switched-root --system --deserialize 22
+├─kubepods.slice
+│ ├─kubepods-pod8f82ef71_3212_49aa_ba58_5f0c4cb46843.slice
+│ │ ├─cri-containerd-d03aa2578e3e76306740ab7766eb1831efea9f02506c1c3d219179d340388149.scope
+│ │ │ ├─17274 mysqld
+│ │ │ ├─31225 bash
+│ │ │ ├─31562 mysql -u root -p
+│ │ │ ├─37941 bash
+│ │ │ └─38206 mysql -uroot -p
+│ │ └─cri-containerd-040857dec08c0df6e7d3fb15f74b8a9c499432e8bcad0bd72e27e1cdb7eeeb25.scope
+│ │   └─14187 /pause
+```
+service、scope 和 slice unit 被直接映射到 cgroup 树中的对象
+
+```shell
+# crond.service 属于 system.slice，会直接映射到 cgroup system.slice/cron.service/ 中。
+[root@master-01 crond.service]# pwd
+/sys/fs/cgroup/systemd/system.slice/crond.service
+[root@master-01 crond.service]# ls
+cgroup.clone_children  cgroup.event_control  cgroup.procs  notify_on_release  tasks
+```
 
 
 ## 四大功能
@@ -579,7 +615,6 @@ e420a97835d9692df5b90b47e7951bc3fad48269eb2c8b1fa782527e0ae91c8e
 实际指标是 container_spec_cpu_period 和 container_spec_cpu_quota.
 
 
-
 ```go
 // https://github.com/kubernetes/kubernetes/blob/761dd3640e4e11741c342fcf5fc869e09901cdb1/vendor/github.com/google/cadvisor/metrics/prometheus.go
 
@@ -873,6 +908,102 @@ $ sudo apt-get install cgroup-tools
 - 查看单个子系统（如 memory）挂载位置：lssubsys –m memory
 
 
+## 实践
+
+systemd-run 命令默认创建 service 类型的 unit，比如我们创建名称为 toptest 的 service 运行 top 命令
+```shell
+[root@master-01 systemd]# sudo systemd-run --unit=toptest --slice=test top -b
+
+# 会增加 test.slice
+[root@master-01 systemd]# ls /sys/fs/cgroup/systemd
+cgroup.clone_children  cgroup.event_control  cgroup.procs  cgroup.sane_behavior  kubepods.slice  notify_on_release  release_agent  system.slice  tasks  test.slice  user.slice
+
+[root@master-01 systemd]# ls /sys/fs/cgroup/systemd/test.slice/
+cgroup.clone_children  cgroup.event_control  cgroup.procs  notify_on_release  tasks  toptest.service
+
+[root@master-01 systemd]# systemctl status test.slice
+● test.slice
+   Loaded: loaded
+   Active: active since 二 2025-05-27 21:09:49 CST; 2min 6s ago
+   CGroup: /test.slice
+           └─toptest.service
+             └─48696 /bin/top -b
+
+5月 27 21:11:54 master-01 top[48696]: 44624 1001      20   0  449020  30244  16124 S   0.0  0.2   0:00.30 clckhouse-+
+5月 27 21:11:54 master-01 top[48696]: 45607 root      20   0   16332   1584   1224 S   0.0  0.0   0:29.17 chronyd
+5月 27 21:11:54 master-01 top[48696]: 46542 root      20   0   98608   1940   1524 S   0.0  0.0   0:00.77 rsyslogd
+5月 27 21:11:54 master-01 top[48696]: 47083 root      20   0       0      0      0 S   0.0  0.0   0:00.28 kworker/3:2
+5月 27 21:11:54 master-01 top[48696]: 50039 root      20   0       0      0      0 S   0.0  0.0   0:00.00 kworker/0:2
+5月 27 21:11:54 master-01 top[48696]: 55573 root      20   0       0      0      0 S   0.0  0.0   0:02.01 kworker/7:1
+5月 27 21:11:54 master-01 top[48696]: 58438 root      20   0       0      0      0 S   0.0  0.0   0:00.00 kworker/u1+
+5月 27 21:11:54 master-01 top[48696]: 64250 root      20   0 1238180   9728   5776 S   0.0  0.1  12:18.56 containerd+
+5月 27 21:11:54 master-01 top[48696]: 64287 65535     20   0    1004      4      0 S   0.0  0.0   0:00.02 pause
+5月 27 21:11:54 master-01 top[48696]: 64392 root      20   0 1238436  10432   5880 S   0.0  0.1   5:29.80 containerd+
+
+# top 命令被包装成一个 service 运行在后台了！进程 id 48696
+[root@master-01 systemd]# systemctl status toptest.service
+● toptest.service - /bin/top -b
+   Loaded: loaded (/run/systemd/system/toptest.service; static; vendor preset: disabled)
+  Drop-In: /run/systemd/system/toptest.service.d
+           └─50-Description.conf, 50-ExecStart.conf, 50-Slice.conf
+   Active: active (running) since 二 2025-05-27 21:09:49 CST; 3min 49s ago
+ Main PID: 48696 (top)
+   CGroup: /test.slice/toptest.service
+           └─48696 /bin/top -b
+
+5月 27 21:13:33 master-01 top[48696]: 8853 root      20   0   26380   1780   1460 S   0.0  0.0   0:23.76 systemd-lo+
+5月 27 21:13:33 master-01 top[48696]: 8854 root      20   0   21688   1340   1008 S   0.0  0.0   5:49.43 irqbalance
+5月 27 21:13:33 master-01 top[48696]: 8860 polkitd   20   0  612364  10268   4796 S   0.0  0.1   0:06.41 polkitd
+5月 27 21:13:33 master-01 top[48696]: 8897 root      20   0  126384   1604    988 S   0.0  0.0   0:08.07 crond
+5月 27 21:13:33 master-01 top[48696]: 9009 root       0 -20       0      0      0 S   0.0  0.0   6:09.47 kworker/7:+
+5月 27 21:13:33 master-01 top[48696]: 9193 root      20   0 1293224  43656  19096 S   0.0  0.3 202:55.36 kube-proxy
+5月 27 21:13:33 master-01 top[48696]: 9194 root      20   0  112872   4356   3328 S   0.0  0.0   0:00.34 sshd
+5月 27 21:13:33 master-01 top[48696]: 9229 root      20   0   11164    448    216 S   0.0  0.0   0:00.01 kube-lb
+5月 27 21:13:33 master-01 top[48696]: 9233 root      20   0   12712   2336    708 S   0.0  0.0  61:59.22 kube-lb
+5月 27 21:13:33 master-01 top[48696]: 9305 root       0 -20       0      0      0 S   0.0  0.0  15:38.46 kworker/0:+
+
+# 进程 id 48696
+# 初始化检查 top 进程的 cgroup 信息：
+[root@master-01 systemd]# cat /proc/48696/cgroup
+11:cpuacct,cpu:/
+10:devices:/
+9:freezer:/
+8:pids:/
+7:cpuset:/
+6:hugetlb:/
+5:perf_event:/
+4:blkio:/
+3:net_prio,net_cls:/
+2:memory:/
+1:name=systemd:/test.slice/toptest.service
+
+# 限制 toptest.service 的 CPUShares 为 600，可用内存的上限为 550M：
+[root@master-01 systemd]# sudo systemctl set-property toptest.service CPUShares=600 MemoryLimit=500M
+
+# 再次检查 top 进程的 cgroup 信息：
+# 在 CPU 和 memory 子系统中都出现了 toptest.service 的名字
+[root@master-01 systemd]# cat /proc/48696/cgroup
+11:cpuacct,cpu:/test.slice/toptest.service
+10:devices:/
+9:freezer:/
+8:pids:/
+7:cpuset:/
+6:hugetlb:/
+5:perf_event:/
+4:blkio:/
+3:net_prio,net_cls:/
+2:memory:/test.slice/toptest.service
+1:name=systemd:/test.slice/toptest.service
+
+
+# 设置的 CPUShares=600 MemoryLimit=500M 被分别写入了这些目录下的对应文件中。
+[root@master-01 cgroup]# cat /sys/fs/cgroup/memory/test.slice/toptest.service/memory.limit_in_bytes
+524288000
+
+[root@master-01 cgroup]# cat /sys/fs/cgroup/cpu/test.slice/toptest.service/cpu.shares
+600
+```
+
 ## 参考
 
 - https://www.kernel.org/doc/html/v5.10/admin-guide/cgroup-v2.html
@@ -882,3 +1013,4 @@ $ sudo apt-get install cgroup-tools
 - [k8s CPU limit和throttling的迷思](https://zhuanlan.zhihu.com/p/433065108)
 - [Pod的Qos类](https://blog.csdn.net/weixin_43539320/article/details/137913942)
 - [如何计算Kubernetes容器CPU使用率](https://www.cnblogs.com/apink/p/15767687.html)
+- [临时或永久修改cgroup和Cgroup](https://blog.csdn.net/u011436427/article/details/125706536)

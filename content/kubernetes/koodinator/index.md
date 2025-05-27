@@ -80,6 +80,259 @@ Koordlet 以 DaemonSet 的形式部署在 Kubernetes 集群中，用于支持混
 ### Koord-RuntimeProxy
 Koord-RuntimeProxy 以 systemd service 的形式部署在 Kubernetes 集群的节点上，用于代理 Kubelet 与 containerd/docker 之间的 CRI 请求。这一个代理被设计来支持精细化的资源管理策略，比如为不同 QoS Pod 设置不同的 cgroup 参数，包括内核 cfs quota，resctl 等等技术特性，以改进 Pod 的运行时质量。。
 
+
+
+
+## 优先级
+
+Koordinator 将不同类型的工作负载匹配到不同的优先级:
+{{<figure src="./priority_class.png#center" width=800px >}}
+- koord-prod，运行典型的延迟敏感型服务，一般是指需要 "实时 "响应的服务类型，比如通过点击移动APP中的按钮调用的典型服务。
+- koord-mid，对应于长周期的可用资源，一般用于运行一些实时计算、人工智能训练任务/作业，如 tensorflow/pytorch 等。
+- koord-batch，对应于的短周期可用资源，运行典型的离线批处理作业，一般指离线分析类作业，如日级大数据报告、非交互式 SQL 查询。
+- koord-free，运行低优先级的离线批处理作业，一般指不做资源预算，利用闲置资源尽量完成，如开发人员为测试目提交的作业。
+
+## QOS
+
+{{<figure src="./qos_core.png#center" width=800px >}}
+
+- LSE(Latency Sensitive Exclusive): 很少使用，常见于中间件类应用，一般在独立的资源池中使用
+- LSR(Latency Sensitive Reserved): 类似于社区的 Guaranteed，CPU 核被绑定
+- LS(Latency Sensitive): 微服务工作负载的典型QoS级别，实现更好的资源弹性和更灵活的资源调整能力
+- BE(Best Effort): 批量作业的典型 QoS 水平，在一定时期内稳定的计算吞吐量，低成本资源
+
+
+
+
+
+## 负载感知调度（Load Aware Scheduling）
+
+{{<figure src="./load_aware.png#center" width=800px >}}
+
+
+### 节点指标
+```shell
+[root@master-01 ~]# kubectl get nodemetrics.slo.koordinator.sh master-01 -o yaml
+apiVersion: slo.koordinator.sh/v1alpha1
+kind: NodeMetric
+metadata:
+  creationTimestamp: "2025-05-24T11:31:54Z"
+  generation: 1
+  name: master-01
+  resourceVersion: "15281512"
+  uid: 21d81aaf-0338-4e94-bccc-07540fec3575
+spec:
+  metricCollectPolicy:
+    aggregateDurationSeconds: 300
+    nodeAggregatePolicy:
+      durations:
+      - 5m0s
+      - 10m0s
+      - 30m0s
+    nodeMemoryCollectPolicy: usageWithoutPageCache
+    reportIntervalSeconds: 60
+status:
+  nodeMetric:
+    aggregatedNodeUsages:
+    - duration: 5m0s
+      usage:
+        p50:
+          resources:
+            cpu: 429m
+            memory: 5712464Ki
+        p90:
+          resources:
+            cpu: 886m
+            memory: 5750116Ki
+        p95:
+          resources:
+            cpu: 1097m
+            memory: 5833412Ki
+        p99:
+          resources:
+            cpu: 1366m
+            memory: 5938812Ki
+    - duration: 10m0s
+      usage:
+        p50:
+          resources:
+            cpu: 429m
+            memory: 5716284Ki
+        p90:
+          resources:
+            cpu: 887m
+            memory: 5763284Ki
+        p95:
+          resources:
+            cpu: 1127m
+            memory: 5842656Ki
+        p99:
+          resources:
+            cpu: 1537m
+            memory: 5934088Ki
+    - duration: 30m0s
+      usage:
+        p50:
+          resources:
+            cpu: 429m
+            memory: 5723620Ki
+        p90:
+          resources:
+            cpu: 858m
+            memory: 5823232Ki
+        p95:
+          resources:
+            cpu: 1113m
+            memory: 5867972Ki
+        p99:
+          resources:
+            cpu: 1467m
+            memory: 5977372Ki
+    aggregatedSystemUsages:
+    - duration: 5m0s
+      usage:
+        p50:
+          resources:
+            cpu: 153m
+            memory: 3078852Ki
+        p90:
+          resources:
+            cpu: 407m
+            memory: 3085764Ki
+        p95:
+          resources:
+            cpu: 539m
+            memory: 3088652Ki
+        p99:
+          resources:
+            cpu: 795m
+            memory: 3106312Ki
+    - duration: 10m0s
+      usage:
+        p50:
+          resources:
+            cpu: 155m
+            memory: 3080256Ki
+        p90:
+          resources:
+            cpu: 422m
+            memory: 3089936Ki
+        p95:
+          resources:
+            cpu: 551m
+            memory: 3094736Ki
+        p99:
+          resources:
+            cpu: 803m
+            memory: 3123404Ki
+    - duration: 30m0s
+      usage:
+        p50:
+          resources:
+            cpu: 156m
+            memory: 3082092Ki
+        p90:
+          resources:
+            cpu: 424m
+            memory: 3179492Ki
+        p95:
+          resources:
+            cpu: 569m
+            memory: 3184832Ki
+        p99:
+          resources:
+            cpu: 853m
+            memory: 3203756Ki
+    nodeUsage:
+      resources:
+        cpu: 515m
+        memory: "5862330450"
+    systemUsage:
+      resources:
+        cpu: 196m
+        memory: "3150994008"
+  podsMetric:
+  - name: my-clickhouse-zookeeper-0
+    namespace: clickhouse
+    podUsage:
+      resources:
+        cpu: 26m
+        memory: "396051912"
+    priority: koord-prod
+    qos: LS
+  - name: prometheus-prometheus-node-exporter-wgsq8
+    namespace: monitor
+    podUsage:
+      resources:
+        cpu: 2m
+        memory: "15283891"
+    priority: koord-batch
+    qos: BE
+  - name: node-local-dns-wb5tm
+    namespace: kube-system
+    podUsage:
+      resources:
+        cpu: 5m
+        memory: "15037204"
+    priority: koord-prod
+    qos: LS
+  - name: my-clickhouse-shard0-0
+    namespace: clickhouse
+    podUsage:
+      resources:
+        cpu: 183m
+        memory: "681455546"
+    priority: koord-prod
+    qos: LS
+  - name: koordlet-fzt68
+    namespace: koordinator-system
+    podUsage:
+      resources:
+        cpu: 41m
+        memory: "64553043"
+    priority: koord-prod
+    qos: LS
+  - name: koord-manager-7dcfb8f8bf-7s25k
+    namespace: koordinator-system
+    podUsage:
+      resources:
+        cpu: 8m
+        memory: "28991571"
+    priority: koord-prod
+    qos: LS
+  - name: mysql-7474b86d4f-52p5n
+    namespace: mysql
+    podUsage:
+      resources:
+        cpu: 21m
+        memory: "393941019"
+    priority: koord-prod
+    qos: LSR
+  - name: kube-flannel-ds-h27xn
+    namespace: kube-system
+    podUsage:
+      resources:
+        cpu: 11m
+        memory: "13854899"
+    priority: koord-prod
+    qos: LS
+  - name: my-kafka-controller-0
+    namespace: kafka
+    podUsage:
+      resources:
+        cpu: 57m
+        memory: "1101719261"
+    priority: koord-prod
+    qos: LS
+  prodReclaimableMetric:
+    resource:
+      resources:
+        cpu: 2380m
+        memory: "0"
+  updateTime: "2025-05-25T03:36:38Z"
+```
+
+
 ## 参考
 
 - https://koordinator.sh/zh-Hans/
