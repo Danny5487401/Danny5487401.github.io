@@ -1,6 +1,5 @@
-
 ---
-title: "Ssh"
+title: "SSH 协议"
 date: 2024-09-21T15:54:25+08:00
 summary: "Secure Shell 加密的网络传输协议及在teleport中应用 "
 categories:
@@ -28,7 +27,7 @@ SSH 协议由 3 个子协议构成。从底层到顶层分别是：
 
 
 
-## 传输层协议
+## 传输层协议 Transport Layer Protocol
 
 简单流程
 - 建立底层连接（4.1 Use over TCP/IP）
@@ -42,12 +41,15 @@ SSH 协议由 3 个子协议构成。从底层到顶层分别是：
 - Key 交换算法执行（8. Diffie-Hellman Key Exchange）
 - Key Re-Exchange 即 Key 会多次交换
 
-## 用户认证协议
+## 用户认证协议 User Authentication Protocol
 
 RFC 4252: The Secure Shell (SSH) Authentication Protocol  支持如下几种身份认证协议：
 
-- none，服务端关闭身份认证，也就是说，任意用户都可以连接到该服务端（rfc4252#section-5.2）。
-- publickey基于公钥的身份认证:设备上可以利用RSA和 DSA两种公共密钥算法实现数字签名.客户端发送包含用户名,公共密钥和公共密钥算法的 publickey 认证请求给服务器端.服务器对公钥进行合法性检查,如果不合法,则直接发送失败消息;否则,服务器利用数字签名对客户端进行认证,并返回认证成功或失败的消息（rfc4252#section-7）。
+- none: 服务端关闭身份认证，也就是说，任意用户都可以连接到该服务端（rfc4252#section-5.2）。
+  {{<figure src="./publickey-authentication.png#center" width=800px >}}
+- publickey 基于公钥的身份认证:设备上可以利用RSA和 DSA两种公共密钥算法实现数字签名.客户端发送包含用户名,公共密钥和公共密钥算法的 publickey 认证请求给服务器端.服务器对公钥进行合法性检查,如果不合法,则直接发送失败消息;否则,服务器利用数字签名对客户端进行认证,并返回认证成功或失败的消息（rfc4252#section-7）。
+
+{{<figure src="./password-authentication.png#center" width=800px >}}
 - password认证: 客户端向服务器发出 password认证请求,将用户名和密码加密后发送给服务器;服务器将该信息解密后得到用户名和密码的明文,与设备上保存的用户名和密码进行比较,并返回认证成功或失败的消息。（rfc4252#section-8）
 - hostbased，比较少见，略（rfc4252#section-9）。
 - GSS-API，校验 （rfc4462）
@@ -71,26 +73,49 @@ type gssAPIWithMICCallback struct {
 }
 ```
 
+### SSH 服务端权限问题
+a) SSH服务端上~/.ssh目录的权限必须是700
+```shell
+[python@master-01 ~]$ ls -alh /home/python/
+drwx------  2 python python  29 6月   6 12:37 .ssh
+```
+b) SSH服务端上.~/.ssh/authorized_keys文件权限必须是600或者644
+```shell
+[python@master-01 ~]$ ls -alh /home/python/.ssh/w
+-rw-r--r-- 1 python python 571 6月   6 12:37 authorized_keys
+```
+c) SSH服务端上用户家目录文件权限必须是700或750或755，775和777权限 ssh免密将失效
+```shell
+[python@master-01 ~]$ ls -alh /home/
+drwx------   3 python python  90 6月   6 12:37 python
+```
+权限问题可以通过下面方法 进行缓解，但不建议，有安全隐患。
+```shell
+# 每个文件的 权限信息 由 9 个字符组成，分为三组，分别对应 拥有者, 用户组, 其他人 拥有的权限。
+# 数字类型改变文件权限
+r:4
+w:2
+x:1
+```
+```shell
+# 编辑 vi /etc/ssh/sshd_config
+# 找到 #StrictModes yes改成StrictModes no
+StrictModes no
+```
 
 
-## 连接协议
+## 连接协议  Connection Protocol
 RFC 4254: The Secure Shell (SSH) Connection Protocol 连接协议，包括：交互式登录会话、TCP/IP 端口转发、X11 Forwarding
 
 SSH 连接协议定义的交互式登录终端会话、TCP/IP 端口转发、X11 Forwarding 的这些功能，都工作在自己的通道 (Channel) 之上的。
 
 在 SSH 协议中，Channel 实现对底层连接的多路复用（虚拟连接）
 - 通过一个数字来进行标识和区分这些 Channel
-- 实现流控（窗口
+- 实现流控（窗口)
 
 
-### 交互式会话
-在 SSH 语境下，会话（Session）代表远程执行一个程序。这个程序可能是 Shell、应用。同时，它可能有也可能没有一个 tty、可能涉及也可能不涉及 x11 forward。
-
-
-
-
-## 应用
 ```html
+// 应用
 // https://www.rfc-editor.org/rfc/rfc4250#section-4.9.1
 Channel type                  Reference
 ------------                  ---------
@@ -109,6 +134,12 @@ direct-tcpip                  [SSH-CONNECT, Section 7.2]
 - 远程命令执行：在远程服务器上执行命令，就像在本地终端一样。
 - 端口转发/隧道：通过SSH创建安全的隧道传输数据，可以将本地端口映射到远程服务器上的端口，或反向操作。
 - 代理服务：使用SSH作为SOCKS代理来进行网络活动，增加通信的安全性。
+
+
+
+### 交互式会话
+在 SSH 语境下，会话（Session）代表远程执行一个程序。这个程序可能是 Shell、应用。同时，它可能有也可能没有一个 tty、可能涉及也可能不涉及 x11 forward。
+
 
 
 ### 端口转发（port forwarding）
@@ -473,6 +504,15 @@ ssh-copy-id ：将本机的秘钥复制到远程机器的authorized_keys文件�
 ```shell
 ssh-copy-id -i /root/.ssh/id_dsa.pub root@180.8.5.6
 ```
+
+
+### 添加用户
+有两条命令：adduer和useradd，对应删除用户的命令：userdel。
+这两种命令之间的区别：
+- adduser：会自动为创建的用户指定主目录、系统shell版本，会在创建时输入用户密码。
+- useradd：需要使用参数选项指定上述基本设置，如果不使用任何参数，则创建的用户无密码、无主目录、没有指定shell版本。
+
+useradd 命令属于比较难用的命令 (low level utility for adding users)，所以 Debian 系的发行版中建议管理员使用 adduser 命令。
 
 
 ## 参考

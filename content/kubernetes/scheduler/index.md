@@ -951,7 +951,7 @@ func (sched *Scheduler) findNodesThatPassFilters(
 ```
 
 Predicate有一系列的算法可以使用： 
-- PodToleratesNodeTaints：检查Pod是否容忍Node Taint
+- PodToleratesNodeTaints：检查Pod是否容忍 Node Taint
 - CheckNodeMemoryPressure:检查Pod是否可以调度到MemoryPressure的节点
 - CheckNodeDiskPressure：检查Pod是否可以调度到DiskPressure的节点
 - NoVolumeNodeConflict：检查节点是否满足Pod所引用的Volume的条
@@ -963,7 +963,7 @@ Predicate有一系列的算法可以使用：
 - NoVolumeZoneConflict：检查 volume zone是否冲
 - MaxEBSVolumeCount：检查AWS EBS Volume数量是否过多（默认不超过 39)
 - MaxGCEPDVolumeCount：检查GCE PD Volume数量是否过多（默认不超过 16)
-- MaxAzureDiskVolumeCount：检查Azure Disk Volume数量是否过多（默认不超过 16
+- MaxAzureDiskVolumeCount：检查Azure Disk Volume数量是否过多（默认不超过 16)
 - MatchInterPodAffinity：检查是否匹配Pod的亲和性要求
 
 
@@ -1192,16 +1192,42 @@ scheduler 对 resource 打分内置三种不同策略, 分别是 LeastAllocated 
 - MostAllocated 空闲资源少的分高, 优先调度到空闲资源较少的 node 上, 这样 pod 尽量集中起来方便后面资源回收.
 - RequestedToCapacityRatio 请求 request 和 node 资源总量的比率低的分高.
 
-过滤
 
+LeastAllocated 为例
 ```go
+// Details:
+// (cpu((capacity-requested)*MaxNodeScore*cpuWeight/capacity) + memory((capacity-requested)*MaxNodeScore*memoryWeight/capacity) + ...)/weightSum
+func leastResourceScorer(resources []config.ResourceSpec) func([]int64, []int64) int64 {
+	return func(requested, allocable []int64) int64 {
+		var nodeScore, weightSum int64
+		for i := range requested {
+			if allocable[i] == 0 {
+				continue
+			}
+			weight := resources[i].Weight
+			resourceScore := leastRequestedScore(requested[i], allocable[i])
+			nodeScore += resourceScore * weight
+			weightSum += weight
+		}
+		if weightSum == 0 {
+			return 0
+		}
+		return nodeScore / weightSum
+	}
+}
+```
+
+
+- 过滤
+```go
+// https://github.com/kubernetes/kubernetes/blob/be080584c632b031583310dd090424b06aa4f498/pkg/scheduler/framework/plugins/noderesources/fit.go
 func (f *Fit) Filter(ctx context.Context, cycleState *framework.CycleState, pod *v1.Pod, nodeInfo *framework.NodeInfo) *framework.Status {
 	// 获取在 preFilter 阶段写入的 preFilterState
 	s, err := getPreFilterState(cycleState)
 	if err != nil {
 		return framework.AsStatus(err)
 	}
-    // 判断当前的 node 是否满足 pod 的资源请求需求
+    // 判断当前的 node 是否满足 pod 的资源请求 request 需求
 	insufficientResources := fitsRequest(s, nodeInfo, f.ignoredResources, f.ignoredResourceGroups)
 	
 	if len(insufficientResources) != 0 {// 存在不足资源
@@ -1215,6 +1241,94 @@ func (f *Fit) Filter(ctx context.Context, cycleState *framework.CycleState, pod 
 	return nil
 }
 ```
+
+```go
+func fitsRequest(podRequest *preFilterState, nodeInfo *framework.NodeInfo, ignoredExtendedResources, ignoredResourceGroups sets.String) []InsufficientResource {
+	insufficientResources := make([]InsufficientResource, 0, 4)
+
+	// 保证不超过节点最大运行数目
+	allowedPodNumber := nodeInfo.Allocatable.AllowedPodNumber
+	if len(nodeInfo.Pods)+1 > allowedPodNumber {
+		insufficientResources = append(insufficientResources, InsufficientResource{
+			ResourceName: v1.ResourcePods,
+			Reason:       "Too many pods",
+			Requested:    1,
+			Used:         int64(len(nodeInfo.Pods)),
+			Capacity:     int64(allowedPodNumber),
+		})
+	}
+    // 保证资源 cpu,memory,EphemeralStorage足够 request
+	if podRequest.MilliCPU == 0 &&
+		podRequest.Memory == 0 &&
+		podRequest.EphemeralStorage == 0 &&
+		len(podRequest.ScalarResources) == 0 {
+		return insufficientResources
+	}
+
+	if podRequest.MilliCPU > (nodeInfo.Allocatable.MilliCPU - nodeInfo.Requested.MilliCPU) {
+		insufficientResources = append(insufficientResources, InsufficientResource{
+			ResourceName: v1.ResourceCPU,
+			Reason:       "Insufficient cpu",
+			Requested:    podRequest.MilliCPU,
+			Used:         nodeInfo.Requested.MilliCPU,
+			Capacity:     nodeInfo.Allocatable.MilliCPU,
+		})
+	}
+	if podRequest.Memory > (nodeInfo.Allocatable.Memory - nodeInfo.Requested.Memory) {
+		insufficientResources = append(insufficientResources, InsufficientResource{
+			ResourceName: v1.ResourceMemory,
+			Reason:       "Insufficient memory",
+			Requested:    podRequest.Memory,
+			Used:         nodeInfo.Requested.Memory,
+			Capacity:     nodeInfo.Allocatable.Memory,
+		})
+	}
+	if podRequest.EphemeralStorage > (nodeInfo.Allocatable.EphemeralStorage - nodeInfo.Requested.EphemeralStorage) {
+		insufficientResources = append(insufficientResources, InsufficientResource{
+			ResourceName: v1.ResourceEphemeralStorage,
+			Reason:       "Insufficient ephemeral-storage",
+			Requested:    podRequest.EphemeralStorage,
+			Used:         nodeInfo.Requested.EphemeralStorage,
+			Capacity:     nodeInfo.Allocatable.EphemeralStorage,
+		})
+	}
+
+	// 其他资源
+	for rName, rQuant := range podRequest.ScalarResources {
+		// Skip in case request quantity is zero
+		if rQuant == 0 {
+			continue
+		}
+
+		if v1helper.IsExtendedResourceName(rName) {
+			// If this resource is one of the extended resources that should be ignored, we will skip checking it.
+			// rName is guaranteed to have a slash due to API validation.
+			var rNamePrefix string
+			if ignoredResourceGroups.Len() > 0 {
+				rNamePrefix = strings.Split(string(rName), "/")[0]
+			}
+			if ignoredExtendedResources.Has(string(rName)) || ignoredResourceGroups.Has(rNamePrefix) {
+				continue
+			}
+		}
+
+		if rQuant > (nodeInfo.Allocatable.ScalarResources[rName] - nodeInfo.Requested.ScalarResources[rName]) {
+			insufficientResources = append(insufficientResources, InsufficientResource{
+				ResourceName: rName,
+				Reason:       fmt.Sprintf("Insufficient %v", rName),
+				Requested:    podRequest.ScalarResources[rName],
+				Used:         nodeInfo.Requested.ScalarResources[rName],
+				Capacity:     nodeInfo.Allocatable.ScalarResources[rName],
+			})
+		}
+	}
+
+	return insufficientResources
+}
+
+```
+
+
 
 打分
 
@@ -1241,13 +1355,7 @@ func (r *resourceAllocationScorer) score(
 	nodeInfo *framework.NodeInfo,
 	podRequests []int64) (int64, *framework.Status) {
 	node := nodeInfo.Node()
-	if node == nil {
-		return 0, framework.NewStatus(framework.Error, "node not found")
-	}
-	// resources not set, nothing scheduled,
-	if len(r.resources) == 0 {
-		return 0, framework.NewStatus(framework.Error, "resources not found")
-	}
+    // ...
 
 	requested := make([]int64, len(r.resources))
 	allocatable := make([]int64, len(r.resources))

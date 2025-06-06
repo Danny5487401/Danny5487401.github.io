@@ -1,6 +1,15 @@
 ---
-title: "Koodinator"
+title: "Koodinator 混合工作负载调度系统"
 date: 2025-05-18T09:54:34+08:00
+summary: "csi 部署方式及源码实现"
+categories:
+  - kubernetes
+authors:
+  - Danny
+tags:
+  - k8s
+  - scheduler
+  - 源码
 draft: true
 ---
 
