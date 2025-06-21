@@ -1,5 +1,3 @@
-
-
 ---
 title: "存储: Raid 和 lvm, NVMe"
 date: 2025-02-21T08:34:31+08:00
@@ -94,6 +92,7 @@ ENV{key}：设置设备属性
 
 
 ### LVM 精简卷(Thinly-Provisioned Logical Volumes)
+{{<figure src="./lvm_with_thin_pool.png#center" width=800px >}}
 
 在创建Thin“瘦”卷时，预分配一个虚拟的逻辑卷容量大小，而只是在实际写入数据时才分配物理空间给这个卷。
 这样我们可以轻易的创建出总逻辑容量超出物理磁盘空间的多个“精简卷”，而无须为将来可能达到的数据量提前“买单”。
@@ -615,6 +614,30 @@ func removeVolumeFilesystem(lvmVolume *apis.LVMVolume) error {
 	klog.V(4).Infof("Successfully wiped filesystem on device path: %s", devicePath)
 	return nil
 }
+```
+
+
+### lvm 监控
+
+```shell
+# Total Provisioned Capacity : vgs -o vg_size <vg_name>
+root@node4:~#  vgs -o vg_size ubuntu-vg
+  VSize
+  <98.00g
+  
+# Total Free Capacity :vgs -o vg_free <vg_name> 
+root@node4:~# vgs -o vg_free ubuntu-vg
+  VFree
+  9.00g
+  
+# Total Used Capacity=   Total Provisioned Capacity - Total Free Capacity 
+
+# Total Allocated Capacity : lvs -o lv_size <lv_full_name>
+root@node4:~# lvs -o lv_size ubuntu-vg/ubuntu-lv
+  LSize
+  <89.00g
+  
+# Total Used Capacity : lvs -o lv_size,data_percent,snap_percent,metadata_percent <lv_full_name>
 ```
 
 ## RAID(Redundant Array of Independent Disks 独立硬盘冗余阵列）

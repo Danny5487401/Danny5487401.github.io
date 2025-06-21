@@ -1,5 +1,3 @@
-
-
 ---
 title: "k8s 部署"
 date: 2024-12-27T17:16:39+08:00
@@ -17,7 +15,7 @@ tags:
 ## 部署工具
 [部署工具对比](https://github.com/kubernetes-sigs/kubespray/blob/master/docs/getting_started/comparisons.md)
 
-- github.com/kubernetes-sigs/kubespray: 使用 ansible 作为配置和编排的基础
+- github.com/kubernetes-sigs/kubespray: 使用 ansible 作为配置和编排的基础, 依赖 kubeadm
 - github.com/kubernetes/kops: 与云平台绑定深,比如 AWS (Amazon Web Services) and GCP (Google Cloud Platform)
 - github.com/kubernetes/kubeadm
 - github.com/easzlab/kubeasz: 使用 ansible 脚本安装K8S集群,方便国内网络环境
@@ -120,6 +118,9 @@ Client关闭跟Server的连接后，也有可能很快再次跟Server之间建�
 
 还有另外一个选项tcp_tw_recycle来控制TIME_WAIT状态，但是该选项是很危险的，因为它可能会引起意料不到的问题，比如可能会引起NAT环境下的丢包问题。
 net.ipv4.tcp_tw_recycle = 0  因为打开该选项后引起了太多的问题，所以4.12内核开始就索性删掉了这个配置选项
+
+
+
 
 
 ## 系统预留
@@ -250,15 +251,40 @@ https://github.com/easzlab/kubeasz/blob/3.6.6/docs/guide/harbor.md
 
 结构:https://github.com/goharbor/harbor/wiki/Architecture-Overview-of-Harbor
 
-
-
 ## kubeadm 使用
 - kubeadm init 创建新的控制平面节点
 - kubeadm join 将节点快速连接到指定的控制平面
 
+
+## kubespray 使用
+- [官方离线安装](https://github.com/kubernetes-sigs/kubespray/blob/v2.27.0/docs/operations/offline-environment.md?plain=1)
+
+主要修改镜像源: https://github.com/kubernetes-sigs/kubespray/blob/c144c1ac9c36e34f1b244304b61e1a6bd1843895/docs/operations/mirror.md
+- files_repo: "https://files.m.daocloud.io"
+- gcr_image_repo: "gcr.m.daocloud.io"
+- kube_image_repo: "k8s-gcr.m.daocloud.io"
+- docker_image_repo: "docker.m.daocloud.io"
+- quay_image_repo: "quay.m.daocloud.io"
+- github_image_repo: "ghcr.m.daocloud.io"
+
+### inventory 配置
+- https://github.com/kubernetes-sigs/kubespray/blob/v2.27.0/docs/ansible/inventory.md
+
+配置项:
+- kube_control_plane
+- etcd
+- kube_node节点
+
+
+额外
+- 堡垒机 bastion
+
+
 ## 参考
 
 - https://kubernetes.io/zh-cn/docs/setup/production-environment/tools/
-- [基础篇 TCP连接的建立和断开受哪些系统配置影响](https://time.geekbang.org/column/article/284912)
+- [11 基础篇 TCP连接的建立和断开受哪些系统配置影响](https://time.geekbang.org/column/article/284912)
+- [12 基础篇 TCP收发包过程会受哪些配置项影响？](https://learn.lianglianglee.com/%E4%B8%93%E6%A0%8F/Linux%E5%86%85%E6%A0%B8%E6%8A%80%E6%9C%AF%E5%AE%9E%E6%88%98%E8%AF%BE/12%20%E5%9F%BA%E7%A1%80%E7%AF%87%20TCP%E6%94%B6%E5%8F%91%E5%8C%85%E8%BF%87%E7%A8%8B%E4%BC%9A%E5%8F%97%E5%93%AA%E4%BA%9B%E9%85%8D%E7%BD%AE%E9%A1%B9%E5%BD%B1%E5%93%8D%EF%BC%9F.md)
+- [13 案例篇 TCP拥塞控制是如何导致业务性能抖动的](https://learn.lianglianglee.com/%E4%B8%93%E6%A0%8F/Linux%E5%86%85%E6%A0%B8%E6%8A%80%E6%9C%AF%E5%AE%9E%E6%88%98%E8%AF%BE/13%20%E6%A1%88%E4%BE%8B%E7%AF%87%20TCP%E6%8B%A5%E5%A1%9E%E6%8E%A7%E5%88%B6%E6%98%AF%E5%A6%82%E4%BD%95%E5%AF%BC%E8%87%B4%E4%B8%9A%E5%8A%A1%E6%80%A7%E8%83%BD%E6%8A%96%E5%8A%A8%E7%9A%84%EF%BC%9F.md)
 - [Kubespray实现生产环境一键部署k8s v1.25.6集群](https://www.magiccloudnet.com/kubespray/)
 - https://github.com/kubernetes/kubernetes/tree/v1.32.0/cmd/kubeadm

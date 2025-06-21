@@ -10,7 +10,6 @@ tags:
   - k8s
   - scheduler
   - 源码
-draft: true
 ---
 
 
@@ -109,6 +108,15 @@ Koordinator 将不同类型的工作负载匹配到不同的优先级:
 - LSR(Latency Sensitive Reserved): 类似于社区的 Guaranteed，CPU 核被绑定
 - LS(Latency Sensitive): 微服务工作负载的典型QoS级别，实现更好的资源弹性和更灵活的资源调整能力
 - BE(Best Effort): 批量作业的典型 QoS 水平，在一定时期内稳定的计算吞吐量，低成本资源
+
+
+| Koordinator QoS |     Kubernetes QoS     | 
+| :--: |:----------------------:| 
+| LSE(Latency Sensitive Exclusive) |       Guaranteed       | 
+| LSR(Latency Sensitive Reserved) |            Guaranteed            |
+| LS(Latency Sensitive) |            Guaranteed/Burstable           | 
+| BE(Best Effort) |            BestEffort           |
+
 
 
 
@@ -269,46 +277,7 @@ status:
         memory: "396051912"
     priority: koord-prod
     qos: LS
-  - name: prometheus-prometheus-node-exporter-wgsq8
-    namespace: monitor
-    podUsage:
-      resources:
-        cpu: 2m
-        memory: "15283891"
-    priority: koord-batch
-    qos: BE
-  - name: node-local-dns-wb5tm
-    namespace: kube-system
-    podUsage:
-      resources:
-        cpu: 5m
-        memory: "15037204"
-    priority: koord-prod
-    qos: LS
-  - name: my-clickhouse-shard0-0
-    namespace: clickhouse
-    podUsage:
-      resources:
-        cpu: 183m
-        memory: "681455546"
-    priority: koord-prod
-    qos: LS
-  - name: koordlet-fzt68
-    namespace: koordinator-system
-    podUsage:
-      resources:
-        cpu: 41m
-        memory: "64553043"
-    priority: koord-prod
-    qos: LS
-  - name: koord-manager-7dcfb8f8bf-7s25k
-    namespace: koordinator-system
-    podUsage:
-      resources:
-        cpu: 8m
-        memory: "28991571"
-    priority: koord-prod
-    qos: LS
+  # ....
   - name: mysql-7474b86d4f-52p5n
     namespace: mysql
     podUsage:

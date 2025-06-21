@@ -560,6 +560,26 @@ container_cpu_cfs_throttled_periods_total 通过这指标排查.
 {{<figure src="./limit_0.6_core.png#center" width=800px >}}
 
 
+
+
+#### 为什么 CPU 利用率远不到 limit 还会被 throttle ?
+
+{{<figure src="./cpu_usage_interval.png#center" width=800px >}}
+
+CPU 限流是因为内核使用 CFS 调度算法，对于微突发场景，在一个 CPU 调度周期内 (100ms) 所占用的时间超过了 limit 还没执行完，就会强制 "抢走" CPU 使用权(throttle)，等待下一个周期再执行，但是时间拉长一点，进程使用 CPU 所占用的时间比例却很低，监控上就看不出来 CPU 有突增，但实际上又被 throttle 了。
+
+
+最明显就是 exporter 服务,15s 抓取一次指标.
+
+
+
+解决方式: 
+1. [koordinator 处理突然流量 CPU Burst](https://koordinator.sh/zh-Hans/docs/user-manuals/cpu-burst)
+- 这个 CPU Burst is not available for LSR and BE pods since it targets on burstable cpu usages
+
+2. 内核 >=5.14  提供 Burstable CFS Controller,
+
+
 ### memory：限制内存使用
 
 - memory.limit_in_bytes：cgroup 能使用的内存上限值，默认为字节；也可以添加 k/K、m/M 和 g/G 单位后缀。往文件中写入 -1 来移除设置的上限，表示不对内存做限制
