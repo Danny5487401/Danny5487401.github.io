@@ -252,9 +252,39 @@ https://github.com/easzlab/kubeasz/blob/3.6.6/docs/guide/harbor.md
 结构:https://github.com/goharbor/harbor/wiki/Architecture-Overview-of-Harbor
 
 ## kubeadm 使用
+https://kubernetes.io/zh-cn/docs/reference/setup-tools/kubeadm/
 - kubeadm init 创建新的控制平面节点
 - kubeadm join 将节点快速连接到指定的控制平面
+```shell
+# kubeadm join phase 子命令
+root@node1:/tmp/releases# ./kubeadm-v1.31.4-amd64 join phase --help
+Use this command to invoke single phase of the join workflow
 
+Usage:
+  kubeadm join phase [command]
+
+Available Commands:
+  control-plane-join    Join a machine as a control plane instance
+  control-plane-prepare Prepare the machine for serving a control plane
+  kubelet-start         Write kubelet settings, certificates and (re)start the kubelet
+  preflight             Run join pre-flight checks
+  wait-control-plane    EXPERIMENTAL: Wait for the control plane to start
+```
+操作流程
+preflight → control-plane-prepare → kubelet-start → control-plane-join → wait-control-plan
+
+
+```shell
+# 查看token
+root@node1:/tmp/releases# ./kubeadm-v1.31.4-amd64 token list
+TOKEN                     TTL         EXPIRES                USAGES                   DESCRIPTION                                                EXTRA GROUPS
+7y9wsq.m39141nuiqbqp3jf   23h         2025-06-24T05:05:26Z   authentication,signing   <none>                                                     system:bootstrappers:kubeadm:default-node-token
+8dmx1v.y68sd65fizm097h7   1h          2025-06-23T07:05:20Z   <none>                   Proxy for managing TTL for the kubeadm-certs secret        <none>
+a8yy39.u0tvtbzypg0inqp7   23h         2025-06-24T05:05:25Z   authentication,signing   <none>                                                     system:bootstrappers:kubeadm:default-node-token
+b7qg4l.y2nw6n63lz7zv4ii   23h         2025-06-24T05:05:25Z   authentication,signing   <none>                                                     system:bootstrappers:kubeadm:default-node-token
+di7ppa.7nla9o35v1otkrr6   1h          2025-06-23T07:05:27Z   <none>                   Proxy for managing TTL for the kubeadm-certs secret        <none>
+iswh4x.rao77z1q88ucwaco   23h         2025-06-24T05:05:20Z   authentication,signing   <none>                                                     system:bootstrappers:kubeadm:default-node-token
+```
 
 ## kubespray 使用
 - [官方离线安装](https://github.com/kubernetes-sigs/kubespray/blob/v2.27.0/docs/operations/offline-environment.md?plain=1)
@@ -280,6 +310,10 @@ https://github.com/easzlab/kubeasz/blob/3.6.6/docs/guide/harbor.md
 - 堡垒机 bastion
 
 
+
+安装完 venv 后
+
+
 ## 参考
 
 - https://kubernetes.io/zh-cn/docs/setup/production-environment/tools/
@@ -288,3 +322,4 @@ https://github.com/easzlab/kubeasz/blob/3.6.6/docs/guide/harbor.md
 - [13 案例篇 TCP拥塞控制是如何导致业务性能抖动的](https://learn.lianglianglee.com/%E4%B8%93%E6%A0%8F/Linux%E5%86%85%E6%A0%B8%E6%8A%80%E6%9C%AF%E5%AE%9E%E6%88%98%E8%AF%BE/13%20%E6%A1%88%E4%BE%8B%E7%AF%87%20TCP%E6%8B%A5%E5%A1%9E%E6%8E%A7%E5%88%B6%E6%98%AF%E5%A6%82%E4%BD%95%E5%AF%BC%E8%87%B4%E4%B8%9A%E5%8A%A1%E6%80%A7%E8%83%BD%E6%8A%96%E5%8A%A8%E7%9A%84%EF%BC%9F.md)
 - [Kubespray实现生产环境一键部署k8s v1.25.6集群](https://www.magiccloudnet.com/kubespray/)
 - https://github.com/kubernetes/kubernetes/tree/v1.32.0/cmd/kubeadm
+- https://kubespray.io/#/

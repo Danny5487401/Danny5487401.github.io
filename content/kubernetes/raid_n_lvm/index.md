@@ -98,15 +98,37 @@ ENV{key}：设置设备属性
 这样我们可以轻易的创建出总逻辑容量超出物理磁盘空间的多个“精简卷”，而无须为将来可能达到的数据量提前“买单”。
 在应用产生的数据确实需要增加驱动器时，我们也可以灵活地在线调整卷的大小。
 
+
+前置条件, 
+```shell
+# 确认模块是否加载
+root@node1:~# lsmod | grep dm_thin_pool
+dm_thin_pool           90112  0
+dm_persistent_data    118784  1 dm_thin_pool
+dm_bio_prison          28672  1 dm_thin_pool
+```
+如果为空,openebs/lvm-driver:1.7.0 会报错 thin: Required device-mapper target(s) not detected in your kernel.
+
+如果没有,则加载模块:
+```shell
+modprobe dm_thin_pool
+```
+
+
 ### dmsetup(Device mapper setup 管理硬盘映射器)
 
 dmsetup命令是Linux系统平台中一个更加底层的逻辑卷管理工具，能够轻松从设备底层管理LVM逻辑卷管理器中各个设备卷，如果用lvcreate和lvremove无法正常对逻辑卷进行管理了，那么则可以用dmsetup试一下
 
-demsetup ls #列出所有逻辑设备
+```shell
+dmsetup ls #列出所有逻辑设备
 
-demsetup status # 列出所有逻辑设备的状态信息
+dmsetup status # 列出所有逻辑设备的状态信息
 
-desetup remove # 移除逻辑设备
+dmsetup remove # 移除逻辑设备
+```
+
+
+
 
 ### fuser
 显示出当前哪个程序在使用磁盘上的某个文件、挂载点、甚至网络端口，并给出程序进程的详细信息。

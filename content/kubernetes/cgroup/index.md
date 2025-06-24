@@ -23,6 +23,45 @@ cgroup 是一种以 hierarchical（树形层级）方式组织进程的机制（
 
 
 
+### 文件系统I/O
+
+
+{{<figure src="./io_in_vfs.png#center" width=800px >}}
+
+第一种，根据是否利用标准库缓存，可以把文件I/O分为缓冲I/O与非缓冲I/O。
+
+- 缓冲I/O，是指利用标准库缓存来加速文件的访问，而标准库内部再通过系统调度访问文件。
+
+- 非缓冲I/O，是指直接通过系统调用来访问文件，不再经过标准库缓存。
+
+第二，根据是否利用操作系统的页缓存，可以把文件I/O分为直接I/O与非直接I/O。
+
+- 直接I/O，是指跳过操作系统的页缓存，直接跟文件系统交互来访问文件。
+
+- 非直接I/O正好相反，文件读写时，先要经过系统的页缓存，然后再由内核或额外的系统调用，真正写入磁盘。
+
+文件系统管理的缓存，其实就是 Cache 的一部分。而裸磁盘的缓存，用的正是Buffer。
+
+
+
+第三，根据应用程序是否阻塞自身运行，可以把文件I/O分为阻塞I/O和非阻塞I/O：
+
+- 所谓阻塞I/O，是指应用程序执行I/O操作后，如果没有获得响应，就会阻塞当前线程，自然就不能执行其他任务。
+
+- 所谓非阻塞I/O，是指应用程序执行I/O操作后，不会阻塞当前的线程，可以继续执行其他的任务，随后再通过轮询或者事件通知的形式，获取调用的结果
+
+比方说，访问管道或者网络套接字时，设置 O_NONBLOCK 标志，就表示用非阻塞方式访问；而如果不做任何设置，默认的就是阻塞访问。
+
+第四，根据是否等待响应结果，可以把文件I/O分为同步和异步I/O：
+
+- 所谓同步I/O，是指应用程序执行I/O操作后，要一直等到整个I/O完成后，才能获得I/O响应。
+
+- 所谓异步I/O，是指应用程序执行I/O操作后，不用等待完成和完成后的响应，而是继续执行就可以。等到这次 I/O完成后，响应会用事件通知的方式，告诉应用程序
+
+举个例子，在操作文件时，如果你设置了 O_SYNC 或者 O_DSYNC 标志，就代表同步I/O。如果设置了O_DSYNC，就要等文件数据写入磁盘后，才能返回；而O_SYNC，则是在O_DSYNC基础上，要求文件元数据也要写入磁盘后，才能返回。
+
+
+为了降低慢速磁盘对性能的影响，文件系统又通过页缓存、目录项缓存以及索引节点缓存，缓和磁盘延迟对应用程序的影响。
 
 
 ## 组成
@@ -112,11 +151,24 @@ cgroup 主要限制的资源是：
 
 {{<figure src="./page_cache_io.png#center" width=800px >}}
 
-blkio是cgroup中的一个子系统，可以用于限制及监控磁盘读写io
+blkio是cgroup v1 中的一个子系统，可以用于限制及监控磁盘读写io
 blkio控制子系统可以限制进程读写的 IOPS 和吞吐量，但它只能对 Direct I/O 的文件读写进行限速，对 Buffered I/O 的文件读写无法限制
 Buffered I/O 指会经过 PageCache 然后再写入到存储设备中。
 
 
+#### 为什么 cgroup v1 不支持非 Buffer IO 的限制
+
+{{<figure src="./cgroupv1.png#center" width=800px >}}
+cgroup v1 通常是每个层级对应一个子系统，子系统需要挂载使用，而每个子系统之间都是独立的，很难协同工作，比如 memory cgroup 和 blkio cgroup 能分别控制某个进程的资源使用量，
+但是blkio cgroup 对进程资源限制的时候无法感知 memory cgroup 中进程资源的使用量，导致对 Buffered I/O 的限制一直没有实现
+
+
+cgroup v1 因为有很多缺陷也导致了 linux 的开发者重新设计了 cgroup，也就有了 cgroup v2，在 cgroup v2 中就可以解决 Buffered I/O 限制的问题。
+cgroup v2 使用了统一层级（unified hierarchy)，各个子系统都可以挂载在统一层级下，一个进程属于一个控制组，每个控制组里可以定义自己需要的多个子系统。
+cgroup v2 中 io 子系统等同于 v1 中的 blkio 子系统。
+
+
+#### blkio 使用
 限制磁盘 IO 有两种方式：权重（weight）和上限（limit）。权重是给不同的应用（或者 cgroup）一个权重值，各个应用按照百分比来使用 IO 资源；上限是直接写死应用读写速率的最大值。
 
 1. 设置 cgroup 访问设备的权重
@@ -154,6 +206,7 @@ echo "8:16 0" >> /sys/fs/cgroup/blkio/blkio.throttle.write_bps_device
 
 ```go
 // github.com/openebs/lib-csi@v0.8.2/pkg/device/iolimit/utils.go
+
 func SetIOLimits(request *Request) error {
 	if !helpers.DirExists(baseCgroupPath) {
 		return errors.New(baseCgroupPath + " does not exist")
@@ -166,6 +219,7 @@ func SetIOLimits(request *Request) error {
 	if err != nil {
 		return err
 	}
+	// 设置 io 限制
 	err = setIOLimits(validRequest)
 	return err
 }
