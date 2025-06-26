@@ -1,5 +1,5 @@
 ---
-title: "存储: Raid 和 lvm, NVMe"
+title: "磁盘: Raid 和 lvm, NVMe"
 date: 2025-02-21T08:34:31+08:00
 summary: RAID(Redundant Array of Independent Disks 独立硬盘冗余阵列, lvm(Logical Volume Manager), nvme(Non-Volatile Memory Express 非易失性内存主机控制器接口规范) 在k8s中应用
 categories:
@@ -9,6 +9,55 @@ categories:
 ---
 
 ## 基本知识
+### 存储系统的 I/O 栈架构
+{{<figure src="./io_structure.png#center" width=800px >}}
+[详细图](https://www.thomas-krenn.com/en/wiki/Linux_Storage_Stack_Diagram)
+
+存储系统 I/O 的工作原理。
+
+- 文件系统层，包括虚拟文件系统和其他各种文件系统的具体实现。它为上层的应用程序，提供标准的文件访问接口；对下会通过通用块层，来存储和管理磁盘数据。
+
+- 通用块层，包括块设备 I/O 队列和 I/O 调度器。它会对文件系统的 I/O 请求进行排队，再通过重新排序和请求合并，然后才要发送给下一级的设备层。
+
+- 设备层，包括存储设备和相应的驱动程序，负责最终物理设备的I/O操作。
+
+#### 磁盘
+
+1. 根据存储介质的不同，常见磁盘可以分为两类：机械磁盘和固态磁盘。
+
+2. 按照接口来分类，比如可以把硬盘分为 IDE（Integrated Drive Electronics）、SCSI（Small Computer System Interface） 、SAS（Serial Attached SCSI） 、SATA（Serial ATA） 、FC（Fibre Channel） 等。
+不同的接口，往往分配不同的设备名称。比如， IDE 设备会分配一个 hd 前缀的设备名，SCSI和SATA设备会分配一个 sd 前缀的设备名。如果是多块同类型的磁盘，就会按照a、b、c等的字母顺序来编号
+
+
+3. 按照不同的使用方式，又可以把它们划分为多种不同的架构。
+- 直接作为独立磁盘设备.
+- 把多块磁盘组合成一个逻辑磁盘，构成冗余独立磁盘阵列，也就是RAID（Redundant Array of Independent Disks）.
+
+#### 通用块层
+其实是处在文件系统和磁盘驱动中间的一个块设备抽象层。它主要有两个功能 。
+
+第一个功能跟虚拟文件系统的功能类似。向上，为文件系统和应用程序，提供访问块设备的标准接口；向下，把各种异构的磁盘设备抽象为统一的块设备，并提供统一框架来管理这些设备的驱动程序。
+
+第二个功能，通用块层还会给文件系统和应用程序发来的 I/O 请求排队，并通过重新排序、请求合并等方式，提高磁盘读写的效率
+
+
+#### 文件系统层
+
+文件系统，本身是对存储设备上的文件，进行组织管理的机制。组织方式不同，就会形成不同的文件系统。
+
+为了支持各种不同的文件系统，Linux内核在用户进程和文件系统的中间，又引入了一个抽象层，也就是虚拟文件系统VFS（Virtual File System）。
+
+
+文件系统可以分为三类。
+
+第一类是基于磁盘的文件系统，也就是把数据直接存储在计算机本地挂载的磁盘中。常见的Ext4、XFS、OverlayFS等，都是这类文件系统。
+
+第二类是基于内存的文件系统，也就是我们常说的虚拟文件系统。这类文件系统，不需要任何磁盘分配存储空间，但会占用内存。我们经常用到的 /proc 文件系统，其实就是一种最常见的虚拟文件系统。此外，/sys 文件系统也属于这一类，主要向用户空间导出层次化的内核对象。
+
+第三类是网络文件系统，也就是用来访问其他计算机数据的文件系统，比如NFS、SMB、iSCSI等
+
+
+
 ### udev-->Dynamic device management 设备管理工具
 ```shell
 [root@master-01 ~]# man udev
@@ -130,8 +179,6 @@ dmsetup remove # 移除逻辑设备
 
 
 
-### fuser
-显示出当前哪个程序在使用磁盘上的某个文件、挂载点、甚至网络端口，并给出程序进程的详细信息。
 
 ## 基本命令
 
@@ -297,6 +344,7 @@ GPT分区
 ### fuser - identify processer using files or sockets
 
 fuser 可以显示出当前哪个程序在使用磁盘上的某个文件、挂载点、甚至网络端口，并给出程序进程的详细信息。
+
 
 ```shell
 # 显示使用某个文件的进程信息 在umount的时候很有用，可以找到还有哪些用到这个设备了。
@@ -846,7 +894,7 @@ mdadm — zero-superblock /dev/sda1
 
 
 # 创建配置文件
-mdadm –detail –scan >> mdadm.conf
+mdadm –-detail –scan >> mdadm.conf
 ```
 
 ```shell
