@@ -514,6 +514,44 @@ func buildLVMCreateArgs(vol *apis.LVMVolume) []string {
 ```
 
 lvs 使用
+```shell
+root@node1:~# lvs --help
+  lvs - Display information about logical volumes
+
+  lvs
+	[ -H|--history ]
+	[ -a|--all ]
+	[ -o|--options String ]
+	[ -S|--select String ]
+	[ -O|--sort String ]
+	[    --segments ]
+	[    --aligned ]
+	[    --binary ]
+	[    --configreport log|vg|lv|pv|pvseg|seg ]
+	[    --foreign ]
+	[    --ignorelockingfailure ]
+	[    --logonly ]
+	[    --nameprefixes ]
+	[    --noheadings ]
+	[    --nosuffix ]
+	[    --readonly ]
+	[    --reportformat basic|json ]
+	[    --rows ]
+	[    --separator String ]
+	[    --shared ]
+	[    --unbuffered ]
+	[    --units [Number]r|R|h|H|b|B|s|S|k|K|m|M|g|G|t|T|p|P|e|E ]
+	[    --unquoted ]
+	[ COMMON_OPTIONS ]
+	[ VG|LV|Tag ... ]
+	
+root@node1:~# lvs
+  LV        VG        Attr       LSize   Pool Origin Data%  Meta%  Move Log Cpy%Sync Convert
+  ubuntu-lv ubuntu-vg -wi-ao---- <74.00g
+```
+Attr 列通过 6 个字符 描述逻辑卷的 类型、权限、分配策略、固定状态、运行状态和设备状态. 详细 man lvs
+
+业务中使用
 ```go
 func ListLVMLogicalVolume() ([]LogicalVolume, error) {
 	args := []string{
@@ -531,6 +569,8 @@ func ListLVMLogicalVolume() ([]LogicalVolume, error) {
 }
 
 ```
+
+
 pvs 使用
 ```go
 func ListLVMPhysicalVolume() ([]PhysicalVolume, error) {

@@ -1,5 +1,3 @@
-
-
 ---
 title: "Pause 容器"
 date: 2024-11-02T21:52:00+08:00
@@ -31,18 +29,51 @@ kubelet的配置文件中心都指定了如下参数,这是指定拉取的pause�
 
 ## 基本概念
 
+### clone
+是一个 Linux 系统调用，用于创建一个新的进程。
+clone() 调用比 fork() 提供更多的选项，因为它允许通过指定不同的标志来控制新进程与原进程之间资源的共享范围。
+这些标志可以决定新进程属于哪些命名空间。例如，使用标志 CLONE_NEWPID 可以为新进程创建一个新的进程ID命名空间。创建的新进程以及它之后的所有子进程都会包含在指定的命名空间中。
+
+
+### unshare:  run program in new namespaces
+这个系统调用允许一个已经存在的进程从某个命名空间中脱离出来（即使之前是与其他进程共享的）。
+如一个进程想要创建一个与当前网络命名空间分离的新网络命名空间，它可以通过 unshare() 和相应的标志（比如 CLONE_NEWNET）来实现这一点
+
+```go
+// github.com/vishvananda/netns/netns_linux.go
+
+// 创建namespace
+// New creates a new network namespace, sets it as current and returns
+// a handle to it.
+func New() (ns NsHandle, err error) {
+	if err := unix.Unshare(unix.CLONE_NEWNET); err != nil {
+		return -1, err
+	}
+	return Get()
+}
+
+```
+
+
+### setns
+
+setns() 系统调用用于将一个进程加入到已经存在的命名空间中。这个调用需要一个文件描述符来指定目标命名空间。它通常被用在容器技术中，比如将一个进程从主机的命名空间加入到容器的命名空间
+
+
+
 ### Linux namespace 
 
 
-| 名称 | 宏定义 |                                                                                      隔离的内容                                                                                       |
-| :--: | :--: |:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------:|
-| IPC | CLONE_NEWIPC |                                                             System V IPC, POSIX message queues (since Linux 2.6.19)                                                              |
-| Network | CLONE_NEWNET | network device interfaces, IPv4 and IPv6 protocol stacks, IP routing tables, firewall rules, the /proc/net and /sys/class/net directory trees, sockets, etc (since Linux 2.6.24) |
-| Mount | CLONE_NEWNS |                                                                        Mount points (since Linux 2.4.19)                                                                         |
-| PID | CLONE_NEWPID |                                                                         Process IDs (since Linux 2.6.24)                                                                         |
-| User | CLONE_NEWUSER |                                                     User and group IDs (started in Linux 2.6.23 and completed in Linux 3.8)                                                      |
-| UTS | CLONE_NEWUTS |                                       Hostname and NIS domain name (since Linux 2.6.19)                                                                                                                                           |
-| Cgroup | CLONE_NEWCGROUP |                                       Cgroup root directory (since Linux 4.6)                                                                                                                                      |
+|               名称               | 宏定义 |                                                                                      隔离的内容                                                                                       |
+|:------------------------------:| :--: |:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------:|
+|              IPC               | CLONE_NEWIPC |                                                             System V IPC, POSIX message queues (since Linux 2.6.19)                                                              |
+|            Network             | CLONE_NEWNET | network device interfaces, IPv4 and IPv6 protocol stacks, IP routing tables, firewall rules, the /proc/net and /sys/class/net directory trees, sockets, etc (since Linux 2.6.24) |
+|             Mount              | CLONE_NEWNS |                                                                        Mount points (since Linux 2.4.19)                                                                         |
+|              PID               | CLONE_NEWPID |                                                                         Process IDs (since Linux 2.6.24)                                                                         |
+|              User              | CLONE_NEWUSER |                                                     User and group IDs (started in Linux 2.6.23 and completed in Linux 3.8)                                                      |
+| UTS (UNIX Time-sharing System) | CLONE_NEWUTS |                                       Hostname and NIS domain name (since Linux 2.6.19)                                                                                                                                           |
+|             Cgroup             | CLONE_NEWCGROUP |                                       Cgroup root directory (since Linux 4.6)                                                                                                                                      |
+
 
 
 

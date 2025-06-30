@@ -1,7 +1,7 @@
 ---
 title: "Koodinator 混合工作负载调度系统"
 date: 2025-05-18T09:54:34+08:00
-summary: "csi 部署方式及源码实现"
+summary: "组成, QOS, 负载感知调度,GangScheduling"
 categories:
   - kubernetes
 authors:
@@ -87,8 +87,6 @@ Koordlet 以 DaemonSet 的形式部署在 Kubernetes 集群中，用于支持混
 
 ### Koord-RuntimeProxy
 Koord-RuntimeProxy 以 systemd service 的形式部署在 Kubernetes 集群的节点上，用于代理 Kubelet 与 containerd/docker 之间的 CRI 请求。这一个代理被设计来支持精细化的资源管理策略，比如为不同 QoS Pod 设置不同的 cgroup 参数，包括内核 cfs quota，resctl 等等技术特性，以改进 Pod 的运行时质量。。
-
-
 
 
 ## 优先级
@@ -309,6 +307,12 @@ status:
         memory: "0"
   updateTime: "2025-05-25T03:36:38Z"
 ```
+
+
+## GangScheduling 成组调度
+
+
+只有当已经完成调度资源数超过前面声明当前最小资源集合数才能触发节点绑定。
 
 
 ## 参考

@@ -633,7 +633,9 @@ CPU 限流是因为内核使用 CFS 调度算法，对于微突发场景，在�
 1. [koordinator 处理突然流量 CPU Burst](https://koordinator.sh/zh-Hans/docs/user-manuals/cpu-burst)
 - 这个 CPU Burst is not available for LSR and BE pods since it targets on burstable cpu usages
 
-2. 内核 >=5.14  提供 Burstable CFS Controller,
+2. 内核 >=5.14  提供 Burstable CFS Controller, 可参考[volcano 处理 CPU Burst](https://volcano.sh/zh/docs/v1-12-0/colocation/#cpu-burst)
+Volcano agent的CPU Burst能力提供了一种可以短暂突破CPU Limit值的弹性限流机制，以降低业务长尾响应时间。
+其原理是业务在每个CPU调度周期内使用的CPU配额有剩余时，系统对这些CPU配额进行累计，在后续的调度周期内如果需要突破CPU Limit时，使用之前累计的CPU配额，以达到突破CPU Limit的效果。
 
 
 ### memory：限制内存使用

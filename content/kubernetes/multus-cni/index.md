@@ -20,7 +20,13 @@ tags:
 # 部署
 kubectl apply -f https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset-thick.yml
 ```
+
 thick 插件包含两个二进制: multus-daemon and multus-shim CNI plugin
+
+thin 插件 不包含multus-daemon
+
+
+
 
 验证安装
 ```shell
