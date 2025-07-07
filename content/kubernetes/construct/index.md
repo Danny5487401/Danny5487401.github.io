@@ -311,6 +311,21 @@ iswh4x.rao77z1q88ucwaco   23h         2025-06-24T05:05:20Z   authentication,sign
 
 
 
+指定网络信息
+```yaml
+# inventory/mycluster/group_vars/k8s_cluster/k8s-cluster.yml
+
+# 这里使用 calico
+kube_network_plugin: calico
+
+
+# service 网络段
+kube_service_addresses: 10.233.0.0/18
+
+# pod 网络段
+kube_pods_subnet: 10.233.64.0/18
+```
+
 安装完 venv 后
 
 

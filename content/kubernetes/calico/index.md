@@ -12,6 +12,21 @@ tags:
 
 
 ## 基本知识
+
+### tcpdump 
+
+
+```shell
+tcpdump -nn udp port 53 or host 35.190.27.188
+```
+-nn ，表示不解析抓包中的域名（即不反向解析）、协议以及端口号。
+
+udp port 53 ，表示只显示 UDP协议的端口号（包括源端口和目的端口）为53的包。
+
+host 35.190.27.188 ，表示只显示 IP 地址（包括源地址和目的地址）为35.190.27.188的包。
+
+这两个过滤条件中间的“ or ”，表示或的关系，也就是说，只要满足上面两个条件中的任一个，就可以展示出来。
+
 ### BGP (外网路由协议（Border Gateway Protocol )
 
 求最短路径常用的有两种方法，一种是Bellman-Ford算法，一种是Dijkstra算法。
@@ -182,10 +197,10 @@ spec:
   - Tunnel
   blockSize: 26
   cidr: 10.233.64.0/18 # 填写创建集群时规划的cidr地址段    
-  ipipMode: Never  # 不使用IPIP模式相反为Always时代表使用IPIP模式        
+  ipipMode: Never  # Never不使用IPIP模式,Always时代表使用IPIP模式,CrossSubnet代表混合模式,跨网段则ipip,不跨网段BGP       
   natOutgoing: true  #nat转发 
   nodeSelector: all()
-  vxlanMode: Always  # vxlanMode可以为Always或者是CrossSubnet
+  vxlanMode: Always  # vxlanMode 可以为Always,CrossSubnet, 
   
   
 root@node1:/opt/calico# calicoctl ipam show
@@ -243,7 +258,6 @@ spec:
 
 ## 组件
 
-
 - Felix：运行在每一台 Host 的 agent 进程，主要负责网络接口管理和监听、路由、ARP 管理、ACL 管理和同步、状态上报等。
 - etcd：分布式键值存储，主要负责网络元数据一致性，确保Calico网络状态的准确性，可以与kubernetes共用；
 - BGP Client（BIRD）：Calico 为每一台 Host 部署一个 BGP Client，使用 BIRD 实现，BIRD 是一个单独的持续发展的项目，实现了众多动态路由协议比如 BGP、OSPF、RIP 等。在 Calico 的角色是监听 Host 上由 Felix 注入的路由信息，然后通过 BGP 协议广播告诉剩余 Host 节点，从而实现网络互通。
@@ -259,6 +273,7 @@ spec:
 ## 参考
 
 - [k8s网络原理之Calico ](https://www.cnblogs.com/zhangpeiyao/p/18328708)
-- [手工实践calico原理视频-pod同主机和跨主机通讯](https://www.bilibili.com/video/BV1nfz3Y6EhJ/)
+- [calico原理视频1-pod同主机和跨主机通讯](https://www.bilibili.com/video/BV1nfz3Y6EhJ/)
+- [calico原理视频2-vxlan,bgp,ipip 抓包分析](https://www.bilibili.com/video/BV1jKiZYQEzf)
 - [Calico的ip池对象ipPool](https://www.jianshu.com/p/dcad6d74e526)
 
