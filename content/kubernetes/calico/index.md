@@ -1,7 +1,6 @@
 ---
 title: "Calico"
 date: 2025-06-21T22:35:34+08:00
-draft: true
 summary: Calico 实现原理及源码分析
 categories:
   - kubernetes
@@ -17,17 +16,35 @@ tags:
 
 
 ```shell
-tcpdump -nn udp port 53 or host 35.190.27.188
+$ tcpdump -nn udp port 53 or host 35.190.27.188
 ```
 -nn ，表示不解析抓包中的域名（即不反向解析）、协议以及端口号。
 
-udp port 53 ，表示只显示 UDP协议的端口号（包括源端口和目的端口）为53的包。
+* udp : 协议过滤,只显示 UDP协议
+* port 53 : 端口过滤额, 端口号（包括源端口和目的端口）为53的包。
 
-host 35.190.27.188 ，表示只显示 IP 地址（包括源地址和目的地址）为35.190.27.188的包。
+* host 35.190.27.188: 主机过滤, 表示只显示 IP 地址（包括源地址和目的地址）为35.190.27.188的包。
 
-这两个过滤条件中间的“ or ”，表示或的关系，也就是说，只要满足上面两个条件中的任一个，就可以展示出来。
+* or: 逻辑表达式, 这两个过滤条件中间的 “or”，表示或的关系，也就是说，只要满足上面两个条件中的任一个，就可以展示出来。
 
-### BGP (外网路由协议（Border Gateway Protocol )
+* net 192.168.0.0 网络地址过滤
+
+
+
+
+
+输出格式
+```shell
+时间戳 协议 源地址.源端口 > 目的地址.目的端口 网络包详细信息
+```
+
+保存到 ping.pcap 文件
+```shell
+$ tcpdump -nn udp port 53 or host 35.190.27.188 -w ping.pcap
+```
+
+
+### BGP (外网路由协议（Border Gateway Protocol)
 
 求最短路径常用的有两种方法，一种是Bellman-Ford算法，一种是Dijkstra算法。
 
@@ -59,7 +76,6 @@ node3   (64512)   172.16.7.32/16
 node4   (64512)   172.16.7.33/16
 node5   (64512)   172.16.7.34/16
 ```
-
 
 
 ### Proxy ARP
@@ -254,7 +270,7 @@ spec:
 
 - ipipMode
   * ipip always模式（纯ipip模式）
-  * ipip cross-subnet模式（ipip-bgp混合模式），指“同子网内路由采用bgp，跨子网路由采用ipip
+  * ipip cross-subnet模式（ipip-bgp混合模式），指同子网内路由采用bgp，跨子网路由采用ipip
 
 ## 组件
 

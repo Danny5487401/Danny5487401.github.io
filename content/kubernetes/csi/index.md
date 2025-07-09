@@ -401,6 +401,14 @@ func (e registrationServer) GetInfo(ctx context.Context, req *registerapi.InfoRe
 2. 启动一个grpc server，并监听在宿主机上/var/lib/kubelet/plugins_registry/${csiDriverName}-reg.sock，供csi plugin handler来调用。
 
 
+## late binding 延迟绑定
+当没有延迟绑定的时候，pvc会首先绑定pv再进行调度，这也说明了CSI先于CRI。
+
+
+WaitForFirstConsumer其实就是告诉volume控制器，虽然找到了适合的pv， 但请不要现在就执行绑定操作,而要等到第一个声明使用了该pvc的pod出现在调度器之后，调度器综合考虑所有的调度规则后, 最终决定跟哪个pv进行绑定
+
+通过这个延迟绑定机制，原本实时发生的 PVC 和 PV 的绑定过程，就被延迟到了 Pod 第一次调度的时候在调度器中进行，从而保证了这个绑定结果不会影响 Pod 的正常调度
+
 
 
 ## 工作流程

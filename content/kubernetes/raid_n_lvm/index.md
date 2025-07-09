@@ -426,92 +426,6 @@ lvcreate 使用
 	[ PV ... ]
 ```
 
-csi lvm-localpv 中使用
-```go
-// https://github.com/openebs/lvm-localpv/blob/9e0ac5b4a8bacb9dc771d8d6c33293070df71507/pkg/lvm/lvm_util.go
-
-const (
-    VGCreate = "vgcreate"
-    VGList   = "vgs"
-    
-    LVCreate = "lvcreate"
-    LVRemove = "lvremove"
-    LVExtend = "lvextend"
-    LVList   = "lvs"
-    
-    PVList = "pvs"
-    PVScan = "pvscan"
-    
-    YES        = "yes"
-    LVThinPool = "thin-pool"
-)
-
-// 创建 卷
-func CreateVolume(vol *apis.LVMVolume) error {
-	volume := vol.Spec.VolGroup + "/" + vol.Name
-
-	volExists, err := CheckVolumeExists(vol)
-	if err != nil {
-		return err
-	}
-	if volExists {
-		klog.Infof("lvm: volume (%s) already exists, skipping its creation", volume)
-		return nil
-	}
-
-	args := buildLVMCreateArgs(vol)
-	out, _, err := RunCommandSplit(LVCreate, args...)
-
-	if err != nil {
-		err = newExecError(out, err)
-		klog.Errorf(
-			"lvm: could not create volume %v cmd %v error: %s", volume, args, string(out),
-		)
-		return err
-	}
-	klog.Infof("lvm: created volume %s", volume)
-
-	return nil
-}
-
-func buildLVMCreateArgs(vol *apis.LVMVolume) []string {
-	var LVMVolArg []string
-
-	volume := vol.Name
-	size := vol.Spec.Capacity + "b"
-	// thinpool name required for thinProvision volumes
-	pool := vol.Spec.VolGroup + "_thinpool"
-
-	if len(vol.Spec.Capacity) != 0 {
-		// check if thin pool exists for given volumegroup requested thin volume
-		if strings.TrimSpace(vol.Spec.ThinProvision) != YES {
-			LVMVolArg = append(LVMVolArg, "-L", size)
-		} else if !lvThinExists(vol.Spec.VolGroup, pool) {
-			// thinpool size can't be equal or greater than actual volumegroup size
-			LVMVolArg = append(LVMVolArg, "-L", getThinPoolSize(vol.Spec.VolGroup, vol.Spec.Capacity))
-		}
-	}
-
-	// command to create thinpool and thin volume if thinProvision is enabled
-	// `lvcreate -L 1G -T lvmvg/mythinpool -V 1G -n thinvol`
-	if strings.TrimSpace(vol.Spec.ThinProvision) == YES {
-		LVMVolArg = append(LVMVolArg, "-T", vol.Spec.VolGroup+"/"+pool, "-V", size)
-	}
-
-	if len(vol.Spec.VolGroup) != 0 {
-		LVMVolArg = append(LVMVolArg, "-n", volume)
-	}
-
-	if strings.TrimSpace(vol.Spec.ThinProvision) != YES {
-		LVMVolArg = append(LVMVolArg, vol.Spec.VolGroup)
-	}
-
-	// -y is used to wipe the signatures before creating LVM volume
-	LVMVolArg = append(LVMVolArg, "-y")
-	return LVMVolArg
-}
-
-```
 
 lvs 使用
 ```shell
@@ -669,9 +583,360 @@ Logical volume "lv_data" created
 # 4 删除物理卷: pvremove /dev/sd*
 ```
 
+
+#### csi lvm-localpv 中使用
+
+pv节点调度策略 
+```go
+// scheduling algorithm constants
+const (
+	// pick the node where less volumes are provisioned for the given volume group
+	VolumeWeighted = "VolumeWeighted"
+
+	// pick the node where total provisioned volumes have occupied less capacity from the given volume group
+	CapacityWeighted = "CapacityWeighted"
+
+	// pick the node which is less loaded space wise
+	// this will be the default scheduler when none provided
+	SpaceWeighted = "SpaceWeighted"
+)
+
+```
+
+
+##### CreateVolume 实现创建/删除 volume 的功能
+```go
+func (cs *controller) CreateVolume(
+	ctx context.Context,
+	req *csi.CreateVolumeRequest,
+) (*csi.CreateVolumeResponse, error) {
+    // 校验请求
+	if err := cs.validateVolumeCreateReq(req); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	params, err := NewVolumeParams(req.GetParameters())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"failed to parse csi volume params: %v", err)
+	}
+
+	volName := strings.ToLower(req.GetName())
+	size := getRoundedCapacity(req.GetCapacityRange().GetRequiredBytes())
+	contentSource := req.GetVolumeContentSource()
+
+	var vol *lvmapi.LVMVolume
+	if contentSource != nil && contentSource.GetSnapshot() != nil {
+		return nil, status.Error(codes.Unimplemented, "")
+	} else if contentSource != nil && contentSource.GetVolume() != nil {
+		return nil, status.Error(codes.Unimplemented, "")
+	} else {
+		// mark volume for leak protection if pvc gets deleted
+		// before the creation of pv.
+		var finishCreateVolume func()
+		if finishCreateVolume, err = cs.leakProtection.BeginCreateVolume(volName,
+			params.PVCNamespace, params.PVCName); err != nil {
+			return nil, err
+		}
+		defer finishCreateVolume()
+        // 创建 LVM volume
+		vol, err = CreateLVMVolume(ctx, req, params)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	sendEventOrIgnore(params.PVCName, volName,
+		strconv.FormatInt(int64(size), 10),
+		analytics.VolumeProvision)
+
+	topology := map[string]string{lvm.LVMTopologyKey: vol.Spec.OwnerNodeID}
+	cntx := map[string]string{
+		lvm.VolGroupKey:       vol.Spec.VolGroup,
+		lvm.OpenEBSCasTypeKey: lvm.LVMCasTypeName,
+		lvm.FormatOptionsKey:  params.FormatOptions,
+	}
+
+	// 创建 pv
+	return csipayload.NewCreateVolumeResponseBuilder().
+		WithName(volName).
+		WithCapacity(size).
+		WithTopology(topology).
+		WithContext(cntx).
+		WithContentSource(contentSource).
+		Build(), nil
+}
+
+func CreateLVMVolume(ctx context.Context, req *csi.CreateVolumeRequest,
+	params *VolumeParams) (*lvmapi.LVMVolume, error) {
+	volName := strings.ToLower(req.GetName())
+	capacity := strconv.FormatInt(getRoundedCapacity(
+		req.GetCapacityRange().RequiredBytes), 10)
+
+	vol, err := lvm.GetLVMVolume(volName)
+	if err != nil {
+		if !k8serror.IsNotFound(err) {
+			return nil, status.Errorf(codes.Aborted,
+				"failed get lvm volume %v: %v", volName, err.Error())
+		}
+		vol, err = nil, nil
+	}
+
+	if vol != nil {
+		// 已经存在
+	}
+
+	nmap, err := getNodeMap(params.Scheduler, params.VgPattern)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get node map failed : %s", err.Error())
+	}
+
+	// 运行调度器选择节点,依赖 Lvmnode 信息
+	selected := schd.Scheduler(req, nmap)
+
+	if len(selected) == 0 {
+		return nil, status.Error(codes.Internal, "scheduler failed, not able to select a node to create the PV")
+	}
+
+	owner := selected[0]
+	klog.Infof("scheduling the volume %s/%s on node %s",
+		params.VgPattern.String(), volName, owner)
+
+	// 创建 Lvmvolumes 资源
+	volObj, err := volbuilder.NewBuilder().
+		WithName(volName).
+		WithCapacity(capacity).
+		WithVgPattern(params.VgPattern.String()).
+		WithOwnerNode(owner).
+		WithVolumeStatus(lvm.LVMStatusPending).
+		WithShared(params.Shared).
+		WithThinProvision(params.ThinProvision).Build()
+
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	vol, err = lvm.ProvisionVolume(volObj)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "not able to provision the volume %s", err.Error())
+	}
+	// 等待 lvmVolome 创建成功
+	vol, _, err = waitForLVMVolume(ctx, vol)
+	return vol, err
+}
+
+```
+
+
+每个 node 控制器 sync lvmVolume 处理
+```go
+func (c *VolController) syncVol(vol *apis.LVMVolume) error {
+	var err error
+	// LVM Volume should be deleted. Check if deletion timestamp is set
+	if c.isDeletionCandidate(vol) {
+		err = lvm.DestroyVolume(vol)
+		if err == nil {
+			err = lvm.RemoveVolFinalizer(vol)
+		}
+		return err
+	}
+
+	// if status is Pending then it means we are creating the volume.
+	// Otherwise, we are just ignoring the event.
+	switch vol.Status.State {
+	case lvm.LVMStatusFailed:
+		klog.Warningf("Skipping retrying lvm volume provisioning as its already in failed state: %+v", vol.Status.Error)
+		return nil
+	case lvm.LVMStatusReady:
+		klog.Info("lvm volume already provisioned")
+		return nil
+	}
+
+	// if there is already a volGroup field set for lvmvolume resource,
+	// we'll first try to create a volume in that volume group.
+	if vol.Spec.VolGroup != "" { // 如果指定了 vg
+		
+		// 创建 lvm 
+		err = lvm.CreateVolume(vol)
+		if err == nil {
+			return lvm.UpdateVolInfo(vol, lvm.LVMStatusReady)
+		}
+	}
+    
+	// 针对 vol 没有指定 vg 的处理 , 即正则过滤
+	vgs, err := c.getVgPriorityList(vol)
+	if err != nil {
+		return err
+	}
+
+	if len(vgs) == 0 {
+		err = fmt.Errorf("no vg available to serve volume request having regex=%q & capacity=%q",
+			vol.Spec.VgPattern, vol.Spec.Capacity)
+		klog.Errorf("lvm volume %v - %v", vol.Name, err)
+	} else {
+		for _, vg := range vgs {
+			// first update volGroup field in lvm volume resource for ensuring
+			// idempotency and avoiding volume leaks during crash.
+			if vol, err = lvm.UpdateVolGroup(vol, vg.Name); err != nil {
+				klog.Errorf("failed to update volGroup to %v: %v", vg.Name, err)
+				return err
+			}
+			if err = lvm.CreateVolume(vol); err == nil {
+				return lvm.UpdateVolInfo(vol, lvm.LVMStatusReady)
+			}
+		}
+	}
+
+	// In case no vg available or lvm.CreateVolume fails for all vgs, mark
+	// the volume provisioning failed so that controller can reschedule it.
+	vol.Status.Error = c.transformLVMError(err)
+	return lvm.UpdateVolInfo(vol, lvm.LVMStatusFailed)
+}
+
+```
+
+真正创建 lv 
 ```go
 // https://github.com/openebs/lvm-localpv/blob/9e0ac5b4a8bacb9dc771d8d6c33293070df71507/pkg/lvm/lvm_util.go
 
+const (
+    VGCreate = "vgcreate"
+    VGList   = "vgs"
+    
+    LVCreate = "lvcreate"
+    LVRemove = "lvremove"
+    LVExtend = "lvextend"
+    LVList   = "lvs"
+    
+    PVList = "pvs"
+    PVScan = "pvscan"
+    
+    YES        = "yes"
+    LVThinPool = "thin-pool"
+)
+
+// 创建卷
+func CreateVolume(vol *apis.LVMVolume) error {
+	volume := vol.Spec.VolGroup + "/" + vol.Name
+
+	volExists, err := CheckVolumeExists(vol)
+	if err != nil {
+		return err
+	}
+	if volExists {
+		klog.Infof("lvm: volume (%s) already exists, skipping its creation", volume)
+		return nil
+	}
+
+	args := buildLVMCreateArgs(vol)
+	out, _, err := RunCommandSplit(LVCreate, args...)
+
+	if err != nil {
+		err = newExecError(out, err)
+		klog.Errorf(
+			"lvm: could not create volume %v cmd %v error: %s", volume, args, string(out),
+		)
+		return err
+	}
+	klog.Infof("lvm: created volume %s", volume)
+
+	return nil
+}
+
+func buildLVMCreateArgs(vol *apis.LVMVolume) []string {
+	var LVMVolArg []string
+
+	volume := vol.Name
+	size := vol.Spec.Capacity + "b"
+	// thinpool name required for thinProvision volumes
+	pool := vol.Spec.VolGroup + "_thinpool"
+
+	if len(vol.Spec.Capacity) != 0 {
+		// check if thin pool exists for given volumegroup requested thin volume
+		if strings.TrimSpace(vol.Spec.ThinProvision) != YES {
+			LVMVolArg = append(LVMVolArg, "-L", size)
+		} else if !lvThinExists(vol.Spec.VolGroup, pool) {
+			// thinpool size can't be equal or greater than actual volumegroup size
+			LVMVolArg = append(LVMVolArg, "-L", getThinPoolSize(vol.Spec.VolGroup, vol.Spec.Capacity))
+		}
+	}
+
+	// command to create thinpool and thin volume if thinProvision is enabled
+	// `lvcreate -L 1G -T lvmvg/mythinpool -V 1G -n thinvol`
+	if strings.TrimSpace(vol.Spec.ThinProvision) == YES {
+		LVMVolArg = append(LVMVolArg, "-T", vol.Spec.VolGroup+"/"+pool, "-V", size)
+	}
+
+	if len(vol.Spec.VolGroup) != 0 {
+		LVMVolArg = append(LVMVolArg, "-n", volume)
+	}
+
+	if strings.TrimSpace(vol.Spec.ThinProvision) != YES {
+		LVMVolArg = append(LVMVolArg, vol.Spec.VolGroup)
+	}
+
+	// -y is used to wipe the signatures before creating LVM volume
+	LVMVolArg = append(LVMVolArg, "-y")
+	return LVMVolArg
+}
+
+```
+
+
+
+
+
+##### NodePublishVolume 将其挂载到 pod 中
+```go
+func (ns *node) NodePublishVolume(
+	ctx context.Context,
+	req *csi.NodePublishVolumeRequest,
+) (*csi.NodePublishVolumeResponse, error) {
+
+	var (
+		err error
+	)
+
+	if err = ns.validateNodePublishReq(req); err != nil {
+		return nil, err
+	}
+
+	vol, mountInfo, err := GetVolAndMountInfo(req)
+	if err != nil {
+		_ = vol
+		_ = mountInfo
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	podLVinfo, err := getPodLVInfo(req)
+	if err != nil {
+		_ = podLVinfo
+		klog.Warningf("PodLVInfo could not be obtained for volume_id: %s, err = %v", req.VolumeId, err)
+	}
+	switch req.GetVolumeCapability().GetAccessType().(type) {
+	case *csi.VolumeCapability_Block:
+		// attempt block mount operation on the requested path
+		err = lvm.MountBlock(vol, mountInfo, podLVinfo)
+	case *csi.VolumeCapability_Mount:
+		// attempt filesystem mount operation on the requested path
+		err = lvm.MountFilesystem(vol, mountInfo, podLVinfo)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &csi.NodePublishVolumeResponse{}, nil
+}
+
+```
+
+
+##### 删除卷  
+```go
+// https://github.com/openebs/lvm-localpv/blob/9e0ac5b4a8bacb9dc771d8d6c33293070df71507/pkg/lvm/lvm_util.go
+
+// 删除卷
 func DestroyVolume(vol *apis.LVMVolume) error {
 	// 判断存在性
 	volExists, err := CheckVolumeExists(vol)

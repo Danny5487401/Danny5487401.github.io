@@ -13,7 +13,8 @@ tags:
 ---
 
 
-SR-IOV（Single Root I/O Virtualization）是一个将PCIe共享给虚拟机的标准，通过为虚拟机提供独立的内存空间、中断、DMA流，来绕过VMM实现数据访问。SR-IOV基于两种PCIe functions.
+SR-IOV（Single Root I/O Virtualization）是一个将 PCIe（Peripheral Component Interconnect Express，快速外设组件互连）共享给虚拟机的标准，通过为虚拟机提供独立的内存空间、中断、DMA流，来绕过VMM实现数据访问。
+SR-IOV基于两种PCIe functions.
 
 - PF (Physical Function)：包含完整的PCIe功能，包括SR-IOV的扩张能力，该功能用于SR-IOV的配置和管理。
 - VF (Virtual Function)：包含轻量级的PCIe功能。每一个VF有它自己独享的PCI配置区域，并且可能与其他VF共享着同一个物理资源. 以Intel 10GE网卡82599为例，PF驱动是标准的ixgbe，VF驱动是ixgbevf。
@@ -28,6 +29,11 @@ SR-IOV（Single Root I/O Virtualization）是一个将PCIe共享给虚拟机的�
 隔离性: 每个VF都是独立的，互不干扰，提高了系统的安全性和稳定性。
 
 可扩展性: 支持更多的虚拟机同时运行，而不会显著降低性能，使其适用于大型虚拟化环境。
+
+
+## SR-IOV 缺点
+- VF数量有限
+-  ring 结构对于每个 vendor 的 NIC 来说都是独有的。同时，不同 NIC 的配置和控制各不相同，以及对每个 VF 缺少统一的配置、可选项。正是因为这些限制，VFs 需要部署在特定的裸金属服务器上，也就意味着 VNFs 在 host 之间的迁移不是那么容易的。
 
 
 ## 基本知识
@@ -109,11 +115,12 @@ Modalias 字符串包含了设备的基本信息，如设备类型、制造商 I
 [root@master-01 ~]# cat /sys/devices/pci0000:00/0000:00:00.0/modalias
 pci:v00008086d00007190sv000015ADsd00001976bc06sc00i00
 ```
-Modalias 的主要作用是在内核初始化过程中，帮助内核识别新检测到的硬件设备，并找到与之匹配的驱动程序。当内核发现一个新设备时，它会尝试读取设备的 Modalias 属性，然后通过内核的驱动模型来查找匹配的驱动程序。如果找到了匹配的驱动程序，内核将加载该驱动程序，并允许它管理新检测到的设备。
+Modalias 的主要作用是在内核初始化过程中，帮助内核识别新检测到的硬件设备，并找到与之匹配的驱动程序。
+当内核发现一个新设备时，它会尝试读取设备的 Modalias 属性，然后通过内核的驱动模型来查找匹配的驱动程序。如果找到了匹配的驱动程序，内核将加载该驱动程序，并允许它管理新检测到的设备。
 
 ### /sys/bus/pci/devices 目录介绍
 ```shell
-# sys/class目录下 net/scsi_host/fc_host/infiband_host 等 是/sys/bus/pci/devices/*/class下面pci设备的映射，映射到它们指定的类型中
+# /sys/class目录下 net/scsi_host/fc_host/infiband_host 等 是/sys/bus/pci/devices/*/class下面pci设备的映射，映射到它们指定的类型中
 [root@master-01 ~]# ls /sys/class/
 ata_device  block        dmi             hidraw       iommu     msr            power_supply  scsi_device   thermal  usbmon
 ata_link    bsg          drm             hmm_device   leds      net            ppdev         scsi_disk     tpm      vc
@@ -146,7 +153,7 @@ Integrated service 综合服务模型:
 Differentiated service 差分服务模型: 将网络流量分成多个类，不同类按不同优先级处理
 
 
-### VLAN 优先级
+### VLAN 优先级 priority
 
 802.1P优先级，也叫CoS（Class of Service，服务等级）
 
@@ -285,11 +292,38 @@ $ lspci -s 0000:3d:00.0 -n
 ```
 这里需要注意VF设备是不能增量添加的，如果需要修改启动的VF数量，需要先将sriov_numvfs值重置为0后再重新设置为目标值，所以在使用SR-IOV功能最好能确定最多会使用到几个VF，以防在业务运行过程中需要扩展VF数影响正在使用VF的业务。
 
-Linux Kernel version 3.8.x 及以上版本可以通过上述调整 sriov_numvfs 方法动态调整VF数量。但是，对于 3.7.x 或更低版本，则不能动态调整，而是要在加载内核模块时传递参数:
+Linux Kernel version 3.8.x 及以上版本可以通过上述调整 sriov_numvfs 方法动态调整VF数量。
+但是，对于 3.7.x 或更低版本，则不能动态调整，而是要在加载内核模块时传递参数:
 
-{{<figure src="./virtfn.png#center" width=800px >}}
+
+
 开启SR-IOV功能后，在/sys/class/net/eth1/device目录下会多出多个virtfnX的目录，这些目录下分别记录了对应VF的信息，例如可以通过ls /sys/class/net/eth1/device/virtfn*/net显示对应vf设备名称.
 如果VF已经被放入了其他网络名字空间，那么net目录下会显示为空，例如上图中的virtfn0。
+
+```shell
+$ ip -d link show eth4
+6: eth4: <BROADCAST,MULTICAST,SLAVE,UP,LOWER_UP> mtu 1500 qdisc mq master bond0 state UP mode DEFAULT group default qlen 1000
+    link/ether f0:33:e5:a3:92:81 brd ff:ff:ff:ff:ff:ff promiscuity 0 minmtu 68 maxmtu 9702 
+    bond_slave state ACTIVE mii_status UP link_failure_count 0 perm_hwaddr f0:33:e5:a3:92:85 queue_id 0 ad_aggregator_id 2 ad_actor_oper_port_state 61 ad_partner_oper_port_state 61 addrgenmode none numtxqueues 2 numrxqueues 2 gso_max_size 65536 gso_max_segs 65535 
+    vf 0     link/ether 00:00:00:00:00:00, spoof checking off, link-state auto, trust off
+    vf 1     link/ether 00:00:00:00:00:00, spoof checking off, link-state auto, trust off
+    ... 
+$ ls /sys/class/net/eth4/device/virtfn*/net
+/sys/class/net/eth4/device/virtfn0/net:
+
+/sys/class/net/eth4/device/virtfn100/net:
+eth235
+
+/sys/class/net/eth4/device/virtfn101/net:
+eth236
+
+/sys/class/net/eth4/device/virtfn102/net:
+eth237
+
+/sys/class/net/eth4/device/virtfn103/net:
+eth238
+...
+```
 
 
 ## 网卡绑定 bond
@@ -431,7 +465,6 @@ xmit_hash_policy
 2. layer2+3： 在1的基础上增加了三层的ip报头信息，计算量增加了，然而负载却更加均衡了，一个个主机到主机的数据流形成并且同一个流被分发到同一个端口，根据这个思想，如果要使负载更加均衡，我们在继续增加代价的前提下可以拿到4层的信息。
 
 3. layer3+4： 该策略在可能的时候使用上层协议的信息来生成hash。这将允许特定网络对（network peer）的流量分摊到多个slave上，尽管同一个连接（connection）不会分摊到多个slave上。
-
 
 
 
@@ -639,10 +672,10 @@ func attachLinksToBond(bondLinkObj *netlink.Bond, linkObjectsToBond []netlink.Li
 ## SR-IOV 在 k8s 中应用
 
 intel官方也给出了SR-IOV技术在容器中使用的开源组件，例如：sriov-cni 和 sriov-device-plugin等.
-当前招商银行数据库服务就是使用这方面的技术.
 
 {{<figure src="./sr-iov-in-k8s.png#center" width=800px >}}
-节点上的vf设备需要提前生成，然后由 sriov-device-plugin将vf设备发布到k8s集群中。在pod创建的时候，由kubelet调用multus-cni，multus-cni分别调用默认cni和sriov-cni插件为pod构建网络环境。sriov-cni就是将主机上的vf设备添加进容器的网络命名空间中并配置ip地址。
+节点上的vf设备需要提前生成，然后由 sriov-device-plugin将vf设备发布到k8s集群中。在pod创建的时候，由kubelet调用multus-cni，multus-cni分别调用默认cni和sriov-cni插件为pod构建网络环境。
+sriov-cni就是将主机上的vf设备添加进容器的网络命名空间中并配置ip地址。
 
 ### sriov-device-plugin-->vf 分配
 
@@ -713,40 +746,9 @@ func (rp *netResourcePool) GetDeviceSpecs(deviceIDs []string) []*pluginapi.Devic
 ### sriov-cni-->将SR-IOV VF 放入容器Namespace
 ```go
 func cmdAdd(args *skel.CmdArgs) error {
-	if err := config.SetLogging(args.StdinData, args.ContainerID, args.Netns, args.IfName); err != nil {
-		return err
-	}
-	logging.Debug("function called",
-		"func", "cmdAdd",
-		"args.Path", args.Path, "args.StdinData", string(args.StdinData), "args.Args", args.Args)
+    // 解析配置以及参数
 
-	netConf, err := config.LoadConf(args.StdinData)
-	if err != nil {
-		return fmt.Errorf("SRIOV-CNI failed to load netconf: %v", err)
-	}
-
-	envArgs, err := getEnvArgs(args.Args)
-	if err != nil {
-		return fmt.Errorf("SRIOV-CNI failed to parse args: %v", err)
-	}
-
-	if envArgs != nil {
-		MAC := string(envArgs.MAC)
-		if MAC != "" {
-			netConf.MAC = MAC
-		}
-	}
-
-	// RuntimeConfig takes preference than envArgs.
-	// This maintains compatibility of using envArgs
-	// for MAC config.
-	if netConf.RuntimeConfig.Mac != "" {
-		netConf.MAC = netConf.RuntimeConfig.Mac
-	}
-
-	// Always use lower case for mac address
-	netConf.MAC = strings.ToLower(netConf.MAC)
-
+	// 获取当前的namespace
 	netns, err := ns.GetNS(args.Netns)
 	if err != nil {
 		return fmt.Errorf("failed to open netns %q: %v", netns, err)
@@ -890,13 +892,150 @@ func LoadConf(bytes []byte) (*sriovtypes.NetConf, error) {
 	
 
     // 参数校验,主要vlan信息,LinkState状态
-
-
+	
 
 	return n, nil
 }
 
 ```
+
+```go
+// ApplyVFConfig configure a VF with parameters given in NetConf
+func (s *sriovManager) ApplyVFConfig(conf *sriovtypes.NetConf) error {
+	pfLink, err := s.nLink.LinkByName(conf.Master)
+	if err != nil {
+		return fmt.Errorf("failed to lookup master %q: %v", conf.Master, err)
+	}
+	// 1. Set vlan
+	if conf.Vlan != nil {
+		// 如果有vlan的配置项，会继续判断vlanqos的配置，如果有则调用s.nLink.LinkSetVfVlanQos配置，没有则只配置vlan，调用s.nLink.LinkSetVfVlan
+		if err = s.nLink.LinkSetVfVlanQosProto(pfLink, conf.VFID, *conf.Vlan, *conf.VlanQoS, sriovtypes.VlanProtoInt[*conf.VlanProto]); err != nil {
+			return fmt.Errorf("failed to set vf %d vlan configuration - id %d, qos %d and proto %s: %v", conf.VFID, *conf.Vlan, *conf.VlanQoS, *conf.VlanProto, err)
+		}
+	}
+
+	// 2. Set mac address
+	if conf.MAC != "" {
+		// mac配置项
+		// when we restore the original hardware mac address we may get a device or resource busy. so we introduce retry
+		if err := utils.SetVFHardwareMAC(s.nLink, conf.Master, conf.VFID, conf.MAC); err != nil {
+			return fmt.Errorf("failed to set MAC address to %s: %v", conf.MAC, err)
+		}
+	}
+
+	// 3. Set min/max tx link rate. 0 means no rate limiting. Support depends on NICs and driver.
+	// 速率限制
+	var minTxRate, maxTxRate int
+	rateConfigured := false
+	if conf.MinTxRate != nil {
+		minTxRate = *conf.MinTxRate
+		rateConfigured = true
+	}
+
+	if conf.MaxTxRate != nil {
+		maxTxRate = *conf.MaxTxRate
+		rateConfigured = true
+	}
+
+	if rateConfigured {
+		if err = s.nLink.LinkSetVfRate(pfLink, conf.VFID, minTxRate, maxTxRate); err != nil {
+			return fmt.Errorf("failed to set vf %d min_tx_rate to %d Mbps: max_tx_rate to %d Mbps: %v",
+				conf.VFID, minTxRate, maxTxRate, err)
+		}
+	}
+
+	// 4. Set spoofchk flag
+	if conf.SpoofChk != "" {
+		spoofChk := false
+		if conf.SpoofChk == "on" {
+			spoofChk = true
+		}
+		if err = s.nLink.LinkSetVfSpoofchk(pfLink, conf.VFID, spoofChk); err != nil {
+			return fmt.Errorf("failed to set vf %d spoofchk flag to %s: %v", conf.VFID, conf.SpoofChk, err)
+		}
+	}
+
+	// 5. Set trust flag
+	if conf.Trust != "" {
+		trust := false
+		if conf.Trust == "on" {
+			trust = true
+		}
+		if err = s.nLink.LinkSetVfTrust(pfLink, conf.VFID, trust); err != nil {
+			return fmt.Errorf("failed to set vf %d trust flag to %s: %v", conf.VFID, conf.Trust, err)
+		}
+	}
+
+	// 6. Set link state
+	if conf.LinkState != "" {
+		var state uint32
+		switch conf.LinkState {
+		case "auto":
+			state = netlink.VF_LINK_STATE_AUTO
+		case "enable":
+			state = netlink.VF_LINK_STATE_ENABLE
+		case "disable":
+			state = netlink.VF_LINK_STATE_DISABLE
+		default:
+			// the value should have been validated earlier, return error if we somehow got here
+			return fmt.Errorf("unknown link state %s when setting it for vf %d: %v", conf.LinkState, conf.VFID, err)
+		}
+		if err = s.nLink.LinkSetVfState(pfLink, conf.VFID, state); err != nil {
+			return fmt.Errorf("failed to set vf %d link state to %d: %v", conf.VFID, state, err)
+		}
+	}
+
+	// Copy the MTU value to a new variable
+	// and use it as a pointer
+	pfMtu := pfLink.Attrs().MTU
+	conf.MTU = &pfMtu
+
+	return nil
+}
+
+```
+
+
+补充 vf 信息
+```go
+func (s *sriovManager) FillOriginalVfInfo(conf *sriovtypes.NetConf) error {
+	// 获取网络设备
+	pfLink, err := s.nLink.LinkByName(conf.Master)
+	if err != nil {
+		return fmt.Errorf("failed to lookup master %q: %v", conf.Master, err)
+	}
+	// Save current the VF state before modifying it
+	vfState := getVfInfo(pfLink, conf.VFID)
+	if vfState == nil {
+		return fmt.Errorf("failed to find vf %d", conf.VFID)
+	}
+	conf.OrigVfState.FillFromVfInfo(vfState)
+
+	return err
+}
+
+// 根据 pci 地址获取 pf 和 vfid
+func getVfInfo(vfPci string) (string, int, error) {
+	var vfID int
+
+	// 获取 pf name
+	pf, err := utils.GetPfName(vfPci)
+	if err != nil {
+		return "", vfID, err
+	}
+    
+	// 获取 vf id 
+	vfID, err = utils.GetVfid(vfPci, pf)
+	if err != nil {
+		return "", vfID, err
+	}
+
+	return pf, vfID, nil
+}
+
+
+```
+
 
 ```go
 // https://github.com/k8snetworkplumbingwg/sriov-cni/blob/36e2d17af18803d0a1ced3c0c62a33b321d05a5b/pkg/utils/utils.go
@@ -914,7 +1053,7 @@ var (
 	UserspaceDrivers = []string{"vfio-pci", "uio_pci_generic", "igb_uio"}
 )
 
-
+// 获取 pf 名字
 func GetPfName(vf string) (string, error) {
 	pfSymLink := filepath.Join(SysBusPci, vf, "physfn", "net")
 	_, err := os.Lstat(pfSymLink)
@@ -934,6 +1073,7 @@ func GetPfName(vf string) (string, error) {
 	return strings.TrimSpace(files[0].Name()), nil
 }
 
+// 获取 vfid 
 func GetVfid(addr string, pfName string) (int, error) {
 	var id int
 	vfTotal, err := GetSriovNumVfs(pfName)
@@ -961,45 +1101,6 @@ func GetVfid(addr string, pfName string) (int, error) {
 ```
 
 
-
-补充 vf 信息
-```go
-func (s *sriovManager) FillOriginalVfInfo(conf *sriovtypes.NetConf) error {
-	pfLink, err := s.nLink.LinkByName(conf.Master)
-	if err != nil {
-		return fmt.Errorf("failed to lookup master %q: %v", conf.Master, err)
-	}
-	// Save current the VF state before modifying it
-	vfState := getVfInfo(pfLink, conf.VFID)
-	if vfState == nil {
-		return fmt.Errorf("failed to find vf %d", conf.VFID)
-	}
-	conf.OrigVfState.FillFromVfInfo(vfState)
-
-	return err
-}
-```
-
-```go
-// 根据 pci 地址获取 pf 和 vfid
-func getVfInfo(vfPci string) (string, int, error) {
-	var vfID int
-
-	pf, err := utils.GetPfName(vfPci)
-	if err != nil {
-		return "", vfID, err
-	}
-
-	vfID, err = utils.GetVfid(vfPci, pf)
-	if err != nil {
-		return "", vfID, err
-	}
-
-	return pf, vfID, nil
-}
-
-
-```
 
 
 ## 参考
