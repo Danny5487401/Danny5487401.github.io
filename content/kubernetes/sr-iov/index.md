@@ -342,21 +342,82 @@ eth238
 - $ vim /etc/sysconfig/network-scripts/ifcfg-bond0的BONDING_OPTS参数
 ```shell
 # 查看 bond 绑定的网卡
-cat /proc/net/bonding/bond1
-
+$ cat /proc/net/bonding/bond0 
 Ethernet Channel Bonding Driver: v3.7.1 (April 27, 2011)
-...
 
-Slave Interface: eth5
+Bonding Mode: IEEE 802.3ad Dynamic link aggregation
+Transmit Hash Policy: layer3+4 (1)
 MII Status: up
-Speed: 10000 Mbps
-...
+MII Polling Interval (ms): 100
+Up Delay (ms): 0
+Down Delay (ms): 0
+
+802.3ad info
+LACP rate: slow
+Min links: 0
+Aggregator selection policy (ad_select): stable
+System priority: 65535
+System MAC address: --:--:e5:a3:92:81
+Active Aggregator Info:
+        Aggregator ID: 2
+        Number of ports: 2
+        Actor Key: 21
+        Partner Key: 4353
+        Partner Mac Address: --:--:59:60:10:17
+
+Slave Interface: eth0
+MII Status: up
+Speed: 25000 Mbps
+Duplex: full
+Link Failure Count: 0
+Permanent HW addr: --:--:e5:a3:92:81
+Slave queue ID: 0
+Aggregator ID: 2
+Actor Churn State: none
+Partner Churn State: none
+Actor Churned Count: 0
+Partner Churned Count: 0
+details actor lacp pdu:
+    system priority: 65535
+    system mac address: --:--:e5:a3:92:81
+    port key: 21
+    port priority: 255
+    port number: 1
+    port state: 61
+details partner lacp pdu:
+    system priority: 17
+    system mac address: --:--:59:60:10:17
+    oper key: 4353
+    port priority: 32768
+    port number: 4116
+    port state: 61
 
 Slave Interface: eth4
 MII Status: up
-Speed: 10000 Mbps
-...
-
+Speed: 25000 Mbps
+Duplex: full
+Link Failure Count: 0
+Permanent HW addr: --:--:e5:a3:92:85
+Slave queue ID: 0
+Aggregator ID: 2
+Actor Churn State: none
+Partner Churn State: none
+Actor Churned Count: 0
+Partner Churned Count: 0
+details actor lacp pdu:
+    system priority: 65535
+    system mac address: --:--:e5:a3:92:81
+    port key: 21
+    port priority: 255
+    port number: 2
+    port state: 61
+details partner lacp pdu:
+    system priority: 17
+    system mac address: --:--:59:60:10:17
+    oper key: 4353
+    port priority: 32768
+    port number: 8212
+    port state: 61
 ```
 
 
@@ -415,7 +476,11 @@ const (
 * 优点：在传输和接收方向上都实现负载均衡，不需要交换机特殊支持。
 
 
-LACP（Link Aggregation Control Protocol）链路聚合包含两种类型
+LACP（Link Aggregation Control Protocol 链路聚合控制协议）,链路聚合是一种将设备之间的多个物理链路组合成单个逻辑链路的网络技术。
+通过使用链路聚合，可以增加设备之间的通信带宽。 此外，即使一条物理链路发生故障，也可以使用剩余的物理链路来维护逻辑链路，从而提高容错能力.
+链路聚合后来被标准化为 IEEE 802.3ad，它定义了 LACP 的规范。
+
+链路聚合包含两种类型
 - 静态 LACP 模式链路聚合: Eth-Trunk 接口的建立，成员接口的加入，都是由手工配置完成的
 - 动态 LACP 模式链路: Eth-Trunk 接口的建立，成员接口的加入，活动接口的选择完全由 LACP 协议通过协商完成。
 

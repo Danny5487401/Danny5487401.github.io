@@ -327,7 +327,12 @@ kube_pods_subnet: 10.233.64.0/18
 ```
 
 安装完 venv 后
-
+```shell
+# 进入虚拟环境
+root@node1:/opt/kubespray# source kubespray-venv/bin/activate
+# 安装 
+(kubespray-venv) root@node1:/opt/kubespray# ansible-playbook -i inventory/mycluster/inventory.ini cluster.yml -b -v
+```
 
 ## 参考
 

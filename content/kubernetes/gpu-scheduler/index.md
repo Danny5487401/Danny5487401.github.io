@@ -66,6 +66,20 @@ GPU （Graphics Processing Unit）这个概念由NVIDIA公司于1999年提出。
 GPU采用了数量众多的计算单元和超长的流水线，但只有非常简单的控制逻辑并省去了Cache。
 
 
+### InfiniBand 无限带宽
+
+一个用于高性能计算的计算机网络通信标准，它具有极高的吞吐量和极低的延迟，用于计算机与计算机之间的数据互连。
+
+
+InfiniBand采用以应用程序为中心的消息传递方法，找到从一个点到另一个点传递数据的阻力最小的路径。这与传统的网络协议（如TCP/IP和光纤通道）不同，后者使用更以网络为中心的方法进行通信。
+
+
+由于InfiniBand提供了基于credit的流控制（其中发送方节点发送的数据不会超过链路另一端的接收缓冲区公布的“credit”量），传输层不需要像TCP窗口算法那样的丢包机制来确定最佳的正在传输的数据包数量。
+这使得高效的产品能够以极低的延迟和可忽略的CPU使用率为应用程序提供56 GB/s的数据速率。
+
+
+
+
 ## 使用
 
 - 对于裸机环境，只需要安装对应的 GPU Driver 以及 CUDA Toolkit 。
@@ -377,7 +391,6 @@ GPU共享资源隔离方案
 ## 参考
 
 - https://kubernetes.io/docs/concepts/extend-kubernetes/compute-storage-net/device-plugins/
-- [GPU 英伟达GPU架构回顾](https://blog.csdn.net/u012294613/article/details/142672842)
 - [Kubernetes容器平台下的 GPU 集群算力管控](https://mp.weixin.qq.com/s/KzyXgXAsGde_OeF-5TMd2A)
 - [自定义资源支持：K8s Device Plugin 从原理到实现](https://www.lixueduan.com/posts/kubernetes/21-device-plugin/)
 - [GPU 环境搭建指南：如何在裸机、Docker、K8s 等环境中使用 GPU](https://www.lixueduan.com/posts/ai/01-how-to-use-gpu/)

@@ -89,7 +89,25 @@ root@node1:~# cat /proc/sys/net/ipv4/conf/calid7b92ca9b15/proxy_arp
 1
 ```
 
+
+### eXpress Data Path (XDP) 
+
+XDP（eXpress Data Path）提供了一个内核态、高性能、可编程 BPF 包处理框架。
+{{<figure src="./xdp-process.png#center" width=800px >}}
+
+
+XDP的三种工作模式
+- Native XDP，即运行在网卡驱动实现的的 poll() 函数中，需要网卡驱动的支持；
+- Generic XDP，即上面提到的如果网卡驱动不支持XDP，则可以运行在 receive_skb() 函数中；
+- Offloaded XDP，这种模式是指将XDP程序offload到网卡中，这需要网卡硬件的支持，JIT编译器将BPF代码翻译成网卡原生指令并在网卡上运行
+
+
+### eBPF
+eBPF 是嵌入在 Linux 内核中的虚拟机。它允许将小程序加载到内核中，并附加到钩子上，当某些事件发生时会触发这些钩子。这允许（有时大量）定制内核的行为。
+
 ## Calico组网模式
+
+
 ### IPIP 模式(不同网段)
 
 {{<figure src="./ip-in-ip.png#center" width=800px >}}
@@ -97,7 +115,7 @@ Calico默认网络架构，IPIP 可理解为IPinIP，属于overlay的网络架�
 
 {{<figure src="./ip-in-ip-communication.png#center" width=800px >}}
 
-### VXLAN 默认(不同网段)
+### VXLAN (不同网段)
 
 ### BGP 模式 (相同网段)
 两种模式
@@ -280,9 +298,67 @@ spec:
 - calico-controller:  实现网络策略功能,支持 calico 相关的 CRD 资源.
 - BGP Route Reflector（RR 路由反射）：在大型网络规模中，如果仅仅使用 BGP client 形成 mesh 全网互联的方案就会导致规模限制，因为所有节点之间俩俩互联，需要 N^2 个连接，为了解决这个规模问题，可以采用 BGP 的 Router Reflector 的方法，使所有 BGP Client 仅与特定 RR 节点互联并做路由同步，从而大大减少连接数。
 - typha:  各个 calico-node 同 calico datastore 通讯的中间层,减轻大规模集群 calico datastore 的负载,具有缓存功能. 50 节点以上,建议使用.
+- Whisker: v3.30 图形工具.
+
+
+## calico 数据面
+
+### 传统标准数据面
+
+
+{{<figure src="./standard_process.png#center" width=800px >}}
+
+1. 网卡收到一个包（通过 DMA 放到 ring-buffer）。
+1. 包经过 XDP hook 点。
+1. 内核给包分配内存创建skb（包的内核结构体表示），然后送到内核协议栈。
+1. 包经过 GRO 处理，对分片包进行重组。
+1. 包进入 tc（traffic control）的 ingress hook。接下来，所有橙色的框都是 Netfilter 处理点。
+1. Netfilter：在 PREROUTING hook 点处理 raw table 里的 iptables 规则。
+1. 包经过内核的连接跟踪（conntrack）模块。
+1. Netfilter：在 PREROUTING hook 点处理 mangle table 的 iptables 规则。
+1. Netfilter：在 PREROUTING hook 点处理 nat table 的 iptables 规则。
+1. 进行路由判断（FIB：Forwarding Information Base，路由条目的内核表示） 。接下来又是四个 Netfilter 处理点。
+1. Netfilter：在 FORWARD hook 点处理 mangle table 里的 iptables 规则。
+1. Netfilter：在 FORWARD hook 点处理 filter table 里的 iptables 规则。
+1. Netfilter：在 POSTROUTING hook 点处理 mangle table 里的 iptables 规则。
+1. Netfilter：在 POSTROUTING hook 点处理 nat table 里的 iptables 规则。
+1. 包到达 TC egress hook 点，会进行出方向（egress）的判断，例如判断这个包是到本 地设备，还是到主机外。
+1. 对大包进行分片。根据 step 15 判断的结果，这个包接下来可能会：
+1. 发送到一个本机 veth 设备，或者一个本机 service endpoint，
+1. 或者，如果目的 IP 是主机外，就通过网卡发出去
 
 
 
+### eBPF
+{{<figure src="./ebpf_process.png#center" width=800px >}}
+
+对比可以看出，Calico eBPF datapath 做了短路处理：从 tc ingress 直接到 tc egress，节省了 9 个中间步骤（总共 17 个）。
+更重要的是：这个 datapath 绕过了 整个 Netfilter 框架（橘黄色的框们），Netfilter 在大流量情况下性能是很差的。
+
+
+
+```shell
+# 检查 BPF 文件系统
+root@node1:~# mount | grep "/sys/fs/bpf"
+bpf on /sys/fs/bpf type bpf (rw,nosuid,nodev,noexec,relatime,mode=700)
+```
+Calico 的 eBPF 数据平面是标准 Linux 数据平面（基于 iptables）的替代方案。
+标准数据平面侧重于通过与 kube-proxy 和 iptables 规则进行交互来实现兼容性，而 eBPF 数据平面则侧重于性能、延迟和改善用户体验，并提供标准数据平面中无法实现的功能。
+作为其中的一部分，eBPF 数据平面将 kube-proxy 替换为 eBPF 实现。主要的“用户体验”功能是在流量到达 NodePort 时保留来自集群外部的流量源 IP；这使服务器端日志和网络策略在该路径上更加有用。
+
+
+新的数据平面与 Calico 的标准Linux网络数据平面相比
+
+它可以扩展到更高的吞吐量。
+
+它每 GBit 使用更少的 CPU。
+
+它原生支持 Kubernetes 服务（不需要 kube-proxy）：
+
+- 减少数据包到服务的第一个数据包延迟。
+- 将外部客户端源 IP 地址一直保留到 pod。
+- 支持 DSR（Direct Server Return），实现更高效的服务路由。
+- 使用比 kube-proxy 更少的 CPU 来保持数据平面同步。
 
 
 
@@ -292,4 +368,5 @@ spec:
 - [calico原理视频1-pod同主机和跨主机通讯](https://www.bilibili.com/video/BV1nfz3Y6EhJ/)
 - [calico原理视频2-vxlan,bgp,ipip 抓包分析](https://www.bilibili.com/video/BV1jKiZYQEzf)
 - [Calico的ip池对象ipPool](https://www.jianshu.com/p/dcad6d74e526)
+- [Calico eBPF数据平面](https://luckymrwang.github.io/2022/05/12/Calico-eBPF%E6%95%B0%E6%8D%AE%E5%B9%B3%E9%9D%A2/)
 

@@ -81,7 +81,7 @@ drwx------  2 python python  29 6月   6 12:37 .ssh
 ```
 b) SSH服务端上.~/.ssh/authorized_keys文件权限必须是600或者644
 ```shell
-[python@master-01 ~]$ ls -alh /home/python/.ssh/w
+[python@master-01 ~]$ ls -alh /home/python/.ssh/
 -rw-r--r-- 1 python python 571 6月   6 12:37 authorized_keys
 ```
 c) SSH服务端上用户家目录文件权限必须是700或750或755，775和777权限 ssh免密将失效
