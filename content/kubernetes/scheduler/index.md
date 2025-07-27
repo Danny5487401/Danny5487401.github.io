@@ -1,4 +1,3 @@
-
 ---
 title: "kube-scheduler 及 Scheduler 扩展功能推荐方式: 调度框架（scheduling framework）"
 date: 2024-09-15T14:26:42+08:00
@@ -1274,6 +1273,7 @@ func fitsRequest(podRequest *preFilterState, nodeInfo *framework.NodeInfo, ignor
 			Capacity:     nodeInfo.Allocatable.MilliCPU,
 		})
 	}
+	// 内存判断
 	if podRequest.Memory > (nodeInfo.Allocatable.Memory - nodeInfo.Requested.Memory) {
 		insufficientResources = append(insufficientResources, InsufficientResource{
 			ResourceName: v1.ResourceMemory,
@@ -1283,6 +1283,7 @@ func fitsRequest(podRequest *preFilterState, nodeInfo *framework.NodeInfo, ignor
 			Capacity:     nodeInfo.Allocatable.Memory,
 		})
 	}
+	// 临时存储判断
 	if podRequest.EphemeralStorage > (nodeInfo.Allocatable.EphemeralStorage - nodeInfo.Requested.EphemeralStorage) {
 		insufficientResources = append(insufficientResources, InsufficientResource{
 			ResourceName: v1.ResourceEphemeralStorage,
@@ -1372,6 +1373,7 @@ func (r *resourceAllocationScorer) score(
 		requested[i] = req
 	}
 
+	// 打分
 	score := r.scorer(requested, allocatable)
 
     // ...
@@ -1379,6 +1381,20 @@ func (r *resourceAllocationScorer) score(
 	return score, nil
 }
 ```
+
+问题:这种调度策略往往也会在单个节点上产生较多资源碎片。
+
+{{<figure src="./gpu_allocated_before.png#center" width=800px >}}
+
+
+每个节点都有 1 个 GPU 卡空闲，可是又无法被利用，导致资源 GPU 这种昂贵的资源被浪费。
+如果使用的资源调度策略是 Binpack，优先将节点资源填满之后，再调度下一个节点，则上图所出现的资源碎片问题得到解决。
+
+{{<figure src="./gpu_allocated_after.png#center" width=800px >}}
+
+申请 2GPU 的作业被正常调度到节点上，提升了集群的资源使用率。
+
+
 
 
  

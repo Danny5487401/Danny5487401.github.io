@@ -349,16 +349,16 @@ Calico 的 eBPF 数据平面是标准 Linux 数据平面（基于 iptables）的
 
 新的数据平面与 Calico 的标准Linux网络数据平面相比
 
-它可以扩展到更高的吞吐量。
+* 它可以扩展到更高的吞吐量。
 
-它每 GBit 使用更少的 CPU。
+* 它每 GBit 使用更少的 CPU。
 
-它原生支持 Kubernetes 服务（不需要 kube-proxy）：
+* 它原生支持 Kubernetes 服务（不需要 kube-proxy）：
 
-- 减少数据包到服务的第一个数据包延迟。
-- 将外部客户端源 IP 地址一直保留到 pod。
-- 支持 DSR（Direct Server Return），实现更高效的服务路由。
-- 使用比 kube-proxy 更少的 CPU 来保持数据平面同步。
+  - 减少数据包到服务的第一个数据包延迟。
+  - 将外部客户端源 IP 地址一直保留到 pod。
+  - 支持 DSR（Direct Server Return），实现更高效的服务路由。
+  - 使用比 kube-proxy 更少的 CPU 来保持数据平面同步。
 
 
 

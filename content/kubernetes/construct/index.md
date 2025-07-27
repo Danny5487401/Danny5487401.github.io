@@ -1,5 +1,5 @@
 ---
-title: "k8s 部署"
+title: "k8s 集群部署"
 date: 2024-12-27T17:16:39+08:00
 summary: k8s 生产级别部署:内核参数调优等
 categories:
@@ -7,6 +7,7 @@ categories:
 tags:
   - k8s
   - kubeasz
+  - kubespray
   - kubeadm
 ---
 
@@ -20,6 +21,18 @@ tags:
 - github.com/kubernetes/kubeadm
 - github.com/easzlab/kubeasz: 使用 ansible 脚本安装K8S集群,方便国内网络环境
 
+
+## 集群规划
+
+
+### 网段规划
+安装K8S集群安装时会涉及到三个网段：
+
+- 宿主机网段：就是安装k8s的服务器
+- Pod网段：k8s Pod的网段，相当于容器的IP
+- Service网段：k8s service网段，service用于集群容器通信
+
+需要注意的是这三个网段不能有任何交叉, 可用工具:[在线IP地址/子网掩码计算与转换工具](https://tools.jb51.net/aideddesign/ip_net_calc)
 
 ## 系统内核参数设置
 - https://github.com/kubernetes-sigs/kubespray/blob/v2.26.0/roles/kubernetes/preinstall/tasks/0080-system-configurations.yml
@@ -119,10 +132,6 @@ Client关闭跟Server的连接后，也有可能很快再次跟Server之间建�
 还有另外一个选项tcp_tw_recycle来控制TIME_WAIT状态，但是该选项是很危险的，因为它可能会引起意料不到的问题，比如可能会引起NAT环境下的丢包问题。
 net.ipv4.tcp_tw_recycle = 0  因为打开该选项后引起了太多的问题，所以4.12内核开始就索性删掉了这个配置选项
 
-
-
-
-
 ## 系统预留
 默认情况下 Pod 能够使用节点全部可用容量，同样就会伴随一个新的问题，pod消耗的内存会挤占掉系统服务本身的资源，这就好比我们在宿主机上运行java服务一样，会出现java程序将宿主机上的资源（内存、cpu）耗尽，从而导致系统登陆不上或者卡顿现象。
 
@@ -180,7 +189,7 @@ systemReserved:
 当系统内存不足时，就有可能触发系统OOM，这时候根据 oom score 来确定优先杀死哪个进程，而 oom_score_adj 又是影响 oom score 的重要参数，其值越低，表示 oom 的优先级越低.
 
 ## kubeasz 使用
-架构图。
+架构图
 {{<figure src="./featured.png#center" width=800px >}}
 
 [AllinOne部署](https://github.com/easzlab/kubeasz/blob/master/docs/setup/quickStart.md),然后再添加 master,node.
@@ -330,8 +339,12 @@ kube_pods_subnet: 10.233.64.0/18
 ```shell
 # 进入虚拟环境
 root@node1:/opt/kubespray# source kubespray-venv/bin/activate
-# 安装 
+# 安装新集群
 (kubespray-venv) root@node1:/opt/kubespray# ansible-playbook -i inventory/mycluster/inventory.ini cluster.yml -b -v
+`
+
+# 扩容
+(kubespray-venv) root@node1:/opt/kubespray# ansible-playbook -i inventory/mycluster/inventory.ini scale.yml --verbose
 ```
 
 ## 参考

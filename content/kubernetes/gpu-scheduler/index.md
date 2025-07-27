@@ -66,18 +66,6 @@ GPU （Graphics Processing Unit）这个概念由NVIDIA公司于1999年提出。
 GPU采用了数量众多的计算单元和超长的流水线，但只有非常简单的控制逻辑并省去了Cache。
 
 
-### InfiniBand 无限带宽
-
-一个用于高性能计算的计算机网络通信标准，它具有极高的吞吐量和极低的延迟，用于计算机与计算机之间的数据互连。
-
-
-InfiniBand采用以应用程序为中心的消息传递方法，找到从一个点到另一个点传递数据的阻力最小的路径。这与传统的网络协议（如TCP/IP和光纤通道）不同，后者使用更以网络为中心的方法进行通信。
-
-
-由于InfiniBand提供了基于credit的流控制（其中发送方节点发送的数据不会超过链路另一端的接收缓冲区公布的“credit”量），传输层不需要像TCP窗口算法那样的丢包机制来确定最佳的正在传输的数据包数量。
-这使得高效的产品能够以极低的延迟和可忽略的CPU使用率为应用程序提供56 GB/s的数据速率。
-
-
 
 
 ## 使用
@@ -366,6 +354,27 @@ GPU共享资源隔离方案
 - 截获驱动转发，如阿里云cGPU、腾讯云qGPU。
 - 截获GPU硬件访问，如NVIDIA GRID vGPU
 
+
+### volcano GPU 虚拟化
+https://volcano.sh/zh/docs/v1-12-0/gpu_virtualization/
+
+
+
+Volcano主要支持以下两种GPU共享模式
+
+#### 1 HAMI-core（基于软件的vGPU）
+
+描述： 通过VCUDA (一种CUDA API劫持技术) 对GPU核心与显存的使用进行限制，从而实现软件层面的虚拟GPU切片。
+
+使用场景： 适用于需要细粒度GPU共享的场景，兼容所有类型的GPU。
+
+
+
+
+#### 2 Dynamic MIG（硬件级GPU切片）
+描述： 采用NVIDIA的MIG (Multi-Instance GPU)技术，可将单个物理GPU分割为多个具备硬件级性能保障的隔离实例。
+
+使用场景： 尤其适用于对性能敏感的工作负载，要求GPU支持MIG特性（如A100、H100系列）。
 
 ### 容器侧：CUDA 工具集
 {{<figure src="./container_toolkit.png#center" width=800px >}}
