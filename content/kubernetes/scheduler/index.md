@@ -88,6 +88,8 @@ type Framework interface {
     // ..
 }
 ```
+Framework 是一个接口，需要实现的方法大部分为 RunXXXPlugins()，也就是运行某个扩展点的插件，那么只要实现这个 Framework 接口就可以对 Pod 进行调度。kube-scheduler 目前已有接口实现 frameworkImpl
+
 
 ### 核心数据结构
 {{<figure src="./cycle_state.png#center" width=800px >}}
@@ -129,18 +131,18 @@ func NewInTreeRegistry() runtime.Registry {
 	registry := runtime.Registry{
 		dynamicresources.Name:                runtime.FactoryAdapter(fts, dynamicresources.New),
 		selectorspread.Name:                  selectorspread.New,
-		imagelocality.Name:                   imagelocality.New,
-		tainttoleration.Name:                 tainttoleration.New,
-		nodename.Name:                        nodename.New,
-		nodeports.Name:                       nodeports.New,
-		nodeaffinity.Name:                    nodeaffinity.New,
-		podtopologyspread.Name:               runtime.FactoryAdapter(fts, podtopologyspread.New),
-		nodeunschedulable.Name:               nodeunschedulable.New,
-		noderesources.Name:                   runtime.FactoryAdapter(fts, noderesources.NewFit),
-		noderesources.BalancedAllocationName: runtime.FactoryAdapter(fts, noderesources.NewBalancedAllocation),
-		volumebinding.Name:                   runtime.FactoryAdapter(fts, volumebinding.New),
-		volumerestrictions.Name:              runtime.FactoryAdapter(fts, volumerestrictions.New),
-		volumezone.Name:                      volumezone.New,
+		imagelocality.Name:                   imagelocality.New, // 优先考虑已经拥有 Pod 运行的容器镜像的节点
+		tainttoleration.Name:                 tainttoleration.New, // 实现污点和容忍
+		nodename.Name:                        nodename.New, // 检查Pod规格节点名称是否与当前节点匹配
+		nodeports.Name:                       nodeports.New, // 检查节点是否有Pod请求的端口的空闲端口
+		nodeaffinity.Name:                    nodeaffinity.New, // 实现节点选择器和节点亲和性
+		podtopologyspread.Name:               runtime.FactoryAdapter(fts, podtopologyspread.New), //  实现Pod拓扑扩展
+		nodeunschedulable.Name:               nodeunschedulable.New, // 过滤出spec.unschedulable设置为true的节点
+		noderesources.Name:                   runtime.FactoryAdapter(fts, noderesources.NewFit), // 检查节点是否具有Pod请求的所有资源
+		noderesources.BalancedAllocationName: runtime.FactoryAdapter(fts, noderesources.NewBalancedAllocation), // 偏向于如果Pod在那里调度，将获得更平衡资源使用的节点
+		volumebinding.Name:                   runtime.FactoryAdapter(fts, volumebinding.New), / 检查节点是否有或是否可以绑定请求的卷
+		volumerestrictions.Name:              runtime.FactoryAdapter(fts, volumerestrictions.New), // 检查节点中安装的卷是否满足特定于卷提供程序的限制
+		volumezone.Name:                      volumezone.New, // 检查请求的卷是否满足它们可能具有的任何区域需求
 		nodevolumelimits.CSIName:             runtime.FactoryAdapter(fts, nodevolumelimits.NewCSI),
 		nodevolumelimits.EBSName:             runtime.FactoryAdapter(fts, nodevolumelimits.NewEBS),
 		nodevolumelimits.GCEPDName:           runtime.FactoryAdapter(fts, nodevolumelimits.NewGCEPD),
@@ -148,8 +150,8 @@ func NewInTreeRegistry() runtime.Registry {
 		nodevolumelimits.CinderName:          runtime.FactoryAdapter(fts, nodevolumelimits.NewCinder),
 		interpodaffinity.Name:                interpodaffinity.New,
 		queuesort.Name:                       queuesort.New,
-		defaultbinder.Name:                   defaultbinder.New,
-		defaultpreemption.Name:               runtime.FactoryAdapter(fts, defaultpreemption.New),
+		defaultbinder.Name:                   defaultbinder.New, //  提供默认的绑定机制
+		defaultpreemption.Name:               runtime.FactoryAdapter(fts, defaultpreemption.New), // 提供默认的抢占机制
 		schedulinggates.Name:                 runtime.FactoryAdapter(fts, schedulinggates.New),
 	}
 
@@ -420,9 +422,13 @@ func getDefaultPlugins() *v1.Plugins {
 
 {{<figure src="./kube-scheduler-caller.png#center" width=800px >}}
 
+### 等待调度阶段
 
+PreEnqueue: 只有当所有 PreEnqueue 插件返回Success时，Pod 才允许进入活动队列
 
-### 调度流程
+QueueSort: 对调度队列（scheduling queue）内的 pod 进行排序，决定先调度哪些 pods
+
+### 调度阶段（Scheduling cycle）
 
 - findNodesThatFitPod：过滤（或称为预选)--> Filters the nodes to find the ones that fit the pod based on the framework  filter plugins and filter extenders.
 - prioritizeNodes：打分（或称为优选）--> prioritizeNodes prioritizes the nodes by running the score plugins, which return a score for each node from the call to RunScorePlugins()
@@ -431,7 +437,128 @@ func getDefaultPlugins() *v1.Plugins {
 在打分阶段，调度器会为 Pod 从所有可调度节点中选取一个最合适的节点。
 
 
-最后，kube-scheduler 会将 Pod 调度到得分最高的节点上。 如果存在多个得分最高的节点，kube-scheduler 会从中随机选取一个
+最后，kube-scheduler 会将 Pod 调度到得分最高的节点上。 如果存在多个得分最高的节点，kube-scheduler 会从中随机选取一个.
+
+```shell
+# 参考 scheduler v=10 日志
+I0802 02:51:30.244110       1 eventhandlers.go:149] "Add event for unscheduled pod" pod="monitoring/alertmanager-main-1"
+I0802 02:51:30.244208       1 scheduling_queue.go:635] "Pod moved to an internal scheduling queue" pod="monitoring/alertmanager-main-1" event="PodAdd" queue="Active"
+I0802 02:51:30.244309       1 schedule_one.go:83] "About to try and schedule pod" pod="monitoring/alertmanager-main-1"
+I0802 02:51:30.244355       1 schedule_one.go:96] "Attempting to schedule pod" pod="monitoring/alertmanager-main-1"
+I0802 02:51:30.247453       1 resource_allocation.go:76] "Listed internal info for allocatable resources, requested resources and score" logger="Score.NodeResourcesFit" pod="monitoring/alertmanager-main-1" node="node4" resourceAlloc
+ationScorer="LeastAllocated" allocatableResource=[15400,15859908608] requestedResource=[12293,11881957376] resourceScore=22
+I0802 02:51:30.247680       1 resource_allocation.go:76] "Listed internal info for allocatable resources, requested resources and score" logger="Score.NodeResourcesBalancedAllocation" pod="monitoring/alertmanager-main-1" node="node4
+" resourceAllocationScorer="NodeResourcesBalancedAllocation" allocatableResource=[15400,15859908608] requestedResource=[11393,9429374976] resourceScore=92
+I0802 02:51:30.247781       1 resource_allocation.go:76] "Listed internal info for allocatable resources, requested resources and score" logger="Score.NodeResourcesFit" pod="monitoring/alertmanager-main-1" node="node5" resourceAlloc
+ationScorer="LeastAllocated" allocatableResource=[15400,17072095232] requestedResource=[7267,9854011392] resourceScore=47
+I0802 02:51:30.247868       1 resource_allocation.go:76] "Listed internal info for allocatable resources, requested resources and score" logger="Score.NodeResourcesBalancedAllocation" pod="monitoring/alertmanager-main-1" node="node5
+" resourceAllocationScorer="NodeResourcesBalancedAllocation" allocatableResource=[15400,17072095232] requestedResource=[6567,8240289792] resourceScore=97
+I0802 02:51:30.248010       1 resource_allocation.go:76] "Listed internal info for allocatable resources, requested resources and score" logger="Score.NodeResourcesFit" pod="monitoring/alertmanager-main-1" node="node6" resourceAlloc
+ationScorer="LeastAllocated" allocatableResource=[15400,15859904512] requestedResource=[3785,6734497792] resourceScore=66
+I0802 02:51:30.248091       1 resource_allocation.go:76] "Listed internal info for allocatable resources, requested resources and score" logger="Score.NodeResourcesBalancedAllocation" pod="monitoring/alertmanager-main-1" node="node6
+" resourceAllocationScorer="NodeResourcesBalancedAllocation" allocatableResource=[15400,15859904512] requestedResource=[3385,5749921792] resourceScore=92
+I0802 02:51:30.248333       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="TaintToleration" node="node4" score=300
+I0802 02:51:30.248381       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="NodeResourcesFit" node="node4" score=22
+I0802 02:51:30.248415       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="PodTopologySpread" node="node4" score=200
+I0802 02:51:30.248453       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="NodeResourcesBalancedAllocation" node="node4" score=92
+I0802 02:51:30.248489       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="ImageLocality" node="node4" score=0
+I0802 02:51:30.248528       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="TaintToleration" node="node5" score=300
+I0802 02:51:30.248564       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="NodeResourcesFit" node="node5" score=47
+I0802 02:51:30.248596       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="PodTopologySpread" node="node5" score=100
+I0802 02:51:30.248633       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="NodeResourcesBalancedAllocation" node="node5" score=97
+I0802 02:51:30.248667       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="ImageLocality" node="node5" score=0
+I0802 02:51:30.248708       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="TaintToleration" node="node6" score=300
+I0802 02:51:30.248744       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="NodeResourcesFit" node="node6" score=66
+I0802 02:51:30.248793       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="PodTopologySpread" node="node6" score=100
+I0802 02:51:30.248826       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="NodeResourcesBalancedAllocation" node="node6" score=92
+I0802 02:51:30.248859       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="ImageLocality" node="node6" score=0
+I0802 02:51:30.248935       1 schedule_one.go:860] "Calculated node's final score for pod" pod="monitoring/alertmanager-main-1" node="node4" score=614
+I0802 02:51:30.249017       1 schedule_one.go:860] "Calculated node's final score for pod" pod="monitoring/alertmanager-main-1" node="node5" score=544
+I0802 02:51:30.249053       1 schedule_one.go:860] "Calculated node's final score for pod" pod="monitoring/alertmanager-main-1" node="node6" score=558
+I0802 02:51:30.249640       1 default_binder.go:53] "Attempting to bind pod to node" logger="Bind.DefaultBinder" pod="monitoring/alertmanager-main-1" node="node4"
+I0802 02:51:30.249926       1 request.go:1349] Request Body:
+00000000  6b 38 73 00 0a 0d 0a 02  76 31 12 07 42 69 6e 64  |k8s.....v1..Bind|
+00000010  69 6e 67 12 6c 0a 51 0a  13 61 6c 65 72 74 6d 61  |ing.l.Q..alertma|
+00000020  6e 61 67 65 72 2d 6d 61  69 6e 2d 31 12 00 1a 0a  |nager-main-1....|
+00000030  6d 6f 6e 69 74 6f 72 69  6e 67 22 00 2a 24 35 31  |monitoring".*$51|
+00000040  65 32 63 33 30 61 2d 64  36 32 61 2d 34 61 38 32  |e2c30a-d62a-4a82|
+00000050  2d 39 38 65 32 2d 30 61  36 36 30 31 61 62 39 31  |-98e2-0a6601ab91|
+00000060  61 61 32 00 38 00 42 00  12 17 0a 04 4e 6f 64 65  |aa2.8.B.....Node|
+00000070  12 00 1a 05 6e 6f 64 65  34 22 00 2a 00 32 00 3a  |....node4".*.2.:|
+00000080  00 1a 00 22 00                                    |...".|
+I0802 02:51:30.250204       1 round_trippers.go:466] curl -v -XPOST  -H "User-Agent: kube-scheduler/v1.31.4 (linux/amd64) kubernetes/a78aa47/scheduler" -H "Accept: application/vnd.kubernetes.protobuf, */*" -H "Content-Type: applicat
+ion/vnd.kubernetes.protobuf" 'https://127.0.0.1:6443/api/v1/namespaces/monitoring/pods/alertmanager-main-1/binding'
+I0802 02:51:30.277376       1 eventhandlers.go:201] "Delete event for unscheduled pod" pod="monitoring/alertmanager-main-1"
+I0802 02:51:30.277505       1 eventhandlers.go:231] "Add event for scheduled pod" pod="monitoring/alertmanager-main-1"
+I0802 02:51:30.277931       1 round_trippers.go:553] POST https://127.0.0.1:6443/api/v1/namespaces/monitoring/pods/alertmanager-main-1/binding 201 Created in 27 milliseconds
+I0802 02:51:30.278012       1 round_trippers.go:570] HTTP Statistics: GetConnection 0 ms ServerProcessing 23 ms Duration 27 ms
+I0802 02:51:30.278048       1 round_trippers.go:577] Response Headers:
+I0802 02:51:30.278085       1 round_trippers.go:580]     Content-Length: 48
+I0802 02:51:30.278250       1 round_trippers.go:580]     Date: Sat, 02 Aug 2025 02:51:30 GMT
+I0802 02:51:30.278285       1 round_trippers.go:580]     Audit-Id: 97ebb10e-939d-4e21-a794-b796e0a5ee5b
+I0802 02:51:30.278402       1 round_trippers.go:580]     Cache-Control: no-cache, private
+I0802 02:51:30.278431       1 round_trippers.go:580]     Content-Type: application/vnd.kubernetes.protobuf
+I0802 02:51:30.278458       1 round_trippers.go:580]     X-Kubernetes-Pf-Flowschema-Uid: 45a530b8-6402-4baf-aa3d-559802f14e3e
+I0802 02:51:30.278483       1 round_trippers.go:580]     X-Kubernetes-Pf-Prioritylevel-Uid: 67442251-99c9-4bbc-85df-4e552c0ec508
+I0802 02:51:30.278589       1 request.go:1349] Response Body:
+00000000  6b 38 73 00 0a 0c 0a 02  76 31 12 06 53 74 61 74  |k8s.....v1..Stat|
+00000010  75 73 12 18 0a 06 0a 00  12 00 1a 00 12 07 53 75  |us............Su|
+I0802 02:51:30.248489       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="ImageLocality" node="node4" score=0
+I0802 02:51:30.248528       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="TaintToleration" node="node5" score=300
+I0802 02:51:30.248564       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="NodeResourcesFit" node="node5" score=47
+I0802 02:51:30.248596       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="PodTopologySpread" node="node5" score=100
+I0802 02:51:30.248633       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="NodeResourcesBalancedAllocation" node="node5" score=97
+I0802 02:51:30.248667       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="ImageLocality" node="node5" score=0
+I0802 02:51:30.248708       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="TaintToleration" node="node6" score=300
+I0802 02:51:30.248744       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="NodeResourcesFit" node="node6" score=66
+I0802 02:51:30.248793       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="PodTopologySpread" node="node6" score=100
+I0802 02:51:30.248826       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="NodeResourcesBalancedAllocation" node="node6" score=92
+I0802 02:51:30.248859       1 schedule_one.go:793] "Plugin scored node for pod" pod="monitoring/alertmanager-main-1" plugin="ImageLocality" node="node6" score=0
+I0802 02:51:30.248935       1 schedule_one.go:860] "Calculated node's final score for pod" pod="monitoring/alertmanager-main-1" node="node4" score=614
+I0802 02:51:30.249017       1 schedule_one.go:860] "Calculated node's final score for pod" pod="monitoring/alertmanager-main-1" node="node5" score=544
+I0802 02:51:30.249053       1 schedule_one.go:860] "Calculated node's final score for pod" pod="monitoring/alertmanager-main-1" node="node6" score=558
+I0802 02:51:30.249640       1 default_binder.go:53] "Attempting to bind pod to node" logger="Bind.DefaultBinder" pod="monitoring/alertmanager-main-1" node="node4"
+I0802 02:51:30.249926       1 request.go:1349] Request Body:
+00000000  6b 38 73 00 0a 0d 0a 02  76 31 12 07 42 69 6e 64  |k8s.....v1..Bind|
+00000010  69 6e 67 12 6c 0a 51 0a  13 61 6c 65 72 74 6d 61  |ing.l.Q..alertma|
+00000020  6e 61 67 65 72 2d 6d 61  69 6e 2d 31 12 00 1a 0a  |nager-main-1....|
+00000030  6d 6f 6e 69 74 6f 72 69  6e 67 22 00 2a 24 35 31  |monitoring".*$51|
+00000040  65 32 63 33 30 61 2d 64  36 32 61 2d 34 61 38 32  |e2c30a-d62a-4a82|
+00000050  2d 39 38 65 32 2d 30 61  36 36 30 31 61 62 39 31  |-98e2-0a6601ab91|
+00000060  61 61 32 00 38 00 42 00  12 17 0a 04 4e 6f 64 65  |aa2.8.B.....Node|
+00000070  12 00 1a 05 6e 6f 64 65  34 22 00 2a 00 32 00 3a  |....node4".*.2.:|
+00000080  00 1a 00 22 00                                    |...".|
+I0802 02:51:30.250204       1 round_trippers.go:466] curl -v -XPOST  -H "User-Agent: kube-scheduler/v1.31.4 (linux/amd64) kubernetes/a78aa47/scheduler" -H "Accept: application/vnd.kubernetes.protobuf, */*" -H "Content-Type: applicat
+ion/vnd.kubernetes.protobuf" 'https://127.0.0.1:6443/api/v1/namespaces/monitoring/pods/alertmanager-main-1/binding'
+I0802 02:51:30.277376       1 eventhandlers.go:201] "Delete event for unscheduled pod" pod="monitoring/alertmanager-main-1"
+I0802 02:51:30.277505       1 eventhandlers.go:231] "Add event for scheduled pod" pod="monitoring/alertmanager-main-1"
+I0802 02:51:30.277931       1 round_trippers.go:553] POST https://127.0.0.1:6443/api/v1/namespaces/monitoring/pods/alertmanager-main-1/binding 201 Created in 27 milliseconds
+I0802 02:51:30.278012       1 round_trippers.go:570] HTTP Statistics: GetConnection 0 ms ServerProcessing 23 ms Duration 27 ms
+I0802 02:51:30.278048       1 round_trippers.go:577] Response Headers:
+I0802 02:51:30.278085       1 round_trippers.go:580]     Content-Length: 48
+I0802 02:51:30.278250       1 round_trippers.go:580]     Date: Sat, 02 Aug 2025 02:51:30 GMT
+I0802 02:51:30.278285       1 round_trippers.go:580]     Audit-Id: 97ebb10e-939d-4e21-a794-b796e0a5ee5b
+I0802 02:51:30.278402       1 round_trippers.go:580]     Cache-Control: no-cache, private
+I0802 02:51:30.278431       1 round_trippers.go:580]     Content-Type: application/vnd.kubernetes.protobuf
+I0802 02:51:30.278458       1 round_trippers.go:580]     X-Kubernetes-Pf-Flowschema-Uid: 45a530b8-6402-4baf-aa3d-559802f14e3e
+I0802 02:51:30.278483       1 round_trippers.go:580]     X-Kubernetes-Pf-Prioritylevel-Uid: 67442251-99c9-4bbc-85df-4e552c0ec508
+I0802 02:51:30.278589       1 request.go:1349] Response Body:
+00000000  6b 38 73 00 0a 0c 0a 02  76 31 12 06 53 74 61 74  |k8s.....v1..Stat|
+00000010  75 73 12 18 0a 06 0a 00  12 00 1a 00 12 07 53 75  |us............Su|
+00000020  63 63 65 73 73 1a 00 22  00 30 c9 01 1a 00 22 00  |ccess..".0....".|
+I0802 02:51:30.279067       1 cache.go:389] "Finished binding for pod, can be expired" podKey="51e2c30a-d62a-4a82-98e2-0a6601ab91aa" pod="monitoring/alertmanager-main-1"
+I0802 02:51:30.279165       1 schedule_one.go:314] "Successfully bound pod to node" pod="monitoring/alertmanager-main-1" node="node4" evaluatedNodes=6 feasibleNodes=3
+```
+调度 monitoring/alertmanager-main-1,总共分析evaluatedNodes=6 个,可用feasibleNodes=3个
+
+涉及的插件(最终 node-4 为例)
+- NodeResourcesFit : 22
+- NodeResourcesBalancedAllocation: 92
+- TaintToleration: 300
+- PodTopologySpread: 200
+- ImageLocality: 0
+
+计算 node-4 总得分: 614
 
 
 ### 调度器性能
@@ -584,6 +711,7 @@ func New(client clientset.Interface,
 		return nil, err
 	}
 	
+	// extenders 调度
 	extenders, err := buildExtenders(options.extenders, options.profiles)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't build extenders: %w", err)
@@ -614,7 +742,7 @@ func New(client clientset.Interface,
 	for profileName, profile := range profiles {
 		preEnqueuePluginMap[profileName] = profile.PreEnqueuePlugins()
 	}
-	// 实例化 queue, 该 queue 为 PriorityQueue
+	// 实例化调度队列 queue, 该 queue 为 PriorityQueue
 	podQueue := internalqueue.NewSchedulingQueue(
 		profiles[options.profiles[0].SchedulerName].QueueSortFunc(),
 		informerFactory,
@@ -632,7 +760,7 @@ func New(client clientset.Interface,
 		fwk.SetPodNominator(podQueue)
 	}
 
-	// 实例化 cache 缓存
+	// 实例化 cache 缓存: scheduler Cache 缓存 Pod，Node 等信息，各个扩展点的插件在计算时所需要的 Node 和 Pod 信息都是从 scheduler Cache 获取。
 	schedulerCache := internalcache.New(durationToExpireAssumedPod, stopEverything)
 
 	// Setup cache debugger.
@@ -641,12 +769,9 @@ func New(client clientset.Interface,
 
 	// 实例化 scheduler 对象
 	sched := &Scheduler{
-		Cache:                    schedulerCache,
-		client:                   client,
-		nodeInfoSnapshot:         snapshot,
-		percentageOfNodesToScore: options.percentageOfNodesToScore,
-		Extenders:                extenders,
-		NextPod:                  internalqueue.MakeNextPodFunc(podQueue),
+        // ...
+		
+		NextPod:                  internalqueue.MakeNextPodFunc(podQueue), // 获取 pod,调用 queue.Pop()
 		StopEverything:           stopEverything,
 		SchedulingQueue:          podQueue,
 		Profiles:                 profiles,
@@ -666,6 +791,99 @@ func (s *Scheduler) applyDefaultHandlers() {
 	s.FailureHandler = s.handleSchedulingFailure
 }
 ```
+
+```go
+type SchedulingQueue interface {
+	framework.PodNominator
+	Add(pod *v1.Pod) error
+	// Activate moves the given pods to activeQ iff they're in unschedulablePods or backoffQ.
+	// The passed-in pods are originally compiled from plugins that want to activate Pods,
+	// by injecting the pods through a reserved CycleState struct (PodsToActivate).
+	Activate(pods map[string]*v1.Pod)
+	// AddUnschedulableIfNotPresent adds an unschedulable pod back to scheduling queue.
+	// The podSchedulingCycle represents the current scheduling cycle number which can be
+	// returned by calling SchedulingCycle().
+	AddUnschedulableIfNotPresent(pod *framework.QueuedPodInfo, podSchedulingCycle int64) error
+	// SchedulingCycle returns the current number of scheduling cycle which is
+	// cached by scheduling queue. Normally, incrementing this number whenever
+	// a pod is popped (e.g. called Pop()) is enough.
+	SchedulingCycle() int64
+	// Pop removes the head of the queue and returns it. It blocks if the
+	// queue is empty and waits until a new item is added to the queue.
+	Pop() (*framework.QueuedPodInfo, error)
+	Update(oldPod, newPod *v1.Pod) error
+	Delete(pod *v1.Pod) error
+	MoveAllToActiveOrBackoffQueue(event framework.ClusterEvent, preCheck PreEnqueueCheck)
+	AssignedPodAdded(pod *v1.Pod)
+	AssignedPodUpdated(pod *v1.Pod)
+	PendingPods() ([]*v1.Pod, string)
+	// Close closes the SchedulingQueue so that the goroutine which is
+	// waiting to pop items can exit gracefully.
+	Close()
+	// Run starts the goroutines managing the queue.
+	Run()
+}
+
+
+func NewSchedulingQueue(
+	lessFn framework.LessFunc,
+	informerFactory informers.SharedInformerFactory,
+	opts ...Option) SchedulingQueue {
+	return NewPriorityQueue(lessFn, informerFactory, opts...)
+}
+
+// 初始化队列
+func NewPriorityQueue(
+	lessFn framework.LessFunc,
+	informerFactory informers.SharedInformerFactory,
+	opts ...Option,
+) *PriorityQueue {
+	options := defaultPriorityQueueOptions
+	if options.podLister == nil {
+		options.podLister = informerFactory.Core().V1().Pods().Lister()
+	}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	comp := func(podInfo1, podInfo2 interface{}) bool {
+		pInfo1 := podInfo1.(*framework.QueuedPodInfo)
+		pInfo2 := podInfo2.(*framework.QueuedPodInfo)
+		return lessFn(pInfo1, pInfo2)
+	}
+
+	pq := &PriorityQueue{
+        // ...
+	}
+    // ...
+
+	return pq
+}
+```
+```go
+type PriorityQueue struct {
+    // ...
+
+	// activeQ is heap structure that scheduler actively looks at to find pods to
+	// schedule. Head of heap is the highest priority pod.
+	activeQ *heap.Heap
+	// podBackoffQ is a heap ordered by backoff expiry. Pods which have completed backoff
+	// are popped from this heap before the scheduler looks at activeQ
+	podBackoffQ *heap.Heap
+	// unschedulablePods holds pods that have been tried and determined unschedulable.
+	unschedulablePods *UnschedulablePods
+	    
+	
+	// ..
+}
+```
+SchedulingQueue 是一个 internalqueue.SchedulingQueue 接口类型，PriorityQueue 对这个接口进行了实现，创建 Scheduler 的时候 SchedulingQueue 会被 PriorityQueue 类型对象赋值。SchedulerQueue 包含三个队列：activeQ、podBackoffQ、unschedulablePods。
+
+- activeQ 是一个优先队列，基于堆实现，用于存放待调度的 Pod，优先级高的会放在队列头部，优先被调度。该队列存放的 Pod 可能的情况有：刚创建未被调度的Pod；backOffPod 队列中转移过来的Pod；unschedule 队列里转移过来的 Pod；
+- podBackoffQ 也是一个优先队列，用于存放那些异常的Pod，这种 Pod 需要等待一定的时间才能够被再次调度，会有协程定期去读取这个队列，然后加入到 activeQ 队列然后重新调度；
+- unschedulablePods 严格上来说不属于队列，用于存放调度失败的 Pod。这个队列也会有协程定期（默认30s）去读取，然后判断当前时间距离上次调度时间的差是否超过5min，如果超过这个时间则把 Pod 移动到 activeQ 重新调度
+
+
 
 ### 启动
 
@@ -1187,15 +1405,17 @@ var nodeResourceStrategyTypeMap = map[config.ScoringStrategyType]scorer{
 
 scheduler 对 resource 打分内置三种不同策略, 分别是 LeastAllocated / MostAllocated / RequestedToCapacityRatio.
 
-- LeastAllocated 默认策略, 空闲资源多的分高, 优先调度到空闲资源多的节点上, 各个 node 节点负载均衡.
-- MostAllocated 空闲资源少的分高, 优先调度到空闲资源较少的 node 上, 这样 pod 尽量集中起来方便后面资源回收.
-- RequestedToCapacityRatio 请求 request 和 node 资源总量的比率低的分高.
+- LeastAllocated(最少资源使用): 默认策略, 空闲资源多的分高, 优先调度到空闲资源多的节点上, 各个 node 节点负载均衡.
+- MostAllocated(最多资源使用) : 空闲资源少的分高, 优先调度到空闲资源较少的 node 上, 这样 pod 尽量集中起来方便后面资源回收.
+- RequestedToCapacityRatio(资源占用比例): 请求 request 和 node 资源总量的比率低的分高.
 
 
 LeastAllocated 为例
 ```go
 // Details:
 // (cpu((capacity-requested)*MaxNodeScore*cpuWeight/capacity) + memory((capacity-requested)*MaxNodeScore*memoryWeight/capacity) + ...)/weightSum
+// 计算了每种资源的未使用量（可分配-请求），然后根据每种资源的权重计算出一个加权平均分。
+// 最后，它返回一个分数，分数越高表示节点上未使用的资源越多
 func leastResourceScorer(resources []config.ResourceSpec) func([]int64, []int64) int64 {
 	return func(requested, allocable []int64) int64 {
 		var nodeScore, weightSum int64
@@ -1382,7 +1602,7 @@ func (r *resourceAllocationScorer) score(
 }
 ```
 
-问题:这种调度策略往往也会在单个节点上产生较多资源碎片。
+问题: 这种调度策略往往也会在单个节点上产生较多资源碎片。
 
 {{<figure src="./gpu_allocated_before.png#center" width=800px >}}
 
@@ -1396,8 +1616,56 @@ func (r *resourceAllocationScorer) score(
 
 
 
+### 2 ImageLocality
+倾向于选择那些已经拥有请求的pod 容器镜像的节点。
 
- 
+```go
+// https://github.com/kubernetes/kubernetes/blob/65faa9c6800dfe97462fd0c8229be1c3435f60fb/pkg/scheduler/framework/plugins/imagelocality/image_locality.go
+
+func (pl *ImageLocality) Score(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) (int64, *framework.Status) {
+	nodeInfo, err := pl.handle.SnapshotSharedLister().NodeInfos().Get(nodeName)
+	if err != nil {
+		return 0, framework.AsStatus(fmt.Errorf("getting node %q from Snapshot: %w", nodeName, err))
+	}
+
+	nodeInfos, err := pl.handle.SnapshotSharedLister().NodeInfos().List()
+	if err != nil {
+		return 0, framework.AsStatus(err)
+	}
+	totalNumNodes := len(nodeInfos)
+
+	imageScores := sumImageScores(nodeInfo, pod, totalNumNodes)
+	score := calculatePriority(imageScores, len(pod.Spec.InitContainers)+len(pod.Spec.Containers))
+
+	return score, nil
+}
+
+
+// 函数 sumImageScores 遍历 pod 中的初始化容器 InitContainers 和其他容器 Containers，
+// 对于每一个容器，它都会检查该容器的镜像是否已经存在于目标节点上。
+// 如果存在，它会调用 scaledImageScore 函数来计算这个镜像的得分，并将其累加到总分中。
+func sumImageScores(nodeInfo *framework.NodeInfo, pod *v1.Pod, totalNumNodes int) int64 {
+	var sum int64
+	for _, container := range pod.Spec.InitContainers {
+		if state, ok := nodeInfo.ImageStates[normalizedImageName(container.Image)]; ok {
+			sum += scaledImageScore(state, totalNumNodes)
+		}
+	}
+	for _, container := range pod.Spec.Containers {
+		if state, ok := nodeInfo.ImageStates[normalizedImageName(container.Image)]; ok {
+			sum += scaledImageScore(state, totalNumNodes)
+		}
+	}
+	return sum
+}
+
+// 这个得分是基于镜像的大小计算的，并且会根据节点的总数进行缩放。这样一来，镜像的大小和节点的数量都会影响到最终的得分。
+// 这有助于在进行 pod 调度时，优先选择那些已经拥有所需镜像的节点，从而可以减少镜像拉取的时间，加快 pod 的启动速度。
+func scaledImageScore(imageState *framework.ImageStateSummary, totalNumNodes int) int64 {
+	spread := float64(imageState.NumNodes) / float64(totalNumNodes)
+	return int64(float64(imageState.Size) * spread)
+
+```
 
 ## 参考 
 

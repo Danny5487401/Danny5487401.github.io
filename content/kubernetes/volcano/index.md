@@ -28,6 +28,7 @@ Volcano由scheduler、controllermanager、admission和vcctl组成
 
 
 ## Volcano scheduler的工作流程
+https://volcano.sh/zh/docs/schduler_introduction/
 
 Scheduler是负责Pod调度的组件，它由一系列action和plugin组成。
 action定义了调度各环节中需要执行的动作；plugin根据不同场景提供了action 中算法的具体实现细节。
@@ -55,8 +56,8 @@ func (sc *SchedulerCache) addPod(pod *v1.Pod) error {
 
 ```
 
-## 丰富的调度策略
-
+## plugin
+丰富的调度策略
 - Gang Scheduling：确保作业的所有任务同时启动，适用于分布式训练、大数据等场景
 - Binpack Scheduling：通过任务紧凑分配优化资源利用率
 - Heterogeneous device scheduling：高效共享GPU异构资源，支持CUDA和MIG两种模式的GPU调度，支持NPU调度
@@ -276,65 +277,85 @@ status:
 
 
 ## action
-action中有enqueue、allocate、preempt、reclaim、backfill、elect、reserve 7种内置的action 
+action中有enqueue、allocate、preempt、reclaim、backfill、shuffle
+
+```go
+// https://github.com/volcano-sh/volcano/blob/b27b4bbe7d19e225e75a11e424bee38ec29a4041/pkg/scheduler/actions/factory.go
+func init() {
+	// 注册 action
+	framework.RegisterAction(reclaim.New())
+	framework.RegisterAction(allocate.New())
+	framework.RegisterAction(backfill.New())
+	framework.RegisterAction(preempt.New())
+	framework.RegisterAction(enqueue.New())
+	framework.RegisterAction(shuffle.New())
+}
+
+```
+
+active 接口
+```go
+type Action interface {
+	// The unique name of Action.
+	Name() string
+
+	// Initialize initializes the allocator plugins.
+	Initialize()
+
+	// Execute allocates the cluster's resources into each queue.
+	Execute(ssn *Session)
+
+	// UnIntialize un-initializes the allocator plugins.
+	UnInitialize()
+}
+
+```
+
+调度器执行逻辑
+
+```go
+func (pc *Scheduler) runOnce() {
+	klog.V(4).Infof("Start scheduling ...")
+	scheduleStartTime := time.Now()
+	defer klog.V(4).Infof("End scheduling ...")
+
+	pc.mutex.Lock()
+	actions := pc.actions
+	plugins := pc.plugins
+	configurations := pc.configurations
+	pc.mutex.Unlock()
+
+	// Load ConfigMap to check which action is enabled.
+	conf.EnabledActionMap = make(map[string]bool)
+	for _, action := range actions {
+		conf.EnabledActionMap[action.Name()] = true
+	}
+
+	ssn := framework.OpenSession(pc.cache, plugins, configurations)
+	defer func() {
+		framework.CloseSession(ssn)
+		metrics.UpdateE2eDuration(metrics.Duration(scheduleStartTime))
+	}()
+
+	// 遍历 actions, 执行 action
+	for _, action := range actions {
+		actionStartTime := time.Now()
+		action.Execute(ssn) // 传递了一个 ssn（*Session 类型）对象进去
+		metrics.UpdateActionDuration(action.Name(), metrics.Duration(actionStartTime))
+	}
+}
+```
 
 ### Enqueue
 
 Enqueue action筛选符合要求的作业进入待调度队列。当一个Job下的最小资源申请量不能得到满足时，即使为Job下的Pod执行调度动作，Pod也会因为gang约束没有达到而无法进行调度；
-只有当job的最小资源量得到满足，状态由”Pending”刷新为”Inqueue”才可以进行
+经过这个action，任务的状态将由pending变为inqueue。
 
-```go
-func (cp *capacityPlugin) OnSessionOpen(ssn *framework.Session) {
-	// Prepare scheduling data for this session.
-	cp.totalResource.Add(ssn.TotalResource)
 
-	klog.V(4).Infof("The total resource is <%v>", cp.totalResource)
-	
-	// ....
-	
-	ssn.AddJobEnqueueableFn(cp.Name(), func(obj interface{}) int {
-		job := obj.(*api.JobInfo)
-		queueID := job.Queue
-		attr := cp.queueOpts[queueID]
-		queue := ssn.Queues[queueID]
-		// If no capability is set, always enqueue the job.
-		if attr.realCapability == nil {
-			klog.V(4).Infof("Capability of queue <%s> was not set, allow job <%s/%s> to Inqueue.",
-				queue.Name, job.Namespace, job.Name)
-			return util.Permit
-		}
 
-		if job.PodGroup.Spec.MinResources == nil {
-			klog.V(4).Infof("job %s MinResources is null.", job.Name)
-			return util.Permit
-		}
-		minReq := job.GetMinResources()
 
-		klog.V(5).Infof("job %s min resource <%s>, queue %s capability <%s> allocated <%s> inqueue <%s> elastic <%s>",
-			job.Name, minReq.String(), queue.Name, attr.realCapability.String(), attr.allocated.String(), attr.inqueue.String(), attr.elastic.String())
-		// The queue resource quota limit has not reached
-		r := minReq.Add(attr.allocated).Add(attr.inqueue).Sub(attr.elastic)
-		rr := attr.realCapability.Clone()
-
-		for name := range rr.ScalarResources {
-			if _, ok := r.ScalarResources[name]; !ok {
-				delete(rr.ScalarResources, name)
-			}
-		}
-
-		inqueue := r.LessEqual(rr, api.Infinity)
-		klog.V(5).Infof("job %s inqueue %v", job.Name, inqueue)
-		if inqueue {
-			attr.inqueue.Add(job.GetMinResources())
-			return util.Permit
-		}
-		ssn.RecordPodGroupEvent(job.PodGroup, v1.EventTypeNormal, string(scheduling.PodGroupUnschedulableType), "queue resource quota insufficient")
-		return util.Reject
-	})
-
-    // ...
-}
-```
+### allocate
+allocate对Queue和Job这两个资源排序， 如果job状态为pending，则会尝试为其分配node资源。
 
 
 ### preempt
@@ -342,6 +363,10 @@ func (cp *capacityPlugin) OnSessionOpen(ssn *framework.Session) {
 
 ### reclaim
 支持队列间的资源回收。当队列资源紧张时，触发资源回收机制。优先回收超出队列deserved值的资源，并结合队列/作业优先级选择合适的牺牲者
+
+### backfill
+backfill action负责将处于pending状态的任务尽可能的调度下去以保证节点资源的最大化利用。
+
 
 ## 参考
 

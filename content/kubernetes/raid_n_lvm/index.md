@@ -1094,7 +1094,7 @@ RAID 0亦称为带区集。它将两个以上的磁盘并联起来，成为一�
 假设我们有2个磁盘驱动器，例如，如果我们将数据“TECMINT”写到逻辑卷中，“T”将被保存在第一盘中，“E”将保存在第二盘，'C'将被保存在第一盘，“M”将保存在第二盘，它会一直继续此循环过程。（LCTT 译注：实际上不可能按字节切片，是按数据块切片的。）
 
 
-#### RAID 1
+#### raid 1
 
 {{<figure src="./raid1.png#center" width=800px >}}
 
@@ -1103,7 +1103,7 @@ RAID 0亦称为带区集。它将两个以上的磁盘并联起来，成为一�
 其原理为在主硬盘上存放数据的同时也在镜像硬盘上写一样的数据。当主硬盘（物理）损坏时，镜像硬盘则代替主硬盘的工作。
 
 
-#### 混合RAID: raid 10
+#### 混合 raid: raid 10
 {{<figure src="./featured.png#center" width=800px >}}
 RAID 10 是组合 RAID 1 和 RAID 0 形成的.
 
@@ -1264,6 +1264,8 @@ rm /etc/mdadm.conf
 ## 参考
 - https://www.diskinternals.com/raid-recovery/how-to-remove-software-raid-with-mdadm/
 - https://linux.die.net/man/8/dmsetup
+- https://github.com/topolvm/topolvm/
+- https://github.com/openebs/lvm-localpv
 - [LVM的基本概念和部署](http://xintq.net/2014/07/30/LVM%E7%9A%84%E5%9F%BA%E6%9C%AC%E6%A6%82%E5%BF%B5%E5%92%8C%E9%83%A8%E7%BD%B2/)
 - [fdisk,gdisk,parted 三种分区工具比较](https://www.cnblogs.com/zhaojiedi1992/p/zhaojiedi_linux_039_fdisk_gdisk_parted.html)
 - [LVM管理](https://www.cnblogs.com/diantong/p/10554831.html)
@@ -1271,6 +1273,6 @@ rm /etc/mdadm.conf
 - [LVM精简卷(Thinly-Provisioned Logical Volumes)操作](https://blog.csdn.net/IndexMan/article/details/120267326)
 - [RAID及mdadm命令](https://cloud.tencent.com/developer/article/1108103)
 - [mdadm命令](https://www.cnblogs.com/apexchu/p/6512341.html)
-- [使用 mdadm 工具创建软 RAID 0 ](https://golinux.gitbooks.io/raid/content/chapter2.html)
+- [使用 mdadm 工具创建软 RAID 0](https://golinux.gitbooks.io/raid/content/chapter2.html)
 - [udev和rules使用规则](https://www.cnblogs.com/zhouhbing/p/4025748.html)
 - [dmsetup 命令](https://www.cnblogs.com/xzongblogs/p/14982032.html)
