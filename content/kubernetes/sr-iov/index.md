@@ -479,18 +479,18 @@ eth238
 对TCP/IP协议层只存在一个Bond网卡，在Bond程序中实现网络流量的负载均衡，即将一个网络请求重定位到不同的网卡上，来提高总体网络的可用性
 
 怎么看当前bond的mode？
-- $ cat /proc/net/bonding/bond0
+- $ cat /proc/net/bonding/bondX  其中 bondX 是网络绑定接口的名称，其中 X 是数字，表示具体的网络绑定接口编号。
 - $ vim /etc/sysconfig/network-scripts/ifcfg-bond0的BONDING_OPTS参数
 ```shell
 # 查看 bond 绑定的网卡
 $ cat /proc/net/bonding/bond0 
-Ethernet Channel Bonding Driver: v3.7.1 (April 27, 2011)
+Ethernet Channel Bonding Driver: v3.7.1 (April 27, 2011) # 显示网络绑定驱动程序的版本号
 
-Bonding Mode: IEEE 802.3ad Dynamic link aggregation
+Bonding Mode: IEEE 802.3ad Dynamic link aggregation # 显示网络绑定模式，即使用的网络绑定算法
 Transmit Hash Policy: layer3+4 (1)
-MII Status: up
-MII Polling Interval (ms): 100
-Up Delay (ms): 0
+MII Status: up # 显示网络接口的 MII 状态为上线（up）或下线（down）
+MII Polling Interval (ms): 100 # 显示 MII 轮询间隔的时间（毫秒）
+Up Delay (ms): 0 # 显示网络接口激活时的延迟时间（毫秒）
 Down Delay (ms): 0
 
 802.3ad info

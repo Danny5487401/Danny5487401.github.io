@@ -7,6 +7,8 @@ categories:
 ---
 ## 基本知识
 
+在 AI 算力建设中， RDMA 技术是支持高吞吐、低延迟网络通信的关键。目前，RDMA技术主要通过两种方案实现：Infiniband和RoCE（基于RDMA的以太网技术，以下简称为RoCE）。
+
 ### InfiniBand 无限带宽
 
 InfiniBand架构是一种支持多并发链接的“转换线缆”技术，它是新一代服务器硬件平台的I/O标准。
@@ -22,12 +24,16 @@ InfiniBand采用以应用程序为中心的消息传递方法，找到从一个�
 
 
 
-#### Infiniband 协议
+#### IB(Infiniband 协议)
 {{<figure src="./Infiniband_structure.png#center" width=800px >}}
 - 物理层定义了在线路上如何将比特信号组 成符号,然后再组成帧、 数据符号以及包之间的数据填 充等,详细说明了构建有效包的信令协议等；
 - 链路层定义了数据包的格式以及数据包操作的协议,如流控、 路由选择、 编码、解码等；网络层通过在数据包上添加一个40字节的全局的路由报头(Global Route Header,GRH)来进行路由的选择,对数据进行转发。在转发的过程中,路由 器仅仅进行可变的CRC校验,这样就保证了端到端的数据传输的完整性；
 - 传输层再将数据包传送到某个指定 的队列偶(QueuePair,QP)中,并指示QP如何处理该数据 包以及当信息的数据净核部分大于通道的最大传输单 元MTU时,对数据进行分段和重组。
 
+
+#### InfiniBand的速度与以太网相比如何？
+
+答：与传统以太网相比，InfiniBand的速度要高得多。以太网的运行速度通常为 1Gbps、10Gbps或100Gbps，而InfiniBand可以提供高达200Gbps 甚至更高的速度。
 
 
 
@@ -42,14 +48,19 @@ NVLink服务器指的是采用NVLink和NVSwitch技术来互联GPU的服务器，
 
 
 ## DMA( Direct Memory Access 直接内存访问)
+{{<figure src="./dma-info.png#center" width=800px >}}
 
+DMA 是单机内存和设备间数据传输的“发动机”。 它的核心目标是加速设备（如硬盘、显卡、网卡）与本地内存之间的数据流动，减少 CPU 的参与
 
-允许不同速度的硬件装置来沟通，而不需要依于 CPU 的大量中断负载。
+红线部分为传统内存访问，需要通过CPU进行数据copy来移动数据，通过CPU将内存中的Buffer1移动到Buffer2中。
+在DMA模式：可以同DMA Engine之间通过硬件将数据从Buffer1移动到Buffer2,而不需要操作系统CPU的参与，大大降低了CPU Copy的开销。
 
 
 ### DMA传输过程
 
 {{<figure src="./dma-process.png#center" width=800px >}}
+
+
 1、DMA请求
 
 CPU对DMA控制器初始化，并向I/O接口发出操作命令，I/O接口提出DMA请求。
@@ -73,6 +84,34 @@ DMA控制器获得总线控制权后，CPU即刻挂起或只执行内部操作�
 当完成规定的成批数据传送后，DMA控制器即释放总线控制权，并向I/O接口发出结束信号。
 
 当I/O接口收到结束信号后，一方面停 止I/O设备的工作，另一方面向CPU提出中断请求，使CPU从不介入的状态解脱，并执行一段检查本次DMA传输操作正确性的代码。
+
+## RDMA(Remote Direct Memory Access 全称远端内存直接访问技术)
+
+RDMA 是分布式网络环境的“整车”。 它不仅继承了 DMA 的核心能力，还扩展到了网络通信范畴，提供了远程节点间的高效、零拷贝通信。
+
+{{<figure src="./rdma-info.png#center" width=800px >}}
+
+
+### RoCE (RDMA over Converged Ethernet 基于融合以太网的RDMA)
+
+
+为什么我们有了Infiniband协议之后，还要设计RoCE协议呢？最主要的原因还是成本问题：由于Infiniband协议本身定义了一套全新的层次架构，从链路层到传输层，都无法与现有的以太网设备兼容。
+也就是说，如果某个数据中心因为性能瓶颈，想要把数据交换方式从以太网切换到Infiniband技术，那么需要购买全套的Infiniband设备，包括网卡、线缆、交换机和路由器等等
+
+
+
+{{<figure src="./infiniband_vs_roce.png#center" width=800px >}}
+IB与RoCE协议栈在传输层以上是相同的，在链路层与网络层有所区别：
+
+RoCEv1中，以太网替代了IB的链路层(交换机需要支持PFC等流控技术，在物理层保证可靠传输)，然而，由于RoCEv1中使用的是L2 Ethernet网络，依赖于以太网的MAC地址和VLAN标签进行通信，而不涉及网络层（IP层，即OSI模型的第三层）的路由功能，因此，RoCE v1数据包不能实现跨不同的IP子网传输，只能在同一广播域或L2子网内进行传输。
+
+RoCEv2在RoCEv1的基础上，融合以太网网络层，IP又替代了IB的网络层，因此也称为IP routable RoCE，使得RoCE v2协议数据包可以在第3层进行路由，可扩展性更优。
+
+网络层级对比
+* 在物理层，RoCE和IB都支持800G，但PAM4相比NRZ具有更强的升级潜力，以太网成本也低于IB，RoCE更胜一筹。
+* 在链路层，两者均实现了无损传输，RoCE的ETS能够为不同优先的流量提供带宽保证，且RoCE和IB的时延均达到了100ns级别，在实际应用中差不大。
+* 在网络层，RoCE借助IP的成熟的持续发展，更能适应大规模网络。
+* 传输层及以上，RoCE和IB使用同样的协议，没有区别。
 
 
 ## 内存的架构
@@ -100,10 +139,6 @@ GPU设备存储：
 * PCIE-to-PCIE：显卡之间通过PCIE直接传输数据；
 * NVLINK：显卡之间的一种专用的数据传输通道，由NVIDIA公司推出
 
-
-## 存储（内存）之间的操作
-
-### 数据从磁盘/系统内存到GPU
 
 
 ## GPU 内存管理
@@ -153,3 +188,4 @@ nvidia-smi 调用的是 NVML。NVML 全称是 NVIDIA Management Library，提供
 - [浅谈GPU通信和PCIe P2P DMA](https://zhuanlan.zhihu.com/p/430101220)
 - [nvidia-smi 基本使用](https://www.chenshaowen.com/blog/basic-usage-of-nvidia-smi.html)
 - [infiniBand简介](https://blog.csdn.net/maopig/article/details/121362576)
+- [RoCE与IB对比分析（一）：协议栈层级篇](https://asterfusion.com/a20241107-roce1/?srsltid=AfmBOopaO-jAuUhJ4mRBm02kj6Q2zevh0t5KBfkNsDwu-83s_J3rxvSP)

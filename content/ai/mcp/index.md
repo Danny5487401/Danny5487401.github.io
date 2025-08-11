@@ -1,8 +1,9 @@
-
 ---
 title: "MCP（ 模型上下文协议 Model Context Protocol)"
 date: 2025-05-12T22:34:01+08:00
 summary: 模型上下文协议实现原理
+categories:
+  - mcp
 ---
 
 
@@ -10,7 +11,8 @@ summary: 模型上下文协议实现原理
 它为AI应用提供了一种统一、标准化的方式来访问和处理实时数据，使模型不再局限于训练时获得的静态知识。
 
 
-MCP由Anthropic首次提出并开源，通过定义标准化接口，允许大语言模型以一致的方式与各类外部系统互动，包括数据库、API和企业内部工具等。这一协议的核心价值在于打破了AI模型的"信息孤岛"限制，极大扩展了大模型的应用场景
+MCP由Anthropic首次提出并开源，通过定义标准化接口，允许大语言模型以一致的方式与各类外部系统互动，包括数据库、API和企业内部工具等。
+这一协议的核心价值在于打破了AI模型的"信息孤岛"限制，极大扩展了大模型的应用场景.
 
 
 
@@ -31,10 +33,14 @@ MCP 由三个核心组件构成：Host、Client 和 Server。
 
 {{<figure src="./mcp_process_example.png#center" width=800px >}}
 
+## 案例 
+客户端: https://github.com/modelcontextprotocol/python-sdk/tree/main/examples/clients/simple-chatbot/mcp_simple_chatbot
+
+
+ 
 
 ## 手动开发 MCP 开发
 
-## 待补充
 
 
 ## 参考

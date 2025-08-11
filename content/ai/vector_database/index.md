@@ -1,7 +1,9 @@
 ---
 title: "向量数据库"
 date: 2025-07-31T11:06:36+08:00
-draft: true
+summary: 常见向量数据库
+categories:
+  - vector database
 ---
 
 
@@ -58,7 +60,7 @@ Qdrant完全独立开发，支持集群部署，不需要借助ETCD、Pulsar等�
 在向量数据库领域，HNSW（Hierarchical Navigable Small-World）和 DiskANN 正逐渐成为主流索引方案。
 其中NHSW主要以内存搜索为主，DiskANN主要以磁盘搜索为主。
 
-### HNSW（Hierarchical Navigable Small-World 层次导航小世界图
+### HNSW（Hierarchical Navigable Small-World 层次导航小世界图)
 它是跳表和小世界图（SWG）结构的扩展，可以有效地找到近似的最近邻。
 
 ### DiskANN (DISK Approximate Nearest Neighbors)

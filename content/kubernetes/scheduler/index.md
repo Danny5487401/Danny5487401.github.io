@@ -883,7 +883,15 @@ SchedulingQueue 是一个 internalqueue.SchedulingQueue 接口类型，PriorityQ
 - podBackoffQ 也是一个优先队列，用于存放那些异常的Pod，这种 Pod 需要等待一定的时间才能够被再次调度，会有协程定期去读取这个队列，然后加入到 activeQ 队列然后重新调度；
 - unschedulablePods 严格上来说不属于队列，用于存放调度失败的 Pod。这个队列也会有协程定期（默认30s）去读取，然后判断当前时间距离上次调度时间的差是否超过5min，如果超过这个时间则把 Pod 移动到 activeQ 重新调度
 
+```go
+func (p *PriorityQueue) Run() {
+	// 运行异常的 Pod 等待时间完成后，flushBackoffQCompleted 将该 Pod 移动到 activeQ；
+	go wait.Until(p.flushBackoffQCompleted, 1.0*time.Second, p.stop)
+    // 调度失败的 Pod 如果满足一定条件，这个函数会将这种 Pod 移动到 activeQ 或 podBackoffQ；
+    go wait.Until(p.flushUnschedulablePodsLeftover, 30*time.Second, p.stop)
+}
 
+```
 
 ### 启动
 
@@ -916,7 +924,7 @@ func (sched *Scheduler) scheduleOne(ctx context.Context) {
 	pod := podInfo.Pod
 	// 根据 SchedulerName 获取调度器
 	fwk, err := sched.frameworkForPod(pod)
-    // 。。
+    // ...
 	// 检查 pod 是否需要跳过调度。1 处于正在被删除状态的 pod 跳过本次调度 2 pod 在 AssumedPod 缓存里面，也跳过调度
 	if sched.skipPodSchedule(fwk, pod) {
 		return
@@ -940,7 +948,7 @@ func (sched *Scheduler) scheduleOne(ctx context.Context) {
 		return
 	}
 
-	// bind the pod to its host asynchronously (we can do this b/c of the assumption step above).
+	// 启动一个协程，开始绑定;
 	go func() {
         //...
 		// apiserver 发起 pod -> node 绑定
@@ -969,7 +977,7 @@ func (sched *Scheduler) schedulingCycle(
     // ...
 	assumedPodInfo := podInfo.DeepCopy()
 	assumedPod := assumedPodInfo.Pod
-	// 告诉缓存，假设他已经绑定
+	// 告诉缓存，假设他已经绑定. 需要这个缓存的原因也是为了提升调度效率，将绑定和调度分开，因为绑定需要调用 kube-apiserver，所以 Scheduler 乐观的假设调度已经成功
 	err = sched.assume(assumedPod, scheduleResult.SuggestedHost)
 
 

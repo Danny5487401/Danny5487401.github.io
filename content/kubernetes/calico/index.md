@@ -77,6 +77,25 @@ node4   (64512)   172.16.7.33/16
 node5   (64512)   172.16.7.34/16
 ```
 
+### 路由聚合（Route Aggregation）
+
+路由聚合，也称为路由汇总或路由压缩，是一种网络设计技术，它允许将多个具有相同下一跳地址的路由条目合并成一个单一的路由。
+这个过程基于子网划分的原理，通过使用更长的子网掩码来表示更大的地址范围。
+
+#### 路由聚合的优势
+路由聚合的主要优势在于它能够显著减少路由表的大小，这对于大型网络尤其重要。较小的路由表意味着：
+
+* 更快的查找速度：路由器查找路由的时间更短，从而提高了数据包转发的速度。
+* 更容易的管理：网络管理员需要配置和维护的路由条目更少，减轻了管理工作的负担。
+* 更好的可扩展性：网络可以通过添加新的子网来轻松扩展，而无需对每个新子网都添加单独的路由条目
+
+### 路由聚合的工作原理
+路由聚合的关键在于找到一个包含所有子网的最小子网，这个子网的子网掩码可以覆盖所有子网的地址范围。这个过程通常涉及到以下步骤：
+
+1. 识别子网：确定需要聚合的子网列表。
+2. 计算最小子网：找到能够包含这些子网的最小子网地址和子网掩码。
+3. 配置聚合路由：在路由器上配置一个指向这个最小子网的聚合路由，其下一跳地址与子网的下一跳地址相同。
+4. 更新路由表：将所有单独的子网路由替换为这个聚合路由
 
 ### Proxy ARP
 能就是使那些在同一网段却不在同一物理网络上的计算机或路由器能够相互通信。
@@ -93,13 +112,37 @@ root@node1:~# cat /proc/sys/net/ipv4/conf/calid7b92ca9b15/proxy_arp
 ### eXpress Data Path (XDP) 
 
 XDP（eXpress Data Path）提供了一个内核态、高性能、可编程 BPF 包处理框架。
+本质上是Linux Kernel中的一个eBPF Hook（钩子），可以动态挂载，使得ebpf程序能够在数据报文到达网络驱动层时提前进行针对性的高速处理。
+XDP可以与内核协同工作，既可以绕过繁琐的TCP/IP协议栈，也可以复用TCP/IP协议栈以及内核基础设施。
+
 {{<figure src="./xdp-process.png#center" width=800px >}}
 
 
 XDP的三种工作模式
-- Native XDP，即运行在网卡驱动实现的的 poll() 函数中，需要网卡驱动的支持；
-- Generic XDP，即上面提到的如果网卡驱动不支持XDP，则可以运行在 receive_skb() 函数中；
-- Offloaded XDP，这种模式是指将XDP程序offload到网卡中，这需要网卡硬件的支持，JIT编译器将BPF代码翻译成网卡原生指令并在网卡上运行
+
+- Native XDP 原生模式（性能高，需要网卡支持），即运行在网卡驱动实现的的 poll() 函数中，需要网卡驱动的支持；
+- Generic XDP（性能良好，Linux内核支持最好），即上面提到的如果网卡驱动不支持XDP，则可以运行在 receive_skb() 函数中；
+- Offloaded XDP 卸载模式（性能最高，支持的网卡最少），这种模式是指将XDP程序offload到网卡中，这需要网卡硬件的支持，JIT编译器将BPF代码翻译成网卡原生指令并在网卡上运行
+
+
+
+XDP专为高性能而设计，相较与DPDK来说，具有以下优点：
+
+* 无需专门硬件，无需大页内存，无需独占CPU等资源，任何有Linux驱动的网卡都可以支持，无需引入第三方代码库。
+* 兼容内核协议栈，可选择性复用内核已有的功能。
+* 保持了内核的安全边界，提供与内核API一样稳定的接口。
+* 无需对网络配置或管理工具做任何修改。
+* 服务不中断的前提下动态重新编程，这意味着可以按需加入或移除功能，而不会引起任何流量中断，也能动态响应系统其他部分的的变化。
+* 主流的发行版中，Linux内核已经内置并启用了XDP，并且支持主流的高速网络驱动，4.8+的内核已内置，5.4+能够完全使用。
+缺点：
+
+* XDP不提供缓存队列（qdisc），TX设备太慢时会直接丢包，因而不能在接收队列（RX RING）比发送队列（TX RING）快的设备上使用XDP。
+* 由于不具备缓存队列，对与IP分片不太友好。
+* XDP程序是专用的，不具备网络协议栈的通用性。
+
+
+### 应用场景 AF_XDP
+AF_XDP是XDP技术的一种应用场景，AF_XDP是一种高性能Linux socket
 
 
 ### eBPF
@@ -175,6 +218,7 @@ Calico 项目提供的 BGP 网络解决方案，与 Flannel 的 host-gw 模式�
 
 
 ## IPAM 地址管理
+calico 使用 calico-ipam 插件,可以划分 podcird 到多个pool.
 ```shell
 (⎈|kubeasz-test:metallb)➜  ~ kubectl get cm -n kube-system calico-config -o yaml
 apiVersion: v1
@@ -252,7 +296,7 @@ spec:
   cidr: 10.233.64.0/18 # 填写创建集群时规划的cidr地址段    
   ipipMode: Never  # Never不使用IPIP模式,Always时代表使用IPIP模式,CrossSubnet代表混合模式,跨网段则ipip,不跨网段BGP       
   natOutgoing: true  #nat转发 
-  nodeSelector: all()
+  nodeSelector: all() # all() 选择所有节点
   vxlanMode: Always  # vxlanMode 可以为Always,CrossSubnet, 
   
   
@@ -268,7 +312,8 @@ root@node1:/opt/calico# calicoctl ipam show
 
 - block/blockSize: block主要功能是路由聚合，减少对外宣告路由条目。
 block在POD所在节点自动创建，如在worker01节点创建1.1.1.1的POD时，blocksize为29，则该节点自动创建1.1.1.0/29的block，对外宣告1.1.1.0/29的BGP路由，并且节点下发1.1.1.0/29的黑洞路由和1.1.1.1/32的明细路由。
-在IBGP模式下，黑洞路由可避免环路。如果blockSize设置为32，则不下发黑洞路由也不会造成环路，缺点是路由没有聚合，路由表项会比较多，需要考虑交换机路由器的容量。
+在IBGP模式下，黑洞路由可避免环路。
+如果blockSize设置为32，则不下发黑洞路由也不会造成环路，缺点是路由没有聚合，路由表项会比较多，需要考虑交换机路由器的容量。
 
 
 Calico创建block时，会出现借用IP的情况。
@@ -310,7 +355,7 @@ spec:
   * ipip cross-subnet模式（ipip-bgp混合模式），指同子网内路由采用bgp，跨子网路由采用ipip
 
 ## 组件
-
+架构图: https://docs.tigera.io/calico/3.29/reference/architecture/overview 
 - Felix：运行在每一台 Host 的 agent 进程，主要负责网络接口管理和监听、路由、ARP 管理、ACL 管理和同步、状态上报等。
 - etcd：分布式键值存储，主要负责网络元数据一致性，确保Calico网络状态的准确性，可以与kubernetes共用；
 - BGP Client（BIRD）：Calico 为每一台 Host 部署一个 BGP Client，使用 BIRD 实现，BIRD 是一个单独的持续发展的项目，实现了众多动态路由协议比如 BGP、OSPF、RIP 等。在 Calico 的角色是监听 Host 上由 Felix 注入的路由信息，然后通过 BGP 协议广播告诉剩余 Host 节点，从而实现网络互通。
@@ -388,4 +433,6 @@ Calico 的 eBPF 数据平面是标准 Linux 数据平面（基于 iptables）的
 - [calico原理视频2-vxlan,bgp,ipip 抓包分析](https://www.bilibili.com/video/BV1jKiZYQEzf)
 - [Calico的ip池对象ipPool](https://www.jianshu.com/p/dcad6d74e526)
 - [Calico eBPF数据平面](https://luckymrwang.github.io/2022/05/12/Calico-eBPF%E6%95%B0%E6%8D%AE%E5%B9%B3%E9%9D%A2/)
+- [AF_XDP工作原理](https://www.51cto.com/article/783213.html)
+- [万字长文|深入理解XDP全景指南](https://www.eet-china.com/mp/a109055.html)
 

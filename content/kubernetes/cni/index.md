@@ -672,11 +672,6 @@ bridge的某个端口打开hairpin mode后允许从这个端口收到的包仍�
 ### vlan
 {{<figure src="./vlan-structure#center" width=800px >}}
 
-在一个VLAN交换网络中，以太网帧主要有以下两种格式：
-
-- 有标记帧（Tagged帧）：加入了4字节VLAN标签的帧。
-- 无标记帧（Untagged帧）：原始的、未加入4字节VLAN标签的帧。
-缺省VLAN又称PVID（Port Default VLAN ID）.
 
 ```go
 func cmdAdd(args *skel.CmdArgs) error {
@@ -1358,4 +1353,3 @@ CNI 插件的测试过程，不需要一定安装一个 K8s 出来，走 K8s CNI
 - [源码分析：K8s CNI macvlan 网络插件](https://hansedong.github.io/2020/08/11/23/)
 - [k8s pod使用sriov](https://blog.csdn.net/weixin_40579389/article/details/138086057)
 - [bridge 插件使用](https://morningspace.github.io/tech/k8s-net-cni/)
-- [vlan 基础知识](https://cshihong.github.io/2017/11/05/VLAN%E5%9F%BA%E7%A1%80%E7%9F%A5%E8%AF%86/)

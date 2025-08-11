@@ -22,7 +22,8 @@ Flannel是CoreOS开源的，Overlay模式的CNI网络插件，Flannel在每个�
 - 物理隔离: 配置单独的子网.
 - 虚拟隔离: VLAN
 
-我们可以设置交换机每个口所属的VLAN。如果某个口坐的是程序员，他们属于VLAN 10；如果某个口坐的是人事，他们属于VLAN 20；如果某个口坐的是财务，他们属于VLAN 30。这样，财务发的包，交换机只会转发到VLAN 30的口上。程序员啊，你就监听VLAN 10吧，里面除了代码，啥都没有。
+我们可以设置交换机每个口所属的VLAN。如果某个口坐的是程序员，他们属于VLAN 10；如果某个口坐的是人事，他们属于VLAN 20；如果某个口坐的是财务，他们属于VLAN 30。
+这样，财务发的包，交换机只会转发到VLAN 30的口上。程序员啊，你就监听VLAN 10吧，里面除了代码，啥都没有。
 
 而且对于交换机来讲，每个VLAN的口都是可以重新设置的。一个财务走了，把他所在座位的口从VLAN 30移除掉，来了一个程序员，坐在财务的位置上，就把这个口设置为VLAN 10，十分灵活。
 
@@ -43,11 +44,12 @@ VLAN具备以下优点：
 {{<figure src="./vlan_structure.png#center" width=800px >}}
 
 
-####  VLAN的使用场景
+#### VLAN的使用场景
 VLAN的常见使用场景包括：VLAN间用户的二层隔离，VLAN间用户的三层互访
 
 VLAN间用户的二层隔离 
 {{<figure src="./vlan_department.png#center" width=800px >}}
+
 1. 为了保证部门内员工的位置调整后，访问网络资源的权限不变，可在公司的交换机Switch_1上配置基于IP子网划分VLAN。这样，服务器的不同网段就划分到不同的VLAN，访问服务器不同应用服务的数据流就会隔离，提高了安全性。
 
 {{<figure src="./vlan_company.png#center" width=800px >}}
@@ -59,6 +61,34 @@ VLAN间用户的三层互访
 {{<figure src="./vlan_access_route.png#center" width=800px >}}
 某小型公司的两个部门分别通过二层交换机接入到一台三层交换机Switch_3，所属VLAN分别为VLAN2和VLAN3，部门1和部门2的用户互通时，需要经过三层交换机。
 可在Switch_1和Switch_2上划分VLAN并将VLAN透传到Switch_3上，然后在Switch_3上为每个VLAN配置一个VLANIF接口，实现VLAN2和VLAN3间的路由。
+
+
+#### VLAN帧格式
+IEEE802.1Q，俗称“Dot One Q”，是经过IEEE认证的对数据帧附加VLAN识别信息的协议。
+{{<figure src="./vlan_frame.png#center" width=800px >}}
+
+- TPID: Tag Protocol Identifier
+- PRI: Priority，表示数据帧的802.1Q优先级, 取值范围为0～7，值越大优先级越高。当网络阻塞时，设备优先发送优先级高的数据帧。
+- CFI: Canonical Format Indicator（标准格式指示位）, CFI取值为0表示MAC地址以标准格式进行封装，为1表示以非标准格式封装。在以太网中，CFI的值为0。
+- VID: VLAN ID , VLAN ID取值范围是0～4095。由于0和4095为协议保留取值，所以VLAN ID的有效取值范围是1～4094。
+
+在一个VLAN交换网络中，以太网帧主要有以下两种格式：
+
+- 有标记帧（Tagged帧）：加入了4字节VLAN标签的帧。
+- 无标记帧（Untagged帧）：原始的、未加入4字节VLAN标签的帧。
+  缺省 VLAN 又称 PVID（Port Default VLAN ID）.
+
+常用设备中：
+
+- 用户主机、服务器、Hub只能收发Untagged帧。
+- 交换机、路由器和AC既能收发Tagged帧，也能收发Untagged帧。
+- 语音终端、AP等设备可以同时收发一个Tagged帧和一个Untagged帧。
+
+#### 接口类型
+根据接口连接对象以及对收发数据帧处理的不同，以太网接口分为：
+- Access接口一般用于和不能识别Tag的用户终端（如用户主机、服务器等）相连，或者不需要区分不同VLAN成员时使用。
+- Trunk接口一般用于连接交换机、路由器、AP以及可同时收发Tagged帧和Untagged帧的语音终端。
+- Hybrid接口既可以用于连接不能识别Tag的用户终端（如用户主机、服务器等）和网络设备（如Hub），也可以用于连接交换机、路由器以及可同时收发Tagged帧和Untagged帧的语音终端、AP。
 
 ### Vxlan(Virtual Extensible LAN 虚拟可扩展局域网）
 在vlan的基础之上进行的扩展, 可以划分的vlan个数扩大到16M个. VXLAN采用MAC in UDP（User Datagram Protocol）封装方式，是NVO3（Network Virtualization over Layer 3）中的一种网络虚拟化技术。
@@ -106,7 +136,15 @@ vxlan封装报文:
 flanneld中维护了这两部分信息:
 
 - flannel.1的ip与mac地址对应关系，通过flannel.1的ip可以查询到flannel.1 的mac地址
-- flannel.1的mac地址及其所在node ip对应关系，通过flannel.1的mac地址可以查询到node ip
+- flannel.1的mac地址及其所在nfde ip对应关系，通过flannel.1的mac地址可以查询到node ip
+
+
+抓包方式
+```shell
+# 抓取外层包 udp 协议
+tcpdump -i eth0 -nn port 8472
+```
+
 
 ### ARP（Address Resolution Protocol地址解析协议）
 将IP地址解析为MAC地址的协议
@@ -136,6 +174,31 @@ k8s-172-16-7-30:/etc/kubeasz# ansible -i clusters/test/hosts kube_node  -m shell
 192.168.2.0 lladdr c6:73:f2:93:70:0a PERMANENT
 192.168.1.0 lladdr da:9c:34:59:c0:cd PERMANENT
 ```
+
+#### arping命令
+arping命令 是用于发送arp请求到一个相邻主机的工具，arping使用arp数据包，通过ping命令检查设备上的硬件地址。能够测试一个ip地址是否是在网络上已经被使用，并能够获取更多设备信息。
+
+据观察Redhat\CentOS使用的是Linux iputils suite版本的，debian使用的是Thomas Habets。
+```shell
+
+root@node1:~# arping
+ARPing 2.24, by Thomas Habets <thomas@habets.se>
+```
+注意两个版本的的arping使用的参数有很大的区别，所以要根据自己的arping版本去使用相应的参数。
+```shell
+# 查看某个IP的MAC地址
+root@node1:~# arping -I ens32 -c 1 172.16.7.31
+ARPING 172.16.7.31
+60 bytes from 00:0c:29:a5:19:4c (172.16.7.31): index=0 time=460.132 usec
+
+--- 172.16.7.31 statistics ---
+1 packets transmitted, 1 packets received,   0% unanswered (0 extra)
+rtt min/avg/max/std-dev = 0.460/0.460/0.460/0.000 ms
+```
+
+每台主机都会在自己的 ARP 缓冲区中建立一个 ARP 列表，以表示 IP 地址和 MAC 地址之间的对应关系，二层的数据传输靠的就是MAC地址。
+不同厂商默认的ARP表老化时间也不一样：思科是 5分钟，华为是 20分钟。ARP 表缓存老化时间过长有时可能会导致一些网络问题.
+
 
 ### FDB表(Forwarding Database 转发数据库)
 主要用于网络设备（如交换机）中，以实现二层数据转发。FDB表主要记录MAC地址、VLAN号、端口号和一些标志域等信息，是交换机进行二层数据转发的核心数据结构。
@@ -987,3 +1050,4 @@ blackhole 192.168.37.192/26 proto bird
 - [VXLAN-原理介绍+报文分析+配置实例 ](https://www.cnblogs.com/FengXingZhe008/p/17335124.html)
 - [Flannel Vxlan封包原理剖析](https://izsk.me/2022/03/25/Kubernetes-Flannel-Vxlan/)
 - [ip route 命令](https://cloud.tencent.com/developer/article/2101102)
+- [vlan 基础知识](https://cshihong.github.io/2017/11/05/VLAN%E5%9F%BA%E7%A1%80%E7%9F%A5%E8%AF%86/)
