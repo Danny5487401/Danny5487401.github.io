@@ -521,5 +521,5 @@ func CmdAdd(args *skel.CmdArgs, exec invoke.Exec, kubeClient *k8s.ClientInfo) (c
 
 ## 参考
 
-- https://github.com/k8snetworkplumbingwg/multus-cni/blob/master/docs/quickstart.md
+- https://github.com/k8snetworkplumbingwg/multus-cni/blob/v4.2.2/docs/quickstart.md
 - [kubernetes 多网卡方案之 Multus_CNI 部署和基本使用](https://xie.infoq.cn/article/e1d6c58939f6b1973221083fd)

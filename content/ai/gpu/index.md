@@ -48,7 +48,7 @@ NVLink服务器指的是采用NVLink和NVSwitch技术来互联GPU的服务器，
 
 
 ## DMA( Direct Memory Access 直接内存访问)
-{{<figure src="./dma-info.png#center" width=800px >}}
+{{<figure src="./dma_info.png#center" width=800px >}}
 
 DMA 是单机内存和设备间数据传输的“发动机”。 它的核心目标是加速设备（如硬盘、显卡、网卡）与本地内存之间的数据流动，减少 CPU 的参与
 
@@ -89,7 +89,7 @@ DMA控制器获得总线控制权后，CPU即刻挂起或只执行内部操作�
 
 RDMA 是分布式网络环境的“整车”。 它不仅继承了 DMA 的核心能力，还扩展到了网络通信范畴，提供了远程节点间的高效、零拷贝通信。
 
-{{<figure src="./rdma-info.png#center" width=800px >}}
+{{<figure src="./rdma_info.png#center" width=800px >}}
 
 
 ### RoCE (RDMA over Converged Ethernet 基于融合以太网的RDMA)

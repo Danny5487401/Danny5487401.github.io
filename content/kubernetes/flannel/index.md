@@ -412,7 +412,8 @@ ip netns exec ns1 ip addr add 10.1.1.2/24 dev vethDemo0
 {{<figure src="./cri_n_cni.png#center" width=800px >}}
 
 
-1. flannel利用Kubernetes API或者etcd用于存储整个集群的网络配置，其中最主要的内容为设置集群的网络地址空间。flannel上各Node的IP子网分配均基于K8S Node的spec.podCIDR属性. 例如k8s为node-1节点分配的podCIDR为:10.244.8.0/24）
+1. flannel利用Kubernetes API或者etcd用于存储整个集群的网络配置，其中最主要的内容为设置集群的网络地址空间。
+flannel上各Node的IP子网分配均基于K8S Node的spec.podCIDR属性(这依赖cluster-CIDR 配置). 例如k8s为 worker-02 节点分配的podCIDR为:192.168.2.0/24）
 ```shell
 $ kubectl get node worker-02 -o yaml
 apiVersion: v1
@@ -718,7 +719,7 @@ func (be *VXLANBackend) RegisterNetwork(ctx context.Context, wg *sync.WaitGroup,
 			vtepIndex: be.extIface.Iface.Index,
 			vtepAddr:  be.extIface.IfaceAddr,
 			vtepPort:  cfg.Port,
-			gbp:       cfg.GBP,
+			gbp:       cfg.GBP, // Group Based Policy  基于组的策略进行微分段和宏分段
 			learning:  cfg.Learning,
 			hwAddr:    hwAddr,
 		}

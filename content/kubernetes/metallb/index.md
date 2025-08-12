@@ -35,9 +35,6 @@ MetalLB对此的实现方式主要有三种：ARP/NDP和BGP；其中ARP/NDP分�
 ### 四层负载均衡
 
 
-
-
-
 #### 经典 SNAT 模式
 {{<figure src="./lb_snat_process.png#center" width=800px >}}
 - 客户端向负载均衡器提供的虚拟 IP 地址 （Virtual IP Address，VIP） 发送请求 （CIP → VIP）

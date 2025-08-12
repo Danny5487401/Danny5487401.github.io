@@ -1,5 +1,3 @@
-
-
 ---
 title: "ShareInformer 模块"
 summary: 共享 reflector 反射器. 
@@ -24,7 +22,8 @@ sharedIndexInformer 相比普通的 informer 来说, 可以共享 reflector 反�
 
 ## 使用
 
-SharedInformerFactory 工厂相比 SharedIndexInformer 来说, 组合了多个 informer 对象. 在一个 SharedInformerFactory 工厂对象里可以放不同类型的 sharedInformer 对象, 每个资源类型有单独的一个 sharedIndexInformer, 相同资源类型的使用同一个 informer 对象即可.
+SharedInformerFactory 工厂相比 SharedIndexInformer 来说, 组合了多个 informer 对象.
+在一个 SharedInformerFactory 工厂对象里可以放不同类型的 sharedInformer 对象, 每个资源类型有单独的一个 sharedIndexInformer, 相同资源类型的使用同一个 informer 对象即可.
 
 
 ```go

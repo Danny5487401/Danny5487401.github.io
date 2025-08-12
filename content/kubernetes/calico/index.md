@@ -115,7 +115,14 @@ XDP（eXpress Data Path）提供了一个内核态、高性能、可编程 BPF �
 本质上是Linux Kernel中的一个eBPF Hook（钩子），可以动态挂载，使得ebpf程序能够在数据报文到达网络驱动层时提前进行针对性的高速处理。
 XDP可以与内核协同工作，既可以绕过繁琐的TCP/IP协议栈，也可以复用TCP/IP协议栈以及内核基础设施。
 
-{{<figure src="./xdp-process.png#center" width=800px >}}
+
+XDP 在内核收包函数 receive_skb() 之前
+{{<figure src="./xdp-process_before_skb.png#center" width=800px >}}
+
+在 receive_skb() 之后
+{{<figure src="./xdp-process_after_skb.png#center" width=800px >}}
+
+
 
 
 XDP的三种工作模式
@@ -140,6 +147,15 @@ XDP专为高性能而设计，相较与DPDK来说，具有以下优点：
 * 由于不具备缓存队列，对与IP分片不太友好。
 * XDP程序是专用的，不具备网络协议栈的通用性。
 
+XDP 系统由四个主要部分组成：
+
+1. XDP device driver hook：网卡收到包之后直接运行；
+
+2. eBPF虚拟机：执行 XDP 程序（以及内核其他模块加载的 BPF 程序）；
+
+3. BPF maps：使不同 BPF 程序之间、BPF 程序与用户空间应用之间能够通信；
+
+4. eBPF verifier：确保程序不包含任何可能会破坏内核的操作。
 
 ### 应用场景 AF_XDP
 AF_XDP是XDP技术的一种应用场景，AF_XDP是一种高性能Linux socket
