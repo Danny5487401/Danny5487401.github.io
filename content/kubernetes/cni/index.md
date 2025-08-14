@@ -64,8 +64,44 @@ META 插件：其他功能的插件
 - sbr：为网卡设置 source based routing；
 - firewall：通过 iptables 给容器网络的进出流量进行限制。
 
-### macvlan
+### Macvlan（MAC Virtual LAN)
+{{<figure src="./macvlan_process.png#center" width=800px >}}
 
+使用Macvlan技术带来的效果是一块物理网卡上可以绑定多个IP地址，每个IP地址都有自己的MAC地址.
+
+Macvlan支持5种模式，分别是bridge、VEPA、Private、Passthru和Source模式.
+
+#### bridge
+{{<figure src="./macvlan_bridge.png#center" width=800px >}}
+
+Bridge 和linux上网桥类似，子网卡之间数据可以相互通讯。但是不需要mac地址学习，也不需要STP（生成树协议），效率比网桥高，
+
+bridge模式的缺点是父接口down会导致子接口全部down，从而无法通讯。（所以生产环境使用bond网卡作为父接口）
+
+
+#### VEPA（Virtual Ethernet Port Aggregator 虚拟以太网端口聚合）
+{{<figure src="./macvlan_vepa.png#center" width=800px >}}
+
+在VEPA模式下，从父接口收到的广播包会洪泛给所有的子接口。
+
+#### Private
+{{<figure src="./macvlan_private.png#center" width=800px >}}
+
+
+Private 模式类似于 VEPA 模式，但又增强了VEPA模式的隔离能力，其完全阻止共享同一父接口的Macvlan虚拟网卡之间的通信
+
+#### Passthru 直通模式
+
+{{<figure src="./macvlan_passthru.png#center" width=800px >}}
+
+在这种模式下，每个父接口只能和一个Macvlan网卡捆绑，并且Macvlan网卡继承父接口的MAC地址。
+就像是将数据包直接传递给物理网络设备，绕过了网络协议栈的处理，使得 Macvlan 接口可以直接与物理网络设备进行通信。
+
+
+#### Source模式
+在这种模式下，寄生在物理设备上，Macvlan 设备只接收指定的源 Mac 地址的数据包，其他数据包一概丢弃,使得 Macvlan 接口的 MAC 地址与该设备的 MAC 地址相同，并且只能与该设备进行通信
+
+#### macvlan plugin 源码实现
 ```go
 // https://github.com/containernetworking/plugins/blob/fec2d62676cbe4f2fd587b4840c7fc021bead3f9/plugins/main/macvlan/macvlan.go
 
@@ -201,7 +237,8 @@ func createMacvlan(conf *NetConf, ifName string, netns ns.NetNS) (*current.Inter
 	if err != nil {
 		return nil, err
 	}
-
+    
+	// 网络设备属性 
 	linkAttrs := netlink.NewLinkAttrs()
 	linkAttrs.MTU = conf.MTU
 	linkAttrs.Name = tmpName
@@ -463,6 +500,42 @@ func (i *RangeIter) Next() (*net.IPNet, net.IP) {
 ```
 
 ### bridge
+
+
+配置
+```go
+// https://github.com/containernetworking/plugins/blob/6de8a9853ce0c9bcbc3e5ec759031a10dd13d650/plugins/main/bridge/bridge.go
+type NetConf struct {
+	types.NetConf
+	BrName                    string       `json:"bridge"` // 网桥名
+	IsGW                      bool         `json:"isGateway"` //是否将网桥配置为网关
+	IsDefaultGW               bool         `json:"isDefaultGateway"`
+	ForceAddress              bool         `json:"forceAddress"`
+	IPMasq                    bool         `json:"ipMasq"` // 如果true， 设置veth对网卡为发卡模式
+	IPMasqBackend             *string      `json:"ipMasqBackend,omitempty"` 
+	MTU                       int          `json:"mtu"`
+	HairpinMode               bool         `json:"hairpinMode"`
+	PromiscMode               bool         `json:"promiscMode"` // 如果true, 设置网桥为混杂模式
+	Vlan                      int          `json:"vlan"`
+	VlanTrunk                 []*VlanTrunk `json:"vlanTrunk,omitempty"`
+	PreserveDefaultVlan       bool         `json:"preserveDefaultVlan"`
+	MacSpoofChk               bool         `json:"macspoofchk,omitempty"`
+	EnableDad                 bool         `json:"enabledad,omitempty"` // 重复地址检测DAD（Duplicate Address Detect）
+	DisableContainerInterface bool         `json:"disableContainerInterface,omitempty"`
+
+	Args struct {
+		Cni BridgeArgs `json:"cni,omitempty"`
+	} `json:"args,omitempty"`
+	RuntimeConfig struct {
+		Mac string `json:"mac,omitempty"`
+	} `json:"runtimeConfig,omitempty"`
+
+	mac   string
+	vlans []int
+}
+
+```
+
 ```go
 func cmdAdd(args *skel.CmdArgs) error {
 	var success bool = false
@@ -575,7 +648,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			}
 		}
 
-		// Send a gratuitous arp
+		// 发送进行arp广播
 		if err := netns.Do(func(_ ns.NetNS) error {
 			contVeth, err := net.InterfaceByName(args.IfName)
 			if err != nil {
@@ -592,7 +665,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return err
 		}
 
-		if n.IsGW {
+		if n.IsGW { // 将网桥配置为网关
 			var firstV4Addr net.IP
 			var vlanInterface *current.Interface
 			// Set the IP address(es) on the bridge and enable forwarding
@@ -626,6 +699,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 				}
 
 				if gws.gws != nil {
+					// 开启网桥的ip_forward内核参数
 					if err = enableIPForward(gws.family); err != nil {
 						return fmt.Errorf("failed to enable forwarding: %v", err)
 					}
@@ -633,7 +707,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			}
 		}
 
-		if n.IPMasq {
+		if n.IPMasq { // 使用iptables增加容器私有网网段到外部网段的masquerade规则，这样容器内部访问外部网络时会进行snat，在很多情况下配置了这条路由后容器内部才能访问外网
 			chain := utils.FormatChainName(n.Name, args.ContainerID)
 			comment := utils.FormatComment(n.Name, args.ContainerID)
 			for _, ipc := range result.IPs {
@@ -666,11 +740,11 @@ func cmdAdd(args *skel.CmdArgs) error {
 ```
 #### hairpin mode
 bridge不允许包从收到包的端口发出，比如bridge从一个端口收到一个广播报文后，会将其广播到所有其他端口。
-bridge的某个端口打开hairpin mode后允许从这个端口收到的包仍然从这个端口发出。
+bridge的某个端口打开 hairpin mode后允许从这个端口收到的包仍然从这个端口发出。
 这个特性用于NAT场景下，比如docker的nat网络，一个容器访问其自身映射到主机的端口时，包到达bridge设备后走到ip协议栈，经过iptables规则的dnat转换后发现又需要从bridge的收包端口发出，需要开启端口的hairpin mode。
 
 ### vlan
-{{<figure src="./vlan-structure#center" width=800px >}}
+{{<figure src="./vlan-structur.pnge#center" width=800px >}}
 
 
 ```go
@@ -1353,3 +1427,4 @@ CNI 插件的测试过程，不需要一定安装一个 K8s 出来，走 K8s CNI
 - [源码分析：K8s CNI macvlan 网络插件](https://hansedong.github.io/2020/08/11/23/)
 - [k8s pod使用sriov](https://blog.csdn.net/weixin_40579389/article/details/138086057)
 - [bridge 插件使用](https://morningspace.github.io/tech/k8s-net-cni/)
+- [Linux 网络虚拟化 Macvlan 认知](https://zhuanlan.zhihu.com/p/687451032)

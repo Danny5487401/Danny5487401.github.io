@@ -1,7 +1,7 @@
 ---
 title: "Multus Cni 多网卡"
 date: 2025-03-28T22:24:08+08:00
-summary: 多网卡方案 Multus Cni 实现原理
+summary: 多网卡方案 Multus Cni 实现原理,macvlan 实践
 categories:
   - kubernetes
   - cni
@@ -17,13 +17,13 @@ tags:
 但是如果一个应用或服务既需要对外提供 API 调用服务，也需要满足自身基于分布式特性产生的数据同步，那么这时候一张网卡的性能显然很难达到生产级别的要求，网络流量延时、阻塞便成为此应用的一项瓶颈
 ## 使用
 ```shell
-# 部署
-kubectl apply -f https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset-thick.yml
+# 部署 thick 插件
+kubectl apply -f https://github.com/k8snetworkplumbingwg/multus-cni/blob/19f9283db44d8533924e172a0359c115c43bd480/deployments/multus-daemonset-thick.yml
 ```
 
 thick 插件包含两个二进制: multus-daemon and multus-shim CNI plugin
 
-thin 插件 不包含multus-daemon
+thin 插件不包含 multus-daemon
 
 
 
@@ -89,8 +89,8 @@ spec:
   config: '{
       "cniVersion": "0.3.0",
       "type": "macvlan",
-      "master": "ens32",
-      "mode": "bridge",
+      "master": "ens32", # 父接口
+      "mode": "bridge", # 模式
       "ipam": {
         "type": "host-local",
         "subnet": "192.168.1.0/24",
@@ -122,55 +122,69 @@ spec:
     image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/nicolaka/netshoot:v0.13
 EOF
 
+samplepod:~# ip addr
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host proto kernel_lo
+       valid_lft forever preferred_lft forever
+2: eth0@if76: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP group default qlen 1000
+    link/ether 66:59:21:19:8f:ae brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 10.233.75.110/32 scope global eth0
+       valid_lft forever preferred_lft forever
+    inet6 fe80::6459:21ff:fe19:8fae/64 scope link proto kernel_ll
+       valid_lft forever preferred_lft forever
+3: net1@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default
+    link/ether 8a:1f:45:26:b5:22 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 192.168.1.201/24 brd 192.168.1.255 scope global net1
+       valid_lft forever preferred_lft forever
+    inet6 fe80::881f:45ff:fe26:b522/64 scope link proto kernel_ll
+       valid_lft forever preferred_lft forever
+
 # 查看网卡  eth0 是默认设备, net1 是macvlan 设置
 samplepod:~# ip --detail link show
 1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
-    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00 promiscuity 0 addrgenmode eui64 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535
-2: eth0@if29: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP mode DEFAULT group default qlen 1000
-    link/ether de:c3:b0:e3:f4:ee brd ff:ff:ff:ff:ff:ff link-netnsid 0 promiscuity 0
-    veth addrgenmode eui64 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535
-3: net1@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000
-    link/ether e2:34:6b:40:74:c2 brd ff:ff:ff:ff:ff:ff link-netnsid 0 promiscuity 0
-    macvlan mode bridge addrgenmode eui64 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535
-    
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00 promiscuity 0 allmulti 0 minmtu 0 maxmtu 0 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536
+2: eth0@if76: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether 66:59:21:19:8f:ae brd ff:ff:ff:ff:ff:ff link-netnsid 0 promiscuity 0 allmulti 0 minmtu 68 maxmtu 65535
+    veth numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536
+3: net1@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default
+    link/ether 8a:1f:45:26:b5:22 brd ff:ff:ff:ff:ff:ff link-netnsid 0 promiscuity 0 allmulti 0 minmtu 68 maxmtu 16110
+    macvlan mode bridge bcqueuelen 1000 usedbcqueuelen 1000 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535 tso_max_size 65536 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536
+      
 # 查看调度的主机
-(⎈|kubeasz-test:multus)➜  ~ kubectl get pod -o wide -n multus
-NAME        READY   STATUS    RESTARTS   AGE   IP             NODE        NOMINATED NODE   READINESS GATES
-samplepod   1/1     Running   0          14m   192.168.1.47   worker-01   <none>           <none>
+(⎈|kubeasz-test:multus)➜  ~ kubectl get pod -n multus samplepod -o wide
+NAME        READY   STATUS    RESTARTS   AGE    IP              NODE    NOMINATED NODE   READINESS GATES
+samplepod   1/1     Running   0          6m5s   10.233.75.110   node6   <none>           <none>
 
 
-[root@worker-01 ~]# ip --detail link show 
+root@node6:~# ip --detail link show ens32
 2: ens32: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP mode DEFAULT group default qlen 1000
-    link/ether 00:0c:29:a5:19:4c brd ff:ff:ff:ff:ff:ff promiscuity 1 addrgenmode none numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535
-    
-29: veth58af91b3@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue master cni0 state UP mode DEFAULT group default qlen 1000
-    link/ether 86:df:6b:15:20:ca brd ff:ff:ff:ff:ff:ff link-netnsid 4 promiscuity 1
-    veth
-    bridge_slave state forwarding priority 32 cost 2 hairpin on guard off root_block off fastleave off learning on flood on port_id 0x8005 port_no 0x5 designated_port 32773 designated_cost 0 designated_bridge 8000.7e:8d:b5:89:fd:5b designated_root 8000.7e:8d:b5:89:fd:5b hold_timer    0.00 message_age_timer    0.00 forward_delay_timer    0.00 topology_change_ack 0 config_pending 0 proxy_arp off proxy_arp_wifi off mcast_router 1 mcast_fast_leave off mcast_flood on addrgenmode eui64 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535
+    link/ether 00:0c:29:84:50:cf brd ff:ff:ff:ff:ff:ff promiscuity 1  allmulti 0 minmtu 46 maxmtu 16110 addrgenmode eui64 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535 tso_max_size 65536 tso_max_segs 65535 gro_max_size 65536 parentbus pci parentdev 0000:02:00.0
+    altname enp2s0
 ```
 
 ```shell
 (⎈|kubeasz-test:multus)➜  ~ kubectl get pod  -n multus samplepod -o yaml | yq .metadata.annotations
+cni.projectcalico.org/containerID: b1939350a0b3ecd99b52f90366838e0da8843e9f8b7945c6e153ea971cd80a89
+cni.projectcalico.org/podIP: 10.233.75.110/32
+cni.projectcalico.org/podIPs: 10.233.75.110/32
 k8s.v1.cni.cncf.io/network-status: |-
   [{
-      "name": "cbr0",
-      "interface": "eth0",
+      "name": "k8s-pod-network",
       "ips": [
-          "192.168.1.47"
+          "10.233.75.110"
       ],
-      "mac": "de:c3:b0:e3:f4:ee",
       "default": true,
-      "dns": {},
-      "gateway": [
-          "192.168.1.1"
-      ]
+      "dns": {}
   },{
       "name": "multus/macvlan-conf",
       "interface": "net1",
       "ips": [
           "192.168.1.201"
       ],
-      "mac": "e2:34:6b:40:74:c2",
+      "mac": "8a:1f:45:26:b5:22",
       "dns": {},
       "gateway": [
           "\u003cnil\u003e"

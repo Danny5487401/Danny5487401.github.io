@@ -522,6 +522,7 @@ FLANNEL_IPMASQ=true
 插件二进制调用
 ```go
 // https://github.com/flannel-io/cni-plugin/blob/088da1a9c0def0cb57fb77e53da4979fe41d8494/flannel.go
+
 func cmdAdd(args *skel.CmdArgs) error {
 	n, err := loadFlannelNetConf(args.StdinData)
 	if err != nil {
@@ -534,7 +535,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return fmt.Errorf("loadFlannelSubnetEnv failed: %w", err)
 	}
 
-    // 校验操作..
+    // 校验操作...
 
 	return doCmdAdd(args, n, fenv)
 }
@@ -594,6 +595,7 @@ func delegateAdd(cid, dataDir string, netconf map[string]interface{}) error {
 ```
 
 ```go
+// 获取 ipam
 func getDelegateIPAM(n *NetConf, fenv *subnetEnv) (map[string]interface{}, error) {
 	ipam := n.IPAM
 	if ipam == nil {
