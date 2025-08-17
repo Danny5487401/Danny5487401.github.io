@@ -13,11 +13,27 @@ categories:
 
 ## 基本概念
 
-### 向量Embeddings
+### 维度 (dimensionality)
+该空间中的每个维度都可以被视为数据的一个特征或特征。 对于单词或句子，这些维度可以捕获句法角色、语义含义、上下文或各种抽象语言属性。 
+维度越多，表示就越细致，但也需要更多的计算资源。
+
+### 向量 Embeddings
 向量Embeddings是自然语言处理（NLP）中的一个基本概念，是单词、句子、文档、图像、音频或视频数据等对象的数字表示。
 
 - 生成句子Embeddings的常用方法包括Doc2Vec (Document-to-vector)
 - 卷积神经网络(cnn)和视觉几何组(VGG)用于生成图像Embeddings
+
+
+### 距离和相似度 (distance and similarity)
+
+将单词或句子转换为向量的主要原因是为了测量相似度。 在这些向量空间中，任何两个向量之间的 “距离”（通常使用余弦相似度或欧几里德距离等度量）可以指示这两个项目的相似程度。 向量越接近，它们就越相似。
+
+向量的相似性度量基于距离函数，常见的距离函数有欧式距离、余弦距离、点积距离，
+
+
+- 欧式距离(L2 distance)衡量两个向量在空间中的直线距离。欧式距离存在尺度敏感性的局限性，通过归一化等技术可以有效降低尺度敏感性对相似度的干扰。欧式距离适用于低维向量，在高维空间下会逐渐失效。
+- 余弦距离(Cosine similarity)衡量两个向量之间夹角的余弦值。余弦距离存在数值敏感性的局限性，因为其只考虑了向量的方向，而没有考虑向量的长度。余弦距离适用于高维向量或者稀疏向量。
+- 点积距离(Dot product similarity)通过将两个向量的对应分量相乘后再全部求和而进行相似度衡量，点积距离同时考虑了向量的长度和方向。点积距离存在尺度敏感性和零向量的局限性。
 
 
 ## 常见向量数据库
@@ -29,6 +45,8 @@ categories:
 3. [qdrant](https://github.com/qdrant/qdrant)- 开源
 
 4. [pgvector](https://github.com/pgvector/pgvector)- 开源 pg 插件
+
+5. elasticsearch 8.0: https://www.elastic.co/search-labs/blog/vector-search-improvements
 
 
 ### milvus
@@ -57,11 +75,25 @@ Qdrant完全独立开发，支持集群部署，不需要借助ETCD、Pulsar等�
 
 ## 索引
 
+向量检索算法有 kNN（k-Nearest Neighbors）和 ANN （ Approximate Nearest Neighbor) 两种。
+- kNN（k-Nearest Neighbors）是一种蛮力检索方式，当给定目标向量时，计算该向量与候选向量集中所有向量的相似度，并返回最相似的 K 条。当向量库中数据量很大时 kNN 会消耗很多计算资源，耗时也不理想
+- ANN （ Approximate Nearest Neighbor）其基本思想是预先计算向量间的距离，并将距离相近的向量存储在一起，从而在检索时可以更高效。预先计算就是构建向量索引的过程
+
 在向量数据库领域，HNSW（Hierarchical Navigable Small-World）和 DiskANN 正逐渐成为主流索引方案。
+
 其中NHSW主要以内存搜索为主，DiskANN主要以磁盘搜索为主。
 
 ### HNSW（Hierarchical Navigable Small-World 层次导航小世界图)
+
+{{<figure src="./hnsw.png#center" width=800px >}}
+
 它是跳表和小世界图（SWG）结构的扩展，可以有效地找到近似的最近邻。
+
+HNSW是一种基于多层图的算法，在顶层，我们可以看到一个由极少向量构成的图，这些向量之间的连线最长，也就是说，这是一个由相似度最低的相连向量构成的图。
+我们越深入到较低层，发现的向量就越多，图也变得越密集，越来越多的向量彼此靠得更近。
+在最底层，我们可以找到所有的向量，其中相似度最高的向量彼此距离最近。在搜索时，该算法从顶层的任意入口点开始，找到与查询向量最接近的向量（由灰色点表示）。
+然后，它向下移动一层，并从上层离开的同一向量开始重复相同的过程，依此类推，逐层进行，直到到达最底层并找到查询向量的最近邻。
+
 
 ### DiskANN (DISK Approximate Nearest Neighbors)
 

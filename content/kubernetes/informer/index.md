@@ -1,11 +1,7 @@
-
-
 ---
 title: "List-Watch 机制和 Informer 模块"
 summary: list-watch 实现原理及相关模块
 date: 2024-08-19T14:27:21+08:00
-image:
-    caption: 'Image credit: [**Unsplash**](https://unsplash.com)'
 categories:
   - kubernetes
 authors:
@@ -24,6 +20,7 @@ tags:
 
 
 Etcd存储集群的数据信息，apiserver 作为统一入口，任何对数据的操作都必须经过apiserver。
+
 客户端(kubelet/scheduler/controller-manager)通过list-watch监听apiserver中资源(pod/rs/rc等等)的create,update和delete事件，并针对事件类型调用相应的事件处理函数.
 
 
@@ -36,7 +33,8 @@ Etcd存储集群的数据信息，apiserver 作为统一入口，任何对数据
 
 
 Informer 中的 Reflector 通过 List/watch 从 apiserver 中获取到集群中所有资源对象的变化事件（event），将其放入 Delta FIFO 队列中（以 Key、Value 的形式保存），触发 onAdd、onUpdate、onDelete 回调将 Key 放入 WorkQueue 中。
-同时将 Key 更新 Indexer 本地缓存。Control Loop 从 WorkQueue 中取到 Key，从 Indexer 中获取到该 Key 的 Value，进行相应的处理.
+同时将 Key 更新 Indexer 本地缓存。
+Control Loop 从 WorkQueue 中取到 Key，从 Indexer 中获取到该 Key 的 Value，进行相应的处理.
 
 
 ## 基本概念
@@ -180,6 +178,7 @@ type Reflector struct {
 ```go
 func (c *controller) Run(stopCh <-chan struct{}) {
     // ...
+	//  创建Reflector
 	r := NewReflector(
 		c.config.ListerWatcher,
 		c.config.ObjectType,
@@ -204,7 +203,7 @@ func NewNamedReflector(name string, lw ListerWatcher, expectedType interface{}, 
 	r := &Reflector{
 		name:          name,
 		listerWatcher: lw,
-		store:         store,
+		store:         store, //  存储，就是DeltaFIFO
         // ...
 	}
 	r.setExpectedType(expectedType)
@@ -285,8 +284,8 @@ func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 ```
 
 ### 全量拉取
-list-watch 中的 list() 并不是每次都拉取全量的数据. 第一次拉取时由于 resourceVersion 为空, 所以拉取的是全量数据. 当 list-watch 出现异常进行重试重连时, list() 拉取的 resourceVersion 为上次最新的版本, 这样 list 会获取比该版本更新的所有数据.
-
+list-watch 中的 list() 并不是每次都拉取全量的数据. 第一次拉取时由于 resourceVersion 为空, 所以拉取的是全量数据. 
+当 list-watch 出现异常进行重试重连时, list() 拉取的 resourceVersion 为上次最新的版本, 这样 list 会获取比该版本更新的所有数据.
 
 
 ```go
@@ -342,6 +341,7 @@ func (r *Reflector) list(stopCh <-chan struct{}) error {
 ```go
 // syncWith replaces the store's items with the given list.
 func (r *Reflector) syncWith(items []runtime.Object, resourceVersion string) error {
+    // 做一次slice类型转换 
 	found := make([]interface{}, 0, len(items))
 	for _, item := range items {
 		found = append(found, item)
@@ -354,6 +354,118 @@ func (r *Reflector) syncWith(items []runtime.Object, resourceVersion string) err
 
 ### 增量监听
 
+```go
+// watch simply starts a watch request with the server.
+func (r *Reflector) watch(w watch.Interface, stopCh <-chan struct{}, resyncerrc chan error) error {
+	var err error
+	retry := NewRetryWithDeadline(r.MaxInternalErrorRetryDuration, time.Minute, apierrors.IsInternalError, r.clock)
+
+	for {
+		// give the stopCh a chance to stop the loop, even in case of continue statements further down on errors
+		select {
+		case <-stopCh:
+			// we can only end up here when the stopCh
+			// was closed after a successful watchlist or list request
+			if w != nil {
+				w.Stop()
+			}
+			return nil
+		default:
+		}
+
+		// start the clock before sending the request, since some proxies won't flush headers until after the first watch event is sent
+		start := r.clock.Now()
+
+		if w == nil {
+			timeoutSeconds := int64(minWatchTimeout.Seconds() * (rand.Float64() + 1.0))
+			options := metav1.ListOptions{
+				ResourceVersion: r.LastSyncResourceVersion(),
+				// We want to avoid situations of hanging watchers. Stop any watchers that do not
+				// receive any events within the timeout window.
+				TimeoutSeconds: &timeoutSeconds,
+				// To reduce load on kube-apiserver on watch restarts, you may enable watch bookmarks.
+				// Reflector doesn't assume bookmarks are returned at all (if the server do not support
+				// watch bookmarks, it will ignore this field).
+				AllowWatchBookmarks: true,
+			}
+            // 监听变更，把变更内容扔到watch.ResultChan中
+			w, err = r.listerWatcher.Watch(options)
+			if err != nil {
+				if canRetry := isWatchErrorRetriable(err); canRetry {
+					klog.V(4).Infof("%s: watch of %v returned %v - backing off", r.name, r.typeDescription, err)
+					select {
+					case <-stopCh:
+						return nil
+					case <-r.backoffManager.Backoff().C():
+						continue
+					}
+				}
+				return err
+			}
+		}
+
+		err = watchHandler(start, w, r.store, r.expectedType, r.expectedGVK, r.name, r.typeDescription, r.setLastSyncResourceVersion, nil, r.clock, resyncerrc, stopCh)
+		// Ensure that watch will not be reused across iterations.
+		w.Stop()
+		w = nil
+		retry.After(err)
+		if err != nil {
+            // 错误判断 ... 
+		}
+	}
+}
+```
+cache.ListWatch 实际调用 Request watch
+```go
+func (r *Request) Watch(ctx context.Context) (watch.Interface, error) {
+    // ...
+	for {
+		if err := retry.Before(ctx, r); err != nil {
+			return nil, retry.WrapPreviousError(err)
+		}
+
+		req, err := r.newHTTPRequest(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		resp, err := client.Do(req)
+		retry.After(ctx, r, resp, err)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			return r.newStreamWatcher(resp)
+		}
+
+        // ...
+	}
+}
+```
+stream 接收 放入 result
+
+```go
+func (sw *StreamWatcher) receive() {
+	defer utilruntime.HandleCrash()
+	defer close(sw.result)
+	defer sw.Stop()
+	for {
+		action, obj, err := sw.source.Decode()
+		if err != nil {
+            // ...
+		}
+		select {
+		case <-sw.done:
+			return
+		case sw.result <- Event{
+			Type:   action,
+			Object: obj,
+		}:
+		}
+	}
+}
+
+```
+
+
+监听事件处理
 ```go
 // watchHandler watches w and sets setLastSyncResourceVersion
 func watchHandler(start time.Time,
@@ -377,10 +489,8 @@ func watchHandler(start time.Time,
 loop:
 	for {
 		select {
-		case <-stopCh:
-			return errorStopRequested
-		case err := <-errc:
-			return err
+		// ...
+			
 		case event, ok := <-w.ResultChan():
 			if !ok {
 				break loop
@@ -429,7 +539,7 @@ loop:
 		}
 	}
 
-    // 。。。
+    // ...
 	return nil
 }
 
@@ -442,7 +552,7 @@ func (r *Reflector) setLastSyncResourceVersion(v string) {
 ```
 
 
-## store -->deltaFIFO 队列
+## store --> deltaFIFO 队列
 
 
 ### store 初始化

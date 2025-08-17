@@ -4,7 +4,6 @@ summary: 共享 reflector 反射器.
 date: 2024-08-19T14:27:21+08:00
 categories:
   - kubernetes
-
 tags:
   - k8s
   - informer
@@ -18,6 +17,10 @@ tags:
 sharedIndexInformer 相比普通的 informer 来说, 可以共享 reflector 反射器, 业务代码可以注册多个 resourceEventHandler 方法, 无需重复创建 informer 做监听及事件注册.
 
 如果相同资源实例化多个 informer, 那么每个 informer 都有一个 reflector 和 store. 不仅会有数据序列化的开销, 而且缓存 store 不能复用, 可能一个对象存在多个 informer 的 store 里.
+
+
+shareIndexInformer 对事件先进行缓存、转发和处理，而 informer 则是直接对事件进行处理。
+
 
 
 ## 使用
@@ -52,9 +55,47 @@ func main() {
 }
 ```
 
+## 接口
+
+```go
+type SharedInformer interface {
+	//  添加资源事件处理器，
+	AddEventHandler(handler ResourceEventHandler) (ResourceEventHandlerRegistration, error)
+	//  添加需要周期同步的处理器
+	AddEventHandlerWithResyncPeriod(handler ResourceEventHandler, resyncPeriod time.Duration) (ResourceEventHandlerRegistration, error)
+	// RemoveEventHandler removes a formerly added event handler given by
+	// its registration handle.
+	// This function is guaranteed to be idempotent, and thread-safe.
+	RemoveEventHandler(handle ResourceEventHandlerRegistration) error
+	// GetStore returns the informer's local cache as a Store.
+	GetStore() Store
+	// GetController is deprecated, it does nothing useful
+	GetController() Controller
+	// Run starts and runs the shared informer, returning after it stops.
+	// The informer will be stopped when stopCh is closed.
+	Run(stopCh <-chan struct{}
+	
+    // ...
+}
+```
+
+```go
+
+// 扩展了SharedInformer类型，从类型名字上看共享的是Indexer，Indexer也是一种Store的实现
+type SharedIndexInformer interface {
+	SharedInformer
+	// AddIndexers add indexers to the informer before it starts.
+	AddIndexers(indexers Indexers) error
+	GetIndexer() Indexer
+}
+
+```
+
+
 
 ## 结构体
 
+工厂
 ```go
 type sharedInformerFactory struct {
 	client           kubernetes.Interface
@@ -75,6 +116,37 @@ type sharedInformerFactory struct {
 	shuttingDown bool
 }
 ```
+
+
+```go
+type sharedIndexInformer struct {
+	indexer    Indexer
+	controller Controller
+
+	processor             *sharedProcessor
+	cacheMutationDetector MutationDetector // CacheMutationDetector对所有的对象做了一次深度拷贝(DeepCopy)，然后定期比较两个对象是否一致，当发现有不同时说明对象突变了，然后就panic。默认关闭
+
+	listerWatcher ListerWatcher
+
+	// objectType is an example object of the type this informer is expected to handle. If set, an event
+	// with an object with a mismatching type is dropped instead of being delivered to listeners.
+	objectType runtime.Object
+
+	// objectDescription is the description of this informer's objects. This typically defaults to
+	objectDescription string
+
+	// 定期同步的周期，因为可能存在多个ResourceEventHandler，就有可能存在多个同步周期，sharedIndexInformer采用最小的周期
+	resyncCheckPeriod time.Duration
+	// defaultEventHandlerResyncPeriod is the default resync period for any handlers added via
+	// AddEventHandler (i.e. they don't specify one and just want to use the shared informer's default
+	// value).
+	defaultEventHandlerResyncPeriod time.Duration
+    
+	// ...
+}
+
+```
+
 
 
 ## 初始化
@@ -101,7 +173,7 @@ func NewSharedInformerFactoryWithOptions(client kubernetes.Interface, defaultRes
 
 ## 注册资源 InformerFor
 
-这里拿 podinformer 为例
+这里拿 podInformer 为例
 ```go
 func NewFilteredPodInformer(client kubernetes.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
 	return cache.NewSharedIndexInformer(
@@ -131,6 +203,7 @@ func (f *podInformer) defaultInformer(client kubernetes.Interface, resyncPeriod 
 	return NewFilteredPodInformer(client, f.namespace, resyncPeriod, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, f.tweakListOptions)
 }
 
+/// 获取 cache.SharedIndexInformer 
 func (f *podInformer) Informer() cache.SharedIndexInformer {
 	return f.factory.InformerFor(&corev1.Pod{}, f.defaultInformer)
 }
@@ -168,6 +241,7 @@ func (f *sharedInformerFactory) InformerFor(obj runtime.Object, newFunc internal
 
 根据传入的 handler 对象构建 listener 监听器. 然后把监听器加到 listeners 数组里, 并启动 run 和 pop 两个协程
 ```go
+// 添加没有指定同步周期的事件处理器
 func (s *sharedIndexInformer) AddEventHandler(handler ResourceEventHandler) (ResourceEventHandlerRegistration, error) {
 	return s.AddEventHandlerWithResyncPeriod(handler, s.defaultEventHandlerResyncPeriod)
 }
@@ -177,6 +251,7 @@ func (s *sharedIndexInformer) AddEventHandlerWithResyncPeriod(handler ResourceEv
 	defer s.startedLock.Unlock()
 
     // ...
+	
 	// 实例化一个 listener 监听对象
 	listener := newProcessListener(handler, resyncPeriod, determineResyncPeriod(resyncPeriod, s.resyncCheckPeriod), s.clock.Now(), initialBufferSize)
 
@@ -195,7 +270,7 @@ func (s *sharedIndexInformer) AddEventHandlerWithResyncPeriod(handler ResourceEv
 
 	handle := s.processor.addListener(listener)
 	for _, item := range s.indexer.List() {
-		// 增加通知
+		// 增加通知, 因为SharedInformer已经启动了，可能很多对象已经让其他的处理器处理过了，所以这些对象就不会再通知新添加的处理器
 		listener.add(addNotification{newObj: item})
 	}
 	return handle, nil
@@ -237,13 +312,13 @@ func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
 		Queue:            fifo,
 		ListerWatcher:    s.listerWatcher, // reflector 内部会依赖这个做 list/watch 操作
         // 。。
-		Process:           s.HandleDeltas, // 主要关心这个 pop 后的处理，这个是 reflector 消费 deltafifo 触发的回调方法
+		Process:           s.HandleDeltas, // 主要关心这个 pop 后的处理，这个是 reflector 消费 deltaFifo 触发的回调方法
 	}
 
 	func() {
 		s.startedLock.Lock()
 		defer s.startedLock.Unlock()
-
+		//  创建Controller
 		s.controller = New(cfg)
 		s.controller.(*controller).clock = s.clock
 		s.started = true
@@ -305,7 +380,7 @@ func processDeltas(
 		}
 
 		switch d.Type {
-		case Sync, Replaced, Added, Updated:
+		case Sync, Replaced, Added, Updated: // // 同步、替换, 添加、更新都是对象添加类的造作，至于是否是更新还要看cache是否有这个对象
 			if old, exists, err := clientState.Get(obj); err == nil && exists {
 				if err := clientState.Update(obj); err != nil {
 					return err
@@ -317,8 +392,8 @@ func processDeltas(
 				}
 				handler.OnAdd(obj)
 			}
-		case Deleted:
-			if err := clientState.Delete(obj); err != nil {
+		case Deleted: // 对象被删除
+		if err := clientState.Delete(obj); err != nil {
 				return err
 			}
 			handler.OnDelete(obj)
@@ -534,3 +609,6 @@ func ListAll(store Store, selector labels.Selector, appendFn AppendFunc) error {
 ```
 
 ## 参考
+
+- [深入浅出kubernetes之client-go的SharedInformer](https://blog.csdn.net/weixin_42663840/article/details/81699303)
+- [深入源码分析 kubernetes client-go sharedIndexInformer 和 SharedInformerFactory 的实现原理](https://github.com/rfyiamcool/notes/blob/main/kubernetes_client_go_shared_informer.md)
