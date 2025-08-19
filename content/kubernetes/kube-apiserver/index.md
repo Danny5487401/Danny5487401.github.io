@@ -1,5 +1,3 @@
-
-
 ---
 title: "Kube ApiServer"
 date: 2024-09-16T13:33:22+08:00
@@ -8,7 +6,6 @@ categories:
   - kubernetes
 authors:
   - Danny
-
 tags:
   - k8s
   - kube-apiserver
