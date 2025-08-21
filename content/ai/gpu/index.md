@@ -92,6 +92,39 @@ RDMA 是分布式网络环境的“整车”。 它不仅继承了 DMA 的核心
 {{<figure src="./rdma_info.png#center" width=800px >}}
 
 
+https://github.com/linux-rdma/rdma-core: 用于RDMA（远程直接内存访问）通信的用户空间库和工具.
+rdma-core项目的核心组件是libibverbs库，它提供了一个编程接口，使应用程序能够与RDMA适配器进行交互和通信。
+libibverbs提供了对RDMA传输层（RDMA Transport）的抽象，支持多种RDMA传输层协议，如InfiniBand和RoCE（RDMA over Converged Ethernet）。
+除了libibverbs之外，rdma-core还提供了其他工具和库，包括librdmacm用于管理RDMA连接、libibumad用于管理InfiniBand子网管理器（Subnet Manager）、ibvtools用于诊断和调试RDMA设备等。这些工具和库一起构成了一个完整的RDMA开发和管理的工具集。
+
+
+
+```shell
+# rdma 设备查看 , 安装 yum install libibverbs-utils
+$ ibv_devinfo -d mlx5_192
+hca_id: mlx5_192
+        transport:                      InfiniBand (0)
+        fw_ver:                         16.26.2002
+        node_guid:                      0000:0000:0000:0000
+        sys_image_guid:                 8c2a:8e03:00d4:8110
+        vendor_id:                      0x02c9
+        vendor_part_id:                 4120
+        hw_ver:                         0x0
+        board_id:                       HUA0000000024
+        phys_port_cnt:                  1
+                port:   1
+                        state:                  PORT_DOWN (1)
+                        max_mtu:                4096 (5)
+                        active_mtu:             1024 (3)
+                        sm_lid:                 0
+                        port_lid:               0
+                        port_lmc:               0x00
+                        link_layer:             Ethernet
+```
+
+
+
+
 ### RoCE (RDMA over Converged Ethernet 基于融合以太网的RDMA)
 
 
@@ -171,7 +204,6 @@ GPU设备存储：
 
 
 ### UVA (Unified Virtual Address 半分离内存管理)
-
 
 
 ### UM (Unified Memory 统一内存管理)

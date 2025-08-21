@@ -20,22 +20,73 @@ SR-IOV基于两种PCIe functions.
 尽管单个PF理论上可以生成65536个VF，但实际数量受到硬件资源限制，例如82599支持64个VF。
 
 
-## SR-IOV 优点
-性能提升: SR-IOV通过硬件辅助实现虚拟化，VF可以绕过宿主机直接与硬件交互，减少了数据包处理的延迟，提供了接近原生的性能。
-
-资源利用率: SR-IOV设备能够高效利用物理设备资源，每个VF都有自己的硬件资源，提高了整体资源利用率。
-
-隔离性: 每个VF都是独立的，互不干扰，提高了系统的安全性和稳定性。
-
-可扩展性: 支持更多的虚拟机同时运行，而不会显著降低性能，使其适用于大型虚拟化环境。
-
-
-## SR-IOV 缺点
-- VF数量有限
-- ring 结构对于每个 vendor 的 NIC 来说都是独有的。同时，不同 NIC 的配置和控制各不相同，以及对每个 VF 缺少统一的配置、可选项。正是因为这些限制，VFs 需要部署在特定的裸金属服务器上，也就意味着 VNFs 在 host 之间的迁移不是那么容易的。
-
 
 ## 基本知识
+
+### linux收包的方式
+Linux 内核在收包时有两种方式可供选择，一种是中断方式，另外一种是轮询方式。
+
+一次中断处理需要：
+
+1, 将 CPU 的状态寄存器保存到堆栈；
+2. 运行中断服务程序；
+3. 再将保存的状态寄存器信息从堆栈中恢复
+
+整个过程需要至少 300 个处理器时钟周期.网络中大量数据包到来时，会频繁产生中断请求，频繁的中断会造成上下文的切换产生时延，产生较高的性能开销。
+
+
+
+### PMD（Poll Mode Drivers）
+
+一种在用户态基于轮询的驱动程序.
+
+PMD 包含 PMD 应用程序（DPDK程序） + PMD KMOD（pmd kmod: 比如：igb_uio/uio_pci_generic/vfio_pci）
+
+
+PMD Driver 从网卡上接收到数据包后，会直接通过 DMA 方式传输到预分配的内存中，同时更新无锁环形队列中的数据包指针，不断轮询的应用程序很快就能感知收到数据包，并在预分配的内存地址上直接处理数据包(减少内存拷贝)，这个过程非常简洁。
+
+
+#### uio_pci_generic 和 igb_uio对比
+- uio_pci_generic 是不支持VF设备创建的, igb_uio 支持. igb_uio可以用于宿主机上来创建VF设备。适用性比内核原生的uio_pci_generic更强一些，
+- igb_uio.ko是由 dpdk 代码库编译出来的，uio_pci_generic 是原生的，内核自带的
+
+### 用户态驱动框架
+现代系统大多提供DMA和中断重映射功能来确保I/O设备在有限的范围内运行，比如x86平台的AMD-Vi和Intel VT-d。
+
+
+实现用户态驱动最关键的问题在于如何安全可控的将设备的DMA能力暴露到用户空间，IOMMU的出现可以限制设备对内存的访问，恶意的设备不能直接读写物理内存，经过IOMMU映射之后才能使用IOVA或者虚拟地址进行访存，由IOMMU来保证访存的安全性。
+
+#### UIO (Userspace I/O)
+{{<figure src="./uio-framework.png#center" width=800px >}}
+
+{{<figure src="./conventional_driver.png#center" width=800px >}}
+
+UIO (Userspace IO) 是 Linux 提供的一款供用户态驱动框架。相比于传统的驱动程序，UIO 仅需安装一个处理硬中断的内核模块，其主要逻辑运行在用户态，通过 read 系统调用感知中断，通过 mmap 系统调用读取设备内存。
+但UIO有它的不足之处，如不支持DMA、中断等；
+
+
+#### VFIO (Virtual Function I/O)
+
+Virtual Function I/O (VFIO)是一种用户态驱动框架，VFIO是一个可以安全的把设备I/O、中断、DMA等暴露到用户空间（userspace），从而可以在用户空间完成设备驱动的框架。用户空间直接设备访问，虚拟机设备分配可以获得更高的IO性能。
+
+在VFIO驱动框架中，有几个核心概念需要理解。包括：IOMMU，device , group ,container。
+
+{{<figure src="./iommu_vs_mmu.png#center" width=800px >}}
+- IOMMU是一个硬件单元，它可以把设备的IO地址映射成虚拟地址，为设备提供页表映射，设备通过IOMMU将数据直接DMA写到用户空间。
+- Device 是指要操作的硬件设备
+- Group 是IOMMU 能进行DMA隔离的最小单元。一个group 可以有一个或者多个device。
+
+
+IOMMU作用: 
+- 屏蔽物理地址，起到保护作用。典型应用包括两个：一是实现用户态驱动，由于IOMMU的映射功能，使HPA对用户空间不可见，在vfio部分还会举例。二是将设备透传给虚机，使HPA对虚机不可见，并将GPA映射为HPA.
+- IOMMU可以将连续的虚拟地址映射到不连续的多个物理内存片段，这部分功能于MMU类似，对于没有IOMMU的情况，设备访问的物理空间必须是连续的，IOMMU可有效的解决这个问题
+
+
+
+### DPDK(Intel Data Plane Development Kit)
+
+intel提供的数据平面开发工具集，为Intel architecture（IA）处理器架构下用户空间高效的数据包处理提供库函数和驱动的支持，它不同于Linux系统以通用性设计为目的，而是专注于网络应用中数据包的高性能处理。DPDK应用程序是运行在用户空间上利用自身提供的数据平面库来收发数据包，绕过了Linux内核协议栈对数据包处理过程。
+
 
 ### PCI(Peripheral Component Interconnect 外围设备互联)
 {{<figure src="./pci_vs_PCIe.png#center" width=800px >}}
@@ -101,7 +152,7 @@ PCI access options:
 ```
 
 
-#### PCI总线缺陷
+#### PCI 总线缺陷
 
 (1)由于采用了基于总线的共享传输模式，在PCI总线上不可能同时传送两组以上的数据，当一个PCI设备占用总线时，其他设备只能等待；
 
@@ -112,7 +163,6 @@ PCI access options:
 (4)PCI的总线上虽然有buffer作为数据的缓冲区，但是它不具备纠错的功能，如果在传输的过程中发生了数据丢失或损坏的情况，控制器只能触发一个NMI中断通知操作系统在PCI总线上发生了错误
 
 
-
 ### PCIe(Peripheral Component Interconnect Express)
 {{<figure src="./pcie.png#center" width=800px >}}
 
@@ -120,9 +170,12 @@ PCI access options:
 
 PCIe和PCI最大的改变是由并行改为串行，通过使用差分信号传输（differential transmission）.
 
-比如，我们马上能想到的GPU，网卡，USB控制器，声卡，网卡等等，这些都是通过PCIe总线进行连接的，然后现在非常常见的基于m.2接口的SSD，也是使用NVMe协议，通过PCIe总线进行连接的，
+比如 GPU，网卡，USB控制器，声卡，网卡等等，这些都是通过PCIe总线进行连接的，然后现在非常常见的基于m.2接口的SSD，也是使用NVMe协议，通过PCIe总线进行连接的，
 除此以外，Thunderbolt 3 ，USB4，甚至最新的CXL互联协议 ，都是基于PCIe的！
 
+
+PCIE与PCI直通的区别是：PCI只能直通给某个特定的虚拟机，而PCIE有可能可以给多个虚拟机用，如具有SR-IOV功能的PCIE设备，通过在HOST上抽象出多个的VF，每个VF再通过VFIO直通给虚拟机，最终的表现就是一个物理PCIE网卡可以直通给多个虚拟机用；
+SR-IOV是针对PCIE设备的，PCI设备理论上不具有SR-IOV功能.
 
 ### NVMe(Non-Volatile Memory Express)
 或称非易失性内存主机控制器接口规范（Non Volatile Memory Host Controller Interface Specification，缩写：NVMHCIS）是一个逻辑设备接口规范。
@@ -297,6 +350,23 @@ Differentiated service 差分服务模型: 将网络流量分成多个类，不�
 ### VLAN 优先级 priority
 
 802.1P优先级，也叫CoS（Class of Service，服务等级）
+
+
+## SR-IOV 优点
+性能提升: SR-IOV通过硬件辅助实现虚拟化，VF可以绕过宿主机直接与硬件交互，减少了数据包处理的延迟，提供了接近原生的性能。
+
+资源利用率: SR-IOV设备能够高效利用物理设备资源，每个VF都有自己的硬件资源，提高了整体资源利用率。
+
+隔离性: 每个VF都是独立的，互不干扰，提高了系统的安全性和稳定性。
+
+可扩展性: 支持更多的虚拟机同时运行，而不会显著降低性能，使其适用于大型虚拟化环境。
+
+
+## SR-IOV 缺点
+- VF数量有限
+- ring 结构对于每个 vendor 的 NIC 来说都是独有的。同时，不同 NIC 的配置和控制各不相同，以及对每个 VF 缺少统一的配置、可选项。正是因为这些限制，VFs 需要部署在特定的裸金属服务器上，也就意味着 VNFs 在 host 之间的迁移不是那么容易的。
+
+
 
 ## SR-IOV 基本操作
 
@@ -1313,7 +1383,9 @@ func GetVfid(addr string, pfName string) (int, error) {
 - https://github.com/k8snetworkplumbingwg/sriov-cni
 - https://github.com/k8snetworkplumbingwg/sriov-network-device-plugin/blob/master/docs/vf-setup.md
 - https://www.howtoforge.com/tutorial/how-to-configure-high-availability-and-network-bonding-on-linux/
+- https://learn.microsoft.com/en-us/windows-hardware/drivers/network/overview-of-single-root-i-o-virtualization--sr-iov-
 - https://projectacrn.github.io/latest/tutorials/sriov_virtualization.html
+- https://www.kernel.org/doc/html/v4.18/driver-api/uio-howto.html
 - [SR-IOV 技术及在 Pod 中使用](https://www.chenshaowen.com/blog/sr-iov-technique.html)
 - [SR-IOV vs DPDK](https://feisky.gitbooks.io/sdn/content/linux/sr-iov.html)
 - [BONDING_OPTS参数详细说明](https://blog.csdn.net/cuichongxin/article/details/116160277)
@@ -1322,3 +1394,4 @@ func GetVfid(addr string, pfName string) (int, error) {
 - [Linux 内核 Modalias 解析详尽教程](https://my.oschina.net/emacs_8808488/blog/17312648)
 - [NVMe协议基础原理介绍](https://cloud.tencent.com/developer/article/2192563)
 - [NVMe存储 全解](https://cloud-atlas.readthedocs.io/zh-cn/latest/linux/storage/nvme/nvme.html)
+- [ARM SMMU原理与IOMMU技术](https://rtoax.blog.csdn.net/article/details/108997226)
