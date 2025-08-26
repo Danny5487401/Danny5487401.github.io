@@ -1,7 +1,7 @@
 ---
 title: "Kruise"
 date: 2025-08-18T21:29:19+08:00
-summary: 原地升级原理
+summary: 注入过程,原地升级原理
 categories:
   - kubernetes
 ---
@@ -15,6 +15,117 @@ categories:
 InPlacePodVerticalScaling（就地垂直伸缩）是 Kubernetes 中v1.27.1的一个特性，它允许在不重启 Pod 的情况下动态调整 Pod 中容器的资源限制（Resource Limits）
 
 传统上，在 Kubernetes 中更新 Pod 的资源限制需要重新创建 Pod，这会导致应用程序中断和服务不可用的情况。但是，通过使用 InPlacePodVerticalScaling，可以实现对 Pod 进行资源限制的动态更新，而无需重新创建 Pod。
+
+
+## 注入过程
+
+```go
+var (
+	// HandlerGetterMap contains admission webhook handlers
+	HandlerGetterMap = map[string]types.HandlerGetter{
+		// key 为 path 
+		"mutate-pod": func(mgr manager.Manager) admission.Handler {
+			return &PodCreateHandler{
+				Client:  mgr.GetClient(),
+				Decoder: admission.NewDecoder(mgr.GetScheme()),
+			}
+		},
+	}
+)
+
+```
+
+```go
+func (h *PodCreateHandler) Handle(ctx context.Context, req admission.Request) admission.Response {
+	obj := &corev1.Pod{}
+
+	err := h.Decoder.Decode(req, obj)
+	if err != nil {
+		return admission.Errored(http.StatusBadRequest, err)
+	}
+	// when pod.namespace is empty, using req.namespace
+	if obj.Namespace == "" {
+		obj.Namespace = req.Namespace
+	}
+	oriObj := obj.DeepCopy()
+	var changed bool
+    // 注入pod的readiness probe
+	if skip := injectPodReadinessGate(req, obj); !skip {
+		changed = true
+	}
+
+	if utilfeature.DefaultFeatureGate.Enabled(features.WorkloadSpread) {
+		if skip, err := h.workloadSpreadMutatingPod(ctx, req, obj); err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
+		} else if !skip {
+			changed = true
+		}
+	}
+    // 这里来注入sidecar容器
+	if skip, err := h.sidecarsetMutatingPod(ctx, req, obj); err != nil {
+		return admission.Errored(http.StatusInternalServerError, err)
+	} else if !skip {
+		changed = true
+	}
+
+	//  // 初始化容器的启动顺序
+	if skip, err := h.containerLaunchPriorityInitialization(ctx, req, obj); err != nil {
+		return admission.Errored(http.StatusInternalServerError, err)
+	} else if !skip {
+		changed = true
+	}
+
+	// patch related-pub annotation in pod
+	if utilfeature.DefaultFeatureGate.Enabled(features.PodUnavailableBudgetUpdateGate) ||
+		utilfeature.DefaultFeatureGate.Enabled(features.PodUnavailableBudgetDeleteGate) {
+		if skip, err := h.pubMutatingPod(ctx, req, obj); err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
+		} else if !skip {
+			changed = true
+		}
+	}
+
+	// persistent pod state 
+	if skip, err := h.persistentPodStateMutatingPod(ctx, req, obj); err != nil {
+		return admission.Errored(http.StatusInternalServerError, err)
+	} else if !skip {
+		changed = true
+	}
+
+	// EnhancedLivenessProbe enabled
+	if utilfeature.DefaultFeatureGate.Enabled(features.EnhancedLivenessProbeGate) {
+		if skip, err := h.enhancedLivenessProbeWhenPodCreate(ctx, req, obj); err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
+		} else if !skip {
+			changed = true
+		}
+	}
+
+	if utilfeature.DefaultFeatureGate.Enabled(features.EnablePodProbeMarkerOnServerless) {
+		if skip, err := h.podProbeMarkerMutatingPod(ctx, req, obj); err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
+		} else if !skip {
+			changed = true
+		}
+	}
+
+	if !changed {
+		return admission.Allowed("")
+	}
+	marshalled, err := json.Marshal(obj)
+	if err != nil {
+		return admission.Errored(http.StatusInternalServerError, err)
+	}
+	original, err := json.Marshal(oriObj)
+	if err != nil {
+		return admission.Errored(http.StatusInternalServerError, err)
+	}
+	return admission.PatchResponseFromRaw(original, marshalled)
+}
+
+```
+
+
 
 
 ## 原地升级
@@ -465,3 +576,4 @@ func defaultCalculateInPlaceUpdateSpec(oldRevision, newRevision *apps.Controller
 ## 参考
 
 - [如何为 Kubernetes 实现原地升级](https://developer.aliyun.com/article/765421)
+- [OpenKruise SidecarSet 源码浅析](https://juejin.cn/post/7208084427393515578#heading-26)

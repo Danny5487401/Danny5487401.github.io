@@ -1989,6 +1989,22 @@ func createAggregatorServer(aggregatorConfig *aggregatorapiserver.Config, delega
 ```
 
 
+## 监控信息
+
+```shell
+(⎈|kubeasz-test:elastic)➜  ~ kubectl get --raw /metrics | grep kubernetes_feature_enabled
+# HELP kubernetes_feature_enabled [BETA] This metric records the data about the stage and enablement of a k8s feature.
+# TYPE kubernetes_feature_enabled gauge
+kubernetes_feature_enabled{name="APIListChunking",stage=""} 1
+kubernetes_feature_enabled{name="APIResponseCompression",stage="BETA"} 1
+kubernetes_feature_enabled{name="APIServerIdentity",stage="BETA"} 1
+kubernetes_feature_enabled{name="APIServerTracing",stage="BETA"} 1
+kubernetes_feature_enabled{name="APIServingWithRoutine",stage="ALPHA"} 0
+kubernetes_feature_enabled{name="AdmissionWebhookMatchConditions",stage=""}
+```
+
+
+
 ## 参考
 
 - [APIServer的认证机制](https://github.com/yinwenqin/kubeSourceCodeNote/blob/master/apiServer/Kubernetes%E6%BA%90%E7%A0%81%E5%AD%A6%E4%B9%A0-APIServer-P3-APIServer%E7%9A%84%E8%AE%A4%E8%AF%81%E6%9C%BA%E5%88%B6.md)

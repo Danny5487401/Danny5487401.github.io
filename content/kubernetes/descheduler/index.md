@@ -3,6 +3,7 @@ title: "Descheduler 集群均衡器"
 summary: "节点Pod重平衡, 策略包括 LowNodeUtilization 等."
 date: 2025-03-11T20:47:47+08:00
 ---
+
 ## 为什么需要集群均衡器
 
 从 kube-scheduler 的角度来看，它通过各种算法计算出最佳节点去运行 Pod 是非常完美的，当出现新的 Pod 进行调度时，调度程序会根据其当时对 Kubernetes 集群的资源描述做出最佳调度决定。
@@ -12,9 +13,11 @@ date: 2025-03-11T20:47:47+08:00
 - 一些节点过度使用
 - 节点添加污点或则labels后,节点上的pod 不不符合要求
 - 当新节点被添加到集群
--
 
-## descheduler 目前支持的策略
+
+## github.com/kubernetes-sigs/descheduler
+
+### descheduler 目前支持的策略
 
 
 |                    策略                    |                                                                              描述                                                                              | 
@@ -33,7 +36,28 @@ date: 2025-03-11T20:47:47+08:00
 ### LowNodeUtilization
 
 该策略主要用于查找未充分利用资源的节点，并从其他节点驱逐 Pod 将它们重新调度到这些未充分利用的节点上。
-
+```yaml
+    apiVersion: "descheduler/v1alpha2"
+    kind: "DeschedulerPolicy"
+    profiles:
+    - name: default
+      pluginConfig:
+      - args:
+          evictLocalStoragePods: true
+          ignorePvcPods: true
+        name: DefaultEvictor
+      // ...
+      - args:
+          targetThresholds:
+            cpu: 50
+            memory: 50
+            pods: 50
+          thresholds:
+            cpu: 20
+            memory: 20
+            pods: 20
+        name: LowNodeUtilization
+```
 - targetThresholds: 大于它,被认为需要被驱逐
 - thresholds: 小于它,被认为需要调度到这
 - numberOfNodes: 针对大集群,需要重调度节点数量大于它,才需要考虑
@@ -94,15 +118,12 @@ func NewLowNodeUtilization(
 		return nil, fmt.Errorf("error initializing pod filter function: %v", err)
 	}
 
-	// this plugins supports different ways of collecting usage data. each
-	// different way provides its own "usageClient". here we make sure we
-	// have the correct one or an error is triggered. XXX MetricsServer is
-	// deprecated, removed once dropped.
+	// 创建 requestUsage client 
 	var usageClient usageClient = newRequestedUsageClient(
 		extendedResourceNames, handle.GetPodsAssignedToNodeFunc(),
 	)
 	if metrics != nil {
-		// metrics 来源
+		// 使用实际数据client
 		usageClient, err = usageClientForMetrics(args, handle, extendedResourceNames)
 		if err != nil {
 			return nil, err
@@ -134,23 +155,18 @@ func (l *LowNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fra
 		}
 	}
 
-	// starts by taking a snapshot ofthe nodes usage. we will use this
-	// snapshot to assess the nodes usage and classify them as
-	// underutilized or overutilized.
+    // 获取节点映射, 资源使用,节点pod
 	nodesMap, nodesUsageMap, podListMap := getNodeUsageSnapshot(nodes, l.usageClient)
 	capacities := referencedResourceListForNodesCapacity(nodes)
 
-	// usage, by default, is exposed in absolute values. we need to normalize
-	// them (convert them to percentages) to be able to compare them with the
-	// user provided thresholds. thresholds are already provided in percentage
-	// in the <0; 100> interval.
+	// 转换成百分比
 	var usage map[string]api.ResourceThresholds
 	var thresholds map[string][]api.ResourceThresholds
-	if l.args.UseDeviationThresholds {
-            // 浮动的防水剂
+	if l.args.UseDeviationThresholds { // 浮动的阈值
+		// ..
 		)
 	} else {
-		// 静态树枝
+		// 静态数值
 		usage, thresholds = assessNodesUsagesAndStaticThresholds(
 			nodesUsageMap,
 			capacities,
@@ -163,8 +179,7 @@ func (l *LowNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fra
 	// pods from the overutilized nodes to the underutilized ones.
 	nodeGroups := classifier.Classify(
 		usage, thresholds,
-		// underutilization criteria processing. nodes that are
-		// underutilized but aren't schedulable are ignored.
+		// 未充分利用
 		func(nodeName string, usage, threshold api.ResourceThresholds) bool {
 			// 过滤不可调度的
 			if nodeutil.IsNodeUnschedulable(nodesMap[nodeName]) {
@@ -176,7 +191,7 @@ func (l *LowNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fra
 			}
 			return isNodeBelowThreshold(usage, threshold)
 		},
-		// overutilization criteria evaluation.
+		// 充分利用的
 		func(nodeName string, usage, threshold api.ResourceThresholds) bool {
 			return isNodeAboveThreshold(usage, threshold)
 		},
@@ -216,7 +231,7 @@ func (l *LowNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fra
 		}
 	}
 
-	// log nodes that are appropriately utilized.
+	// 打印充分利用的
 	for nodeName := range nodesMap {
 		if !classifiedNodes[nodeName] {
 			klog.InfoS(
@@ -227,7 +242,7 @@ func (l *LowNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fra
 			)
 		}
 	}
-
+	// 分别获取低于标准和高于标准的节点
 	lowNodes, highNodes := nodeInfos[0], nodeInfos[1]
 
 	// log messages for nodes with low and high utilization
@@ -238,8 +253,7 @@ func (l *LowNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fra
 
     // 校验逻辑 
 
-	// this is a stop condition for the eviction process. we stop as soon
-	// as the node usage drops below the threshold.
+	// 判断是否需要继续驱逐
 	continueEvictionCond := func(nodeInfo NodeInfo, totalAvailableUsage api.ReferencedResourceList) bool {
 		if !isNodeAboveTargetUtilization(nodeInfo.NodeUsage, nodeInfo.available) {
 			return false
@@ -253,7 +267,7 @@ func (l *LowNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fra
 		return true
 	}
 
-	// sort the nodes by the usage in descending order
+	// 按照降序排序
 	sortNodesByUsage(highNodes, false)
 
 	var nodeLimit *uint
@@ -261,7 +275,7 @@ func (l *LowNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fra
 		nodeLimit = l.args.EvictionLimits.Node
 	}
 
-	// 驱逐 pod 
+	// 基于优先级驱逐 pod 
 	evictPodsFromSourceNodes(
 		ctx,
 		l.args.EvictableNamespaces,
@@ -279,7 +293,91 @@ func (l *LowNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fra
 	return nil
 }
 
+
+func evictPodsFromSourceNodes(
+	ctx context.Context,
+	evictableNamespaces *api.Namespaces,
+	sourceNodes, destinationNodes []NodeInfo,
+	podEvictor frameworktypes.Evictor,
+	evictOptions evictions.EvictOptions,
+	podFilter func(pod *v1.Pod) bool,
+	resourceNames []v1.ResourceName,
+	continueEviction continueEvictionCond,
+	usageClient usageClient,
+	maxNoOfPodsToEvictPerNode *uint,
+) {
+	// 计算可用资源
+	available, err := assessAvailableResourceInNodes(destinationNodes, resourceNames)
+	if err != nil {
+		klog.ErrorS(err, "unable to assess available resources in nodes")
+		return
+	}
+
+	klog.V(1).InfoS("Total capacity to be moved", usageToKeysAndValues(available)...)
+
+	destinationTaints := make(map[string][]v1.Taint, len(destinationNodes))
+	for _, node := range destinationNodes {
+		destinationTaints[node.node.Name] = node.node.Spec.Taints
+	}
+
+	for _, node := range sourceNodes {
+		klog.V(3).InfoS(
+			"Evicting pods from node",
+			"node", klog.KObj(node.node),
+			"usage", node.usage,
+		)
+
+		nonRemovablePods, removablePods := classifyPods(node.allPods, podFilter)
+		klog.V(2).InfoS(
+			"Pods on node",
+			"node", klog.KObj(node.node),
+			"allPods", len(node.allPods),
+			"nonRemovablePods", len(nonRemovablePods),
+			"removablePods", len(removablePods),
+		)
+
+		if len(removablePods) == 0 {
+			klog.V(1).InfoS(
+				"No removable pods on node, try next node",
+				"node", klog.KObj(node.node),
+			)
+			continue
+		}
+
+		klog.V(1).InfoS(
+			"Evicting pods based on priority, if they have same priority, they'll be evicted based on QoS tiers",
+		)
+
+		// sort the evictable Pods based on priority. This also sorts
+		// them based on QoS. If there are multiple pods with same
+		// priority, they are sorted based on QoS tiers.
+		podutil.SortPodsBasedOnPriorityLowToHigh(removablePods)
+
+		// 驱逐直到满足条件
+		if err := evictPods(
+			ctx,
+			evictableNamespaces,
+			removablePods,
+			node,
+			available,
+			destinationTaints,
+			podEvictor,
+			evictOptions,
+			continueEviction,
+			usageClient,
+			maxNoOfPodsToEvictPerNode,
+		); err != nil {
+			switch err.(type) {
+			case *evictions.EvictionTotalLimitError:
+				return
+			default:
+			}
+		}
+	}
+}
+
 ```
+
 
 ## 参考
 

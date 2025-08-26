@@ -20,8 +20,32 @@ cgroup 是一种以 hierarchical（树形层级）方式组织进程的机制（
 - 任务/控制组： 资源控制是以控制组的方式实现的，进程可以加入到指定的控制组中，类似于Linux中user和group的关系。控制组为树状结构的上下父子关系，子节点控制组会继承父节点控制组的属性，如资源配额等
 - 层级（hierarchy）： 一个大的控制组群树，归属于一个层级中，不同的控制组以层级区分开
 - 子系统（subsystem）： 一个的资源控制器，比如cpu子系统可以控制进程的cpu使用率，子系统需要附加（attach）到某个层级，然后该层级的所有控制组，均受到该子系统的控制
+### CFS（Completely Fair Scheduler 完全公平调度）
 
+就是在一个特定的调度周期内，保证所有待调度的进程都能被执行一遍，主要和当前已经占用的 CPU 时间经权重除权之后的值 (vruntime，见下面公式) 来决定本轮调度周期内所能占用的 CPU 时间，vruntime 越少，本轮能占用的 CPU 时间越多；
+```css
+vruntime = 进程运行时间  * NICE_0_LOAD /  进程权重 = (调度周期  *  进程权重  /  所有进程总权重) * NICE_0_LOAD /  进程权重  =  调度周期  * NICE_0_LOAD /  所有进程总权重
+```
 
+```shell
+# Kernel 配置, 在阿里云的 Kubernetes 节点上
+
+# sched_min_granularity_ns，表示进程最少运行时间，防止频繁的切换，对于交互系统
+$ cat /proc/sys/kernel/sched_min_granularity_ns
+10000000
+
+# 在多 CPU 情况下进行负载均衡时，一次最多移动多少个进程到另一个 CPU 上
+$ cat /proc/sys/kernel/sched_nr_migrate
+32
+
+# 表示进程被唤醒后至少应该运行的时间，这个数值越小，那么发生抢占的概率也就越高
+$ cat /proc/sys/kernel/sched_wakeup_granularity_ns
+15000000
+
+# sched_latency_ns，表示一个运行队列所有进程运行一次的时间长度 (正常情况下的队列调度周期，P)
+$ cat /proc/sys/kernel/sched_latency_ns
+24000000
+```
 
 ### 文件系统I/O
 
@@ -279,6 +303,7 @@ func validate(request *Request) (*ValidRequest, error) {
 ### cpu：限制进程组 CPU 使用
 
 任务使用 CPU 资源有两种调度方式：完全公平调度（CFS，Completely Fair Scheduler）和 实时调度（RT，Real-Time Scheduler）。
+
 前者可以根据权重为任务分配响应的 CPU 时间片，后者能够限制使用 CPU 的核数。
 
 ```go
@@ -374,9 +399,11 @@ func (s *CpuGroup) Set(path string, r *configs.Resources) error {
 ```
 - cpu.cfs_quota_us：每个周期 cgroup 中所有任务能使用的 CPU 时间，默认为 -1，表示不限制 CPU 使用。需要配合 cpu.cfs_period_us 一起使用，一般设置为 100000（docker 中设置的值）
 - cpu.cfs_period_us：每个周期中 cgroup 任务可以使用的时间周期，如果想要限制 cgroup 任务每秒钟使用 0.5 秒 CPU，可以在 cpu.cfs_quota_us 为 100000 的情况下把它设置为 50000。如果它的值比 cfs_quota_us 大，表明进程可以使用多个核 CPU，比如 200000 表示进程能够使用 2.0 核
+- cpu.stat：CPU 使用的统计数据
+  - nr_periods 表示已经过去的时间周期；
+  - nr_throttled 表示 cgroup 中任务被限制使用 CPU 的次数（因为超过了规定的上限）；
+  - throttled_time 表示被限制的总时间
 
-
-- cpu.stat：CPU 使用的统计数据，nr_periods 表示已经过去的时间周期；nr_throttled 表示 cgroup 中任务被限制使用 CPU 的次数（因为超过了规定的上限）；throttled_time 表示被限制的总时间
 
 ```go
 // https://github.com/kubernetes/kubernetes/blob/07af1bab707c16c7fde936dca6579002405159ac/vendor/github.com/opencontainers/runc/libcontainer/cgroups/fs/cpu.go
@@ -566,6 +593,7 @@ func NewPrometheusCollector(i infoProvider, f ContainerLabelsFunc, includedMetri
 						}}
 				},
 			}, {
+				// 限流信息
 				name:      "container_cpu_cfs_throttled_periods_total",
 				help:      "Number of throttled period intervals.",
 				valueType: prometheus.CounterValue,
@@ -600,8 +628,16 @@ func NewPrometheusCollector(i infoProvider, f ContainerLabelsFunc, includedMetri
 
 ```
 
-container_cpu_cfs_throttled_periods_total 通过这指标排查.
+限流 container_cpu_cfs_throttled_periods_total 通过这指标排查.详细可参考: https://community.dynatrace.com/t5/Troubleshooting/Troubleshooting-Kubernetes-High-CPU-Throttling-Alert-Problems-in/ta-p/250371
 
+{{<figure src="./ratio-by-seconds.png#center" width=800px >}}
+
+> ratio-by-periods = container_cpu_cfs_throttled_periods_total / container_cpu_cfs_periods_total
+> The metric throttled_periods_total increases by one whenever a container was interrupted during a period, although it was able to run. The metric periods_total increases every period by one as long as a container is running. The higher throttled_periods is, the higher is the ratio. This ratio is usual between 0 and 100%.
+> container_cpu_cfs_throttled_periods_total would be 1 as throttling occurred in this period. container_cpu_cfs_periods_total would also be 1. So ratio-by-periods = container_cpu_cfs_throttled_periods_total / container_cpu_cfs_periods_total = 1 / 1 = 1 = 100%
+
+> ratio-by-seconds = container_cpu_cfs_throttled_seconds_total / container_cpu_usage_seconds_total
+> container_cpu_cfs_throttled_seconds_total would be 0.06 as throttling occurred for 60ms. container_cpu_usage_seconds_total would be 0.04 as the container actual runs for 40ms. So ratio-by-seconds = container_cpu_cfs_throttled_seconds_total / container_cpu_usage_seconds_total = 0.06 / 0.04 = 1.5 = 150%
 
 举个例子，假设一个API服务在响应请求时需要使用A, B两个线程（2个核），分别使用60ms和80ms，其中B线程晚触发20ms，我们看到API服务在100ms后可给出响应：
 {{<figure src="./without_cpu_limit.png#center" width=800px >}}

@@ -1,5 +1,3 @@
-
-
 ---
 title: "Kubelet"
 date: 2024-09-05T09:59:38+08:00
@@ -629,8 +627,7 @@ func (m *kubeGenericRuntimeManager) createPodSandbox(ctx context.Context, pod *v
 配置生成
 ```go
 func (m *kubeGenericRuntimeManager) generatePodSandboxConfig(pod *v1.Pod, attempt uint32) (*runtimeapi.PodSandboxConfig, error) {
-	// TODO: deprecating podsandbox resource requirements in favor of the pod level cgroup
-	// Refer https://github.com/kubernetes/kubernetes/issues/29871
+
 	podUID := string(pod.UID)
 	podSandboxConfig := &runtimeapi.PodSandboxConfig{
 		Metadata: &runtimeapi.PodSandboxMetadata{

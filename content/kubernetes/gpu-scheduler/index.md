@@ -352,10 +352,51 @@ GPU共享资源隔离方案
 - gpu share。阿里GPU Share Device Plugin。不支持共享资源的隔离
 - 截获CUDA库转发，如vCUDA。
 - 截获驱动转发，如阿里云cGPU、腾讯云qGPU。
-- 截获GPU硬件访问，如NVIDIA GRID vGPU
+
+{{<figure src="./vGPU.png#center" width=800px >}}
+- 截获GPU硬件访问，如NVIDIA GRID vGPU.
 
 
-### volcano GPU 虚拟化
+### vGPU
+
+
+#### vGPU 的优势
+- vGPU 允许每个 VM 拥有 GPU 资源的专用部分。这确保了每个 VM 的一致且可预测的性能。
+- 由于资源是静态分配的，因此在一个 VM 中运行的工作负载不会干扰另一个 VM 中的工作负载，从而防止由于资源争用而导致的性能下降。
+- 每个 vGPU 实例都在其自己的 VM 中运行，提供了强大的安全边界。这种隔离对于多租户环境至关重要，在这些环境中，数据隐私和安全性至关重要，并且在高度监管的行业中通常是强制性的。
+- 一个 vGPU 实例中的错误或故障将被限制在该实例内，防止它们影响共享同一个物理 GPU 的其他 VM。
+- 虽然最大分区数量取决于 GPU 实例模型和 vGPU 管理器软件，但 vGPU 支持创建每个 GPU 最多 20 个分区，使用 A100 80GB GPU 和NVIDIA 虚拟计算服务器 (vCS)。
+
+
+### Multi-Instance GPU (MIG)
+它允许将单个物理 GPU 在硬件级别划分为多个隔离的 GPU 实例。每个实例独立运行，拥有自己的专用计算、内存和带宽资源。这使多个用户或应用程序能够共享单个 GPU，同时保持性能隔离和安全性。
+
+
+#### MIG 的优势
+- MIG 确保 GPU 资源得到充分利用，减少空闲时间并提高整体效率。
+- MIG 将 GPU 静态分区为多个隔离的实例，每个实例都有自己的专用资源部分，包括流式多处理器 (SM)；确保更好且可预测的流式多处理器 (SM)服务质量 (QoS)。
+- 专用部分内存在多个隔离的实例中确保更好的内存 QoS。
+- 静态分区还提供错误隔离，从而实现故障隔离和系统稳定性。
+- 更好的数据保护和恶意活动的隔离，为多租户设置提供更好的安全性。
+
+
+### GPU 时间切片
+
+{{<figure src="./gpu_slice.png#center" width=800px >}}
+
+GPU 时间切片是一种虚拟化技术，允许多个工作负载或虚拟机 (VM) 通过将处理时间划分为离散切片来共享单个 GPU。每个切片按顺序将 GPU 的计算和内存资源的一部分分配给不同的任务或用户。
+这使得能够在单个 GPU 上并发执行多个任务，最大限度地提高资源利用率并确保公平地将 GPU 时间分配给每个工作负载
+
+
+#### GPU 时间切片的优势
+- 最大限度地提高资源利用率并减少空闲时间，无需专门的硬件或专有软件。
+- 减少对额外硬件的需求，从而降低运营成本。
+- 提供灵活性，根据工作负载需求处理不同的计算需求。
+- 时间切片相对易于实施和管理，使其适用于不需要复杂资源管理的环境。
+- 此方法对于可以容忍 GPU 访问和性能变化的非关键任务有效，例如后台处理或批处理作业。
+- 可用最大分区数量不受限制。
+
+## volcano GPU 虚拟化
 https://volcano.sh/zh/docs/v1-12-0/gpu_virtualization/
 
 
@@ -367,7 +408,6 @@ Volcano主要支持以下两种GPU共享模式
 描述： 通过VCUDA (一种CUDA API劫持技术) 对GPU核心与显存的使用进行限制，从而实现软件层面的虚拟GPU切片。
 
 使用场景： 适用于需要细粒度GPU共享的场景，兼容所有类型的GPU。
-
 
 
 
@@ -405,3 +445,4 @@ Volcano主要支持以下两种GPU共享模式
 - [GPU 环境搭建指南：如何在裸机、Docker、K8s 等环境中使用 GPU](https://www.lixueduan.com/posts/ai/01-how-to-use-gpu/)
 - [CUDA简介](https://cloud.tencent.com/developer/article/2092885)
 - [CUDA 编程手册系列第一章：CUDA 简介](https://developer.nvidia.com/zh-cn/blog/cuda-intro-cn/)
+- [GPU共享技术指南：VGPU、MIG和时间切片](https://zhuanlan.zhihu.com/p/713256606)
