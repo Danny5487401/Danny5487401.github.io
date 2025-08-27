@@ -1,5 +1,5 @@
 ---
-title: "磁盘: Raid 和 lvm, NVMe"
+title: "磁盘: Raid 和 lvm"
 date: 2025-02-21T08:34:31+08:00
 summary: RAID(Redundant Array of Independent Disks 独立硬盘冗余阵列, lvm(Logical Volume Manager) 在k8s中应用
 categories:
@@ -55,6 +55,260 @@ categories:
 第二类是基于内存的文件系统，也就是我们常说的虚拟文件系统。这类文件系统，不需要任何磁盘分配存储空间，但会占用内存。我们经常用到的 /proc 文件系统，其实就是一种最常见的虚拟文件系统。此外，/sys 文件系统也属于这一类，主要向用户空间导出层次化的内核对象。
 
 第三类是网络文件系统，也就是用来访问其他计算机数据的文件系统，比如NFS、SMB、iSCSI等
+
+
+### PCI(Peripheral Component Interconnect 外围设备互联)
+{{<figure src="./pci_vs_PCIe.png#center" width=800px >}}
+
+Intel在1992年提出PCI（Peripheral Component Interconnect）总线协议,PCI是一种外设总线规范。
+总线：总线是一种传输信号的路径或信道。典型情况是，总线是连接于一个或多个导体的电气连线，总线上连接的全部设备可在同一时间收到全部的传输内容。
+总线由电气接口和编程接口组成。
+
+Linux PCI设备驱动实际包括Linux PCI设备驱动和设备本身驱动两部分。
+PCI有三种地址空间：PCI I/O空间、PCI内存地址空间和PCI配置空间。
+其中，PCI I/O空间和PCI内存地址空间由设备驱动程序使用，而PCI配置空间由Linux PCI初始化代码使用，用于配置PCI设备，比如中断号以及I/O或内存基地址。
+
+/proc/iomem 描写叙述了系统中全部的设备I/O在内存地址空间上的映射。
+
+一个PCI设备 40000000-400003ff : 0000:00:1f.1 解释
+* 40000000-400003ff是它所映射的内存地址空间，占领了内存地址空间的1024 bytes的位置，而
+* 0000:00:1f.1 则是一个PCI外设的地址,它以冒号和逗号分隔为4个部分，第一个16位表示域，第二个8位表示一个总线编号，第三个5位表示一 个设备号，最后是3位，表示功能号.
+  PCI设备的地址格式为<总线号>:<插槽号>.<功能号>
+
+
+一般一类设备在出厂的时候会有相同的一串classid,而classid记录在/sys/bus/pci/devices/*/class文件中
+
+
+```shell
+# lspci help
+Usage: lspci [<switches>]
+
+Basic display modes:
+-mm             Produce machine-readable output (single -m for an obsolete format)
+-t              Show bus tree
+
+Display options:
+-v              Be verbose (-vv or -vvv for higher verbosity)
+-k              Show kernel drivers handling each device
+-x              Show hex-dump of the standard part of the config space
+-xxx            Show hex-dump of the whole config space (dangerous; root only)
+-xxxx           Show hex-dump of the 4096-byte extended config space (root only)
+-b              Bus-centric view (addresses and IRQ's as seen by the bus)
+-D              Always show domain numbers
+-P              Display bridge path in addition to bus and device number
+-PP             Display bus path in addition to bus and device number
+
+Resolving of device ID's to names:
+-n              Show numeric ID's 
+-nn             Show both textual and numeric ID's (names & numbers)
+-q              Query the PCI ID database for unknown ID's via DNS
+-qq             As above, but re-query locally cached entries
+-Q              Query the PCI ID database for all ID's via DNS
+
+Selection of devices:
+-s [[[[<domain>]:]<bus>]:][<slot>][.[<func>]]   Show only devices in selected slots
+-d [<vendor>]:[<device>][:<class>]              Show only devices with specified ID's
+
+Other options:
+-i <file>       Use specified ID database instead of /usr/share/hwdata/pci.ids
+-p <file>       Look up kernel modules in a given file instead of default modules.pcimap
+-M              Enable `bus mapping' mode (dangerous; root only)
+
+PCI access options:
+-A <method>     Use the specified PCI access method (see `-A help' for a list)
+-O <par>=<val>  Set PCI access parameter (see `-O help' for a list)
+-G              Enable PCI access debugging
+-F <file>       Read PCI configuration dump from a given file
+```
+
+
+#### PCI 总线缺陷
+
+(1)由于采用了基于总线的共享传输模式，在PCI总线上不可能同时传送两组以上的数据，当一个PCI设备占用总线时，其他设备只能等待；
+
+(2)随着总线频率从33MHz提高到66MHz，甚至133MHz（PCI-X），信号线之间的相互干扰变得越来越严重，在一块主板上布设多条总线的难度也就越来越大；
+
+(3)由于PCI设备采用了内存映射I/O地址的方式建立与内存的联系，热添加PCI设备变成了一件非常困难的工作。目前的做法是在内存中为每一个PCI设备划出一块50M到100M的区域，这段空间用户是不能使用的，因此如果一块主板上支持的热插拔PCI接口越多，用户损失的内存就越多；
+
+(4)PCI的总线上虽然有buffer作为数据的缓冲区，但是它不具备纠错的功能，如果在传输的过程中发生了数据丢失或损坏的情况，控制器只能触发一个NMI中断通知操作系统在PCI总线上发生了错误
+
+
+### PCIe(Peripheral Component Interconnect Express)
+{{<figure src="./pcie.png#center" width=800px >}}
+
+一种用于连接外设的总线。它于2003年提出来，作为替代PCI和PCI-X (Peripheral Component Interconnect eXtended)的方案，现在已经成了现代CPU和其他几乎所有外设交互的标准或者基石.
+
+PCIe和PCI最大的改变是由并行改为串行，通过使用差分信号传输（differential transmission）.
+
+比如 GPU，网卡，USB控制器，声卡，网卡等等，这些都是通过PCIe总线进行连接的，然后现在非常常见的基于m.2接口的SSD，也是使用NVMe协议，通过PCIe总线进行连接的，
+除此以外，Thunderbolt 3 ，USB4，甚至最新的CXL互联协议 ，都是基于PCIe的！
+
+
+PCIE与PCI直通的区别是：PCI只能直通给某个特定的虚拟机，而PCIE有可能可以给多个虚拟机用，如具有SR-IOV功能的PCIE设备，通过在HOST上抽象出多个的VF，每个VF再通过VFIO直通给虚拟机，最终的表现就是一个物理PCIE网卡可以直通给多个虚拟机用；
+SR-IOV是针对PCIE设备的，PCI设备理论上不具有SR-IOV功能.
+
+### NVMe(Non-Volatile Memory Express)
+{{<figure src="./NVMe_info.png#center" width=800px >}}
+或称非易失性内存主机控制器接口规范（Non Volatile Memory Host Controller Interface Specification，缩写：NVMHCIS）是一个逻辑设备接口规范。
+它是与Advanced Host Controller Interface(AHCI)类似的、基于设备逻辑接口的总线传输协议规范（相当于通讯协议中的应用层），用于访问通过PCI Express（PCIe）总线附加的非易失性存储器介质（例如采用闪存的固态硬盘驱动器），虽然理论上不一定要求 PCIe 总线协议.
+这个协议就好比SAS（串行SCSI)和SATA一样，用于定义硬件接口和传输协议。
+
+接口：也就是设备如何与计算机通信。常见的存储设备接口包括：
+
+{{<figure src="./sata_vs_pcle.png#center" width=800px >}}
+
+- SATA接口: 通常用于2.5寸和3.5寸硬盘，有时候一些M.2设备也会使用
+
+- PCI Express(PCIe)接口: 用于M.2和PCIe设备
+
+协议：定义了如何在计算机与设备之间传输数据。常见的协议包括：
+
+- 用于SATA接口的 AHCI 或者 ATA 协议
+
+- NVMe over PCIe: 用于PCIe接口的NVMe协议
+
+在SATA中计算机与存储设备只能有一个队列，即使是多CPU情况下，所有请求只能经过这样一个狭窄的道路。
+而NVMe协议可以最多有64K个队列，每个CPU或者核心都可以有一个队列，这样并发程度大大提升，性能也自然更高了。
+
+```shell
+# 查看传输协议
+
+# sas 企业级服务器
+$ lsblk -d -o NAME,MODEL,TRAN
+NAME MODEL          TRAN
+sda  LOGICAL_VOLUME sas
+sdb  LOGICAL_VOLUME sas
+
+# nvme AI/大数据
+$ lsblk -d -o NAME,MODEL,TRAN
+NAME    MODEL               TRAN
+sda     MR9440-8i           
+nvme0n1 INTEL SSDPE2KE032T8 nvme
+nvme2n1 INTEL SSDPE2KE032T8 nvme
+nvme1n1 INTEL SSDPE2KE032T8 nvme
+nvme3n1 INTEL SSDPE2KE032T8 nvme
+nvme4n1 INTEL SSDPE2KE032T8 nvme
+nvme5n1 INTEL SSDPE2KE032T8 nvme
+
+# SATA (Serial ATA) 普通消费级 PC
+root@node1:~# lsblk -d -o NAME,MODEL,TRAN
+NAME  MODEL                          TRAN
+fd0
+loop0
+loop1
+loop2
+loop3
+loop4
+sda   Virtual disk                   spi
+sr0   VMware Virtual SATA CDRW Drive sata
+```
+TRAN 表示磁盘的传输接口协议，常见的值有
+* sata → 传统 SATA 硬盘或 SSD
+
+* nvme → NVMe 协议的 SSD
+
+* sas → Serial Attached SCSI(串行连接 SCSI)
+
+#### nvme-cli 命令
+
+```shell
+# 安装
+$ yum install nvme-cli
+
+[root@master-01 ~]# nvme
+nvme-1.8.1
+usage: nvme <command> [<device>] [<args>]
+
+The '<device>' may be either an NVMe character device (ex: /dev/nvme0) or an
+nvme block device (ex: /dev/nvme0n1).
+
+The following are all implemented sub-commands:
+  list                  List all NVMe devices and namespaces on machine
+  list-subsys           List nvme subsystems
+  id-ctrl               Send NVMe Identify Controller
+  id-ns                 Send NVMe Identify Namespace, display structure
+  list-ns               Send NVMe Identify List, display structure
+  ns-descs              Send NVMe Namespace Descriptor List, display structure
+  id-nvmset             Send NVMe Identify NVM Set List, display structure
+  create-ns             Creates a namespace with the provided parameters
+  delete-ns             Deletes a namespace from the controller
+  attach-ns             Attaches a namespace to requested controller(s)
+  detach-ns             Detaches a namespace from requested controller(s)
+  list-ctrl             Send NVMe Identify Controller List, display structure
+  get-ns-id             Retrieve the namespace ID of opened block device
+  get-log               Generic NVMe get log, returns log in raw format
+  telemetry-log         Retrieve FW Telemetry log write to file
+  fw-log                Retrieve FW Log, show it
+  changed-ns-list-log   Retrieve Changed Namespace List, show it
+  smart-log             Retrieve SMART Log, show it
+  ana-log               Retrieve ANA Log, show it
+  error-log             Retrieve Error Log, show it
+  effects-log           Retrieve Command Effects Log, show it
+  endurance-log         Retrieve Endurance Group Log, show it
+  get-feature           Get feature and show the resulting value
+  device-self-test      Perform the necessary tests to observe the performance
+  self-test-log         Retrieve the SELF-TEST Log, show it
+  set-feature           Set a feature and show the resulting value
+  set-property          Set a property and show the resulting value
+  get-property          Get a property and show the resulting value
+  format                Format namespace with new block format
+  fw-commit             Verify and commit firmware to a specific slot (fw-activate in old version < 1.2)
+  fw-download           Download new firmware
+  admin-passthru        Submit an arbitrary admin command, return results
+  io-passthru           Submit an arbitrary IO command, return results
+  security-send         Submit a Security Send command, return results
+  security-recv         Submit a Security Receive command, return results
+  resv-acquire          Submit a Reservation Acquire, return results
+  resv-register         Submit a Reservation Register, return results
+  resv-release          Submit a Reservation Release, return results
+  resv-report           Submit a Reservation Report, return results
+  dsm                   Submit a Data Set Management command, return results
+  flush                 Submit a Flush command, return results
+  compare               Submit a Compare command, return results
+  read                  Submit a read command, return results
+  write                 Submit a write command, return results
+  write-zeroes          Submit a write zeroes command, return results
+  write-uncor           Submit a write uncorrectable command, return results
+  sanitize              Submit a sanitize command
+  sanitize-log          Retrieve sanitize log, show it
+  reset                 Resets the controller
+  subsystem-reset       Resets the subsystem
+  ns-rescan             Rescans the NVME namespaces
+  show-regs             Shows the controller registers or properties. Requires character device
+  discover              Discover NVMeoF subsystems
+  connect-all           Discover and Connect to NVMeoF subsystems
+  connect               Connect to NVMeoF subsystem
+  disconnect            Disconnect from NVMeoF subsystem
+  disconnect-all        Disconnect from all connected NVMeoF subsystems
+  gen-hostnqn           Generate NVMeoF host NQN
+  dir-receive           Submit a Directive Receive command, return results
+  dir-send              Submit a Directive Send command, return results
+  virt-mgmt             Manage Flexible Resources between Primary and Secondary Controller
+  version               Shows the program version
+  help                  Display this help
+
+See 'nvme help <command>' for more information on a specific command
+
+The following are all installed plugin extensions:
+  intel           Intel vendor specific extensions
+  lnvm            LightNVM specific extensions
+  memblaze        Memblaze vendor specific extensions
+  wdc             Western Digital vendor specific extensions
+  huawei          Huawei vendor specific extensions
+  netapp          NetApp vendor specific extensions
+  toshiba         Toshiba NVME plugin
+  micron          Micron vendor specific extensions
+  seagate         Seagate vendor specific extensions
+
+# 列出系统所有NVMe SSD:设备名,序列号,型号,namespace,使用量,LBA格式,firmware版本
+$ nvme list
+Node          SN              Model                       Namespace Usage                  Format          FW Rev  
+------------- --------------- --------------------------- --------- ---------------------- --------------- --------
+/dev/nvme0n1  S676NF0R908202  SAMSUNG MZVL21T0HCLR-00B00  1         0.00   B /   1.02  TB  512   B +  0 B  GXA7401Q
+/dev/nvme1n1  S676NF0R908214  SAMSUNG MZVL21T0HCLR-00B00  1         0.00   B /   1.02  TB  512   B +  0 B  GXA7401Q
+/dev/nvme2n1  S676NF0R908144  SAMSUNG MZVL21T0HCLR-00B00  1         0.00   B /   1.02  TB  512   B +  0 B  GXA7401Q
+```
+
 
 
 
