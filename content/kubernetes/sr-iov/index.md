@@ -1,7 +1,7 @@
 ---
 title: "SR-IOV（Single Root I/O Virtualization)"
 date: 2025-02-17T15:11:59+08:00
-summary: SR-IOV 基本介绍 在 k8s 中应用
+summary: SR-IOV 配合网卡绑定 bond在 k8s 中应用
 categories:
   - kubernetes
 tags:
@@ -475,9 +475,17 @@ const (
 * 优点：在传输和接收方向上都实现负载均衡，不需要交换机特殊支持。
 
 
+{{<figure src="./lacp_bonding.png#center" width=800px >}}
+
 LACP（Link Aggregation Control Protocol 链路聚合控制协议）,链路聚合是一种将设备之间的多个物理链路组合成单个逻辑链路的网络技术。
-通过使用链路聚合，可以增加设备之间的通信带宽。 此外，即使一条物理链路发生故障，也可以使用剩余的物理链路来维护逻辑链路，从而提高容错能力.
+通过使用链路聚合，可以增加设备之间的通信带宽。 链路聚合技术亦称主干技术（Trunking）或捆绑技术（Bonding）
+
+此外，即使一条物理链路发生故障，也可以使用剩余的物理链路来维护逻辑链路，从而提高容错能力.
 链路聚合后来被标准化为 IEEE 802.3ad，它定义了 LACP 的规范。
+IEEE 802.3ad 是执行链路聚合的标准方法。
+从概念上讲，将多个以太网适配器聚集到单独的虚拟适配器方面与“以太通道（EtherChannel）”的功能相同，能提供更高的带宽防止发生故障。
+例如，ent0 和 ent1 可以聚集到称作 ent3 的 IEEE 802.3ad 链路聚合；然后用 IP 地址配置接口 en3。系统将这些聚集的适配器作为一个适配器来考虑。
+
 
 链路聚合包含两种类型
 - 静态 LACP 模式链路聚合: Eth-Trunk 接口的建立，成员接口的加入，都是由手工配置完成的
@@ -563,7 +571,7 @@ ONBOOT=yes
 
 MASTER=bond0
 
-SLAVE=yes  // 可以没有此字段，就需要开机执行ifenslave bond0 eth0 eth1命令了
+SLAVE=yes  # 可以没有此字段，就需要开机执行ifenslave bond0 eth0 eth1命令了
 
 $ cat /etc/sysconfig/network-scripts/ifcfg-eth1 
 
@@ -1169,7 +1177,8 @@ func GetVfid(addr string, pfName string) (int, error) {
 
 ## 参考
 - https://github.com/k8snetworkplumbingwg/sriov-cni
-- https://github.com/k8snetworkplumbingwg/sriov-network-device-plugin/blob/master/docs/vf-setup.md
+- https://github.com/k8snetworkplumbingwg/sriov-network-device-plugin
+- https://github.com/k8snetworkplumbingwg/bond-cni
 - https://www.howtoforge.com/tutorial/how-to-configure-high-availability-and-network-bonding-on-linux/
 - https://learn.microsoft.com/en-us/windows-hardware/drivers/network/overview-of-single-root-i-o-virtualization--sr-iov-
 - https://projectacrn.github.io/latest/tutorials/sriov_virtualization.html

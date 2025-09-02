@@ -12,7 +12,7 @@ tags:
 ---
 
 
-CNI（容器网络接口）规范为容器运行时和网络插件之间提供了一个通用的接口.
+[CNI（容器网络接口）规范](https://www.cni.dev/docs/spec/) 为容器运行时和网络插件之间提供了一个通用的接口.
 CNI 的目的是将网络配置与容器平台解耦，在不同的平台只需要使用不同的网络插件，其他容器化的内容仍然可以复用。
 
 
@@ -304,6 +304,44 @@ func createMacvlan(conf *NetConf, ifName string, netns ns.NetNS) (*current.Inter
 
 Kube-controller-manager为每个节点分配一个podCIDR。从podCIDR中的子网值中为节点上的Pod分配IP地址。由于所有节点上的podCIDR是不相交的子网，因此它允许为每个pod分配唯一的IP地址。
 
+
+参考配置
+```yaml
+# 从每个ranges中分配一个ip,返回两个ip
+{
+	"ipam": {
+		"type": "host-local",
+		"ranges": [
+			[
+				{
+					"subnet": "10.10.0.0/16",
+					"rangeStart": "10.10.1.20",
+					"rangeEnd": "10.10.3.50",
+					"gateway": "10.10.0.254"
+				},
+				{
+					"subnet": "172.16.5.0/24"
+				}
+			],
+			[
+				{
+					"subnet": "3ffe:ffff:0:01ff::/64",
+					"rangeStart": "3ffe:ffff:0:01ff::0010",
+					"rangeEnd": "3ffe:ffff:0:01ff::0020"
+				}
+			]
+		],
+		"routes": [
+			{ "dst": "0.0.0.0/0" },
+			{ "dst": "192.168.0.0/16", "gw": "10.10.5.1" },
+			{ "dst": "3ffe:ffff:0:01ff::1/64" }
+		],
+		"dataDir": "/run/my-orchestrator/container-ipam-state"
+	}
+}
+```
+
+
 ```go
 func cmdAdd(args *skel.CmdArgs) error {
 	ipamConf, confVersion, err := allocator.LoadIPAMConfig(args.StdinData, args.Args)
@@ -314,6 +352,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	result := &current.Result{CNIVersion: current.ImplementedSpecVersion}
 
 	if ipamConf.ResolvConf != "" {
+		// 设置 dns 解析
 		dns, err := parseResolvConf(ipamConf.ResolvConf)
 		if err != nil {
 			return err
@@ -339,6 +378,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		requestedIPs[ip.String()] = ip
 	}
 
+	// 遍历 ranges
 	for idx, rangeset := range ipamConf.Ranges {
 		// 初始化IP分配器
 		allocator := allocator.NewIPAllocator(&rangeset, store, idx)
@@ -352,7 +392,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 				break
 			}
 		}
-        // 分配 ip 
+        // 返回分配的 ip 及网关
 		ipConf, err := allocator.Get(args.ContainerID, args.IfName, requestedIP)
 		if err != nil {
 			// Deallocate all already allocated IPs
@@ -379,6 +419,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return errors.New(errstr)
 	}
 
+	// 补充配置中的路由
 	result.Routes = ipamConf.Routes
 
 	return types.PrintResult(result, confVersion)
@@ -424,7 +465,7 @@ func (a *IPAllocator) Get(id string, ifname string, requestedIP net.IP) (*curren
 				return nil, fmt.Errorf("%s has been allocated to %s, duplicate allocation is not allowed", allocatedIP.String(), id)
 			}
 		}
-        // 获取迭代器，迭代器指向上一个分配的ip
+        // 获取迭代器，迭代器指向上一个分配的ip,默认会取第rangeIdx 个[]Range
 		iter, err := a.GetIter()
 		if err != nil {
 			return nil, err
@@ -447,7 +488,7 @@ func (a *IPAllocator) Get(id string, ifname string, requestedIP net.IP) (*curren
 		}
 	}
 
-	if reservedIP == nil {
+	if reservedIP == nil { // 如果没有分配成功
 		return nil, fmt.Errorf("no IP addresses available in range set: %s", a.rangeset.String())
 	}
 
@@ -747,6 +788,26 @@ bridge的某个端口打开 hairpin mode后允许从这个端口收到的包仍�
 {{<figure src="./vlan-structur.pnge#center" width=800px >}}
 
 
+参考配置
+```yaml
+{
+	"name": "mynet",
+	"cniVersion": "0.3.1",
+	"type": "vlan",
+	"master": "eth0",
+	"mtu": 1500,
+	"vlanId": 5, 
+	"linkInContainer": false,
+	"ipam": {
+		"type": "host-local",
+		"subnet": "10.1.1.0/24"
+	},
+	"dns": {
+		"nameservers": [ "10.1.1.1", "8.8.8.8" ]
+	}
+}
+```
+
 ```go
 func cmdAdd(args *skel.CmdArgs) error {
 	n, cniVersion, err := loadConf(args)
@@ -779,7 +840,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		}
 	}()
 
-	// Convert whatever the IPAM result was into the current Result type
+	// 转换成  current Result type
 	result, err := current.NewResultFromResult(r)
 	if err != nil {
 		return err
@@ -796,6 +857,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	result.Interfaces = []*current.Interface{vlanInterface}
 
 	err = netns.Do(func(_ ns.NetNS) error {
+		// 把 ip 分配信息应用到网卡上
 		return ipam.ConfigureIface(args.IfName, result)
 	})
 	if err != nil {
@@ -831,7 +893,8 @@ func createVlan(conf *NetConf, ifName string, netns ns.NetNS) (*current.Interfac
 	if err != nil {
 		return nil, err
 	}
-
+    
+	// 配置网络设备属性
 	linkAttrs := netlink.NewLinkAttrs()
 	linkAttrs.MTU = conf.MTU
 	linkAttrs.Name = tmpName
@@ -843,7 +906,7 @@ func createVlan(conf *NetConf, ifName string, netns ns.NetNS) (*current.Interfac
 		VlanId:    conf.VlanID,
 	}
 
-	if conf.LinkContNs {
+	if conf.LinkContNs { // 如果在容器的namespace 添加
 		err = netns.Do(func(_ ns.NetNS) error {
 			return netlink.LinkAdd(v)
 		})

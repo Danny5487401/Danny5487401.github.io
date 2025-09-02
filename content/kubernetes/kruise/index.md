@@ -10,7 +10,7 @@ categories:
 
 ## 基本知识
 
-### v1.27.1新特性 InPlacePodVerticalScaling(就地垂直伸缩）
+### v1.27.1 新特性 InPlacePodVerticalScaling(就地垂直伸缩）
 
 InPlacePodVerticalScaling（就地垂直伸缩）是 Kubernetes 中v1.27.1的一个特性，它允许在不重启 Pod 的情况下动态调整 Pod 中容器的资源限制（Resource Limits）
 
@@ -19,8 +19,93 @@ InPlacePodVerticalScaling（就地垂直伸缩）是 Kubernetes 中v1.27.1的一
 
 ## 注入过程
 
+MutatingWebhookConfiguration 配置
+
+
+```yaml
+# 默认配置
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: kruise-mutating-webhook-configuration
+# ...
+webhooks:
+- admissionReviewVersions:
+  - v1
+  - v1beta1
+  clientConfig:
+    caBundle: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURGRENDQWZ5Z0F3SUJBZ0lJTFNMdVVrUm1VWkl3RFFZSktvWklodmNOQVFFTEJRQXdHakVZTUJZR0ExVUUKQXhNUGQyVmlhRzl2YXkxalpYSjBMV05oTUI0WERUSTFNRGd5TXpFMU1EUTBNRm9YRFRNMU1EZ3lNVEUxTURRMApNRm93R2pFWU1CWUdBMVVFQXhNUGQyVmlhRzl2YXkxalpYSjBMV05oTUlJQklqQU5CZ2txaGtpRzl3MEJBUUVGCkFBT0NBUThBTUlJQkNnS0NBUUVBa2FONnN3YmNjRWx3YzdSTSsyZTJNUE5pTkpyNERtQnJsZFdudkVlRkdhT1IKWFJjWk1PbnFmVG1OREdHMmlmOXlRTWZLci9mejNvWUIrZTd4U2puN0F3elBnSm9iNUhHQ3B5Y3EyUjNJUjRWSwpaeFd4My9CdS9FMUpNT2tSU1l5bWcxaENvaFZjMjZxQWdDT01UTEF1MWxRejM5RXZ4Vkdobmo3QWVuUDVkS0xTCmVnbzIvQklEd1lBYTJYM3ljc1hHM1VNMlZuemZXSEVaUnZiTXJPMkd1MWVmemVmTTNwYlZtMGJHcHF2OWt4bUYKY0dCQithVHlMdUxiU1BWaHdqcjBOVk1LMEU5RzJFYjFJRXE2d0FHRTU2YTNuaFQrVmxoZVJwMFRlTWJvTnAvSwpOTkNjUnozM2xXMCtUeEhRdnExTy9qdDNjM3hmQjZubHNsNWFrQnY5cXdJREFRQUJvMTR3WERBT0JnTlZIUThCCkFmOEVCQU1DQXFRd0R3WURWUjBUQVFIL0JBVXdBd0VCL3pBZEJnTlZIUTRFRmdRVXdSWVFrbjdrNzB0WmYzNTAKdTZNak9PVFZFWFF3R2dZRFZSMFJCQk13RVlJUGQyVmlhRzl2YXkxalpYSjBMV05oTUEwR0NTcUdTSWIzRFFFQgpDd1VBQTRJQkFRQXhldkV0d0QrVy9HVWs2a2xwL2pRRGJlZzBBdjNscTlmVzlJNlUrb1VPYXNYQy93VnBEM0hGCks2WmhaTHplV2VCcHJrejBhN2pWc0tkRU5hNXZEUFBvemh1UUxmSm1LMEgyb29oZFlGb2lVc1JRUTAxKzRvWG8KWHRoNnEyYkxyQVEwbnhLSnhpWVlEOW1UM2ZudldmSGpCMmFUVFQ3cC9TRWlROFk4dksyeFhidCtOcGJ4c0ZUTgpUakhYVzA3RjlLMnY2RFVNQmpaT01qd2NNcjIvNlpEWEdRT3pTTXluVnloRTdZSU41WUZlWnFmVjl2RzRIaGptCk5JdDRpV0lJVVl0dTlnWi9FT3Y0WjQ1VzVINCtrWHNMUzVidzArNDFEOHZmaUpvdTVJLzh4aVgrNzIyMUF4RDcKZ3dKWUwxQmRZdWpNQStsbHEwZGN6L1lXeW9CZ0hPL28KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+    service:
+      name: kruise-webhook-service
+      namespace: kruise-system
+      path: /mutate-pod
+      port: 443
+  failurePolicy: Fail
+  matchPolicy: Equivalent
+  name: mpod.kb.io
+  namespaceSelector:
+    matchExpressions:
+    - key: control-plane
+      operator: NotIn
+      values:
+      - openkruise
+    - key: kubernetes.io/metadata.name
+      operator: NotIn
+      values:
+      - kube-system
+  objectSelector: {}
+  reinvocationPolicy: Never
+  # 创建 pod 的时候
+  rules:
+  - apiGroups:
+    - ""
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    resources:
+    - pods
+    scope: '*'
+  sideEffects: None
+  timeoutSeconds: 30
+
+# ....
+- admissionReviewVersions:
+    - v1
+    - v1beta1
+  clientConfig:
+    caBundle: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURGRENDQWZ5Z0F3SUJBZ0lJTFNMdVVrUm1VWkl3RFFZSktvWklodmNOQVFFTEJRQXdHakVZTUJZR0ExVUUKQXhNUGQyVmlhRzl2YXkxalpYSjBMV05oTUI0WERUSTFNRGd5TXpFMU1EUTBNRm9YRFRNMU1EZ3lNVEUxTURRMApNRm93R2pFWU1CWUdBMVVFQXhNUGQyVmlhRzl2YXkxalpYSjBMV05oTUlJQklqQU5CZ2txaGtpRzl3MEJBUUVGCkFBT0NBUThBTUlJQkNnS0NBUUVBa2FONnN3YmNjRWx3YzdSTSsyZTJNUE5pTkpyNERtQnJsZFdudkVlRkdhT1IKWFJjWk1PbnFmVG1OREdHMmlmOXlRTWZLci9mejNvWUIrZTd4U2puN0F3elBnSm9iNUhHQ3B5Y3EyUjNJUjRWSwpaeFd4My9CdS9FMUpNT2tSU1l5bWcxaENvaFZjMjZxQWdDT01UTEF1MWxRejM5RXZ4Vkdobmo3QWVuUDVkS0xTCmVnbzIvQklEd1lBYTJYM3ljc1hHM1VNMlZuemZXSEVaUnZiTXJPMkd1MWVmemVmTTNwYlZtMGJHcHF2OWt4bUYKY0dCQithVHlMdUxiU1BWaHdqcjBOVk1LMEU5RzJFYjFJRXE2d0FHRTU2YTNuaFQrVmxoZVJwMFRlTWJvTnAvSwpOTkNjUnozM2xXMCtUeEhRdnExTy9qdDNjM3hmQjZubHNsNWFrQnY5cXdJREFRQUJvMTR3WERBT0JnTlZIUThCCkFmOEVCQU1DQXFRd0R3WURWUjBUQVFIL0JBVXdBd0VCL3pBZEJnTlZIUTRFRmdRVXdSWVFrbjdrNzB0WmYzNTAKdTZNak9PVFZFWFF3R2dZRFZSMFJCQk13RVlJUGQyVmlhRzl2YXkxalpYSjBMV05oTUEwR0NTcUdTSWIzRFFFQgpDd1VBQTRJQkFRQXhldkV0d0QrVy9HVWs2a2xwL2pRRGJlZzBBdjNscTlmVzlJNlUrb1VPYXNYQy93VnBEM0hGCks2WmhaTHplV2VCcHJrejBhN2pWc0tkRU5hNXZEUFBvemh1UUxmSm1LMEgyb29oZFlGb2lVc1JRUTAxKzRvWG8KWHRoNnEyYkxyQVEwbnhLSnhpWVlEOW1UM2ZudldmSGpCMmFUVFQ3cC9TRWlROFk4dksyeFhidCtOcGJ4c0ZUTgpUakhYVzA3RjlLMnY2RFVNQmpaT01qd2NNcjIvNlpEWEdRT3pTTXluVnloRTdZSU41WUZlWnFmVjl2RzRIaGptCk5JdDRpV0lJVVl0dTlnWi9FT3Y0WjQ1VzVINCtrWHNMUzVidzArNDFEOHZmaUpvdTVJLzh4aVgrNzIyMUF4RDcKZ3dKWUwxQmRZdWpNQStsbHEwZGN6L1lXeW9CZ0hPL28KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+    service:
+      name: kruise-webhook-service
+      namespace: kruise-system
+      path: /mutate-apps-kruise-io-v1alpha1-sidecarset
+      port: 443
+  failurePolicy: Fail
+  matchPolicy: Equivalent
+  name: msidecarset.kb.io
+  namespaceSelector: {}
+  objectSelector: {}
+  reinvocationPolicy: Never
+  # 修改创建 sidecarsets 的时候
+  rules:
+    - apiGroups:
+        - apps.kruise.io
+      apiVersions:
+        - v1alpha1
+      operations:
+        - CREATE
+        - UPDATE
+      resources:
+        - sidecarsets
+      scope: '*'
+  sideEffects: None
+  timeoutSeconds: 30
+```
+
+### pod 创建接口
 ```go
 var (
+	// 修改 pod 接口
 	// HandlerGetterMap contains admission webhook handlers
 	HandlerGetterMap = map[string]types.HandlerGetter{
 		// key 为 path 
@@ -126,12 +211,81 @@ func (h *PodCreateHandler) Handle(ctx context.Context, req admission.Request) ad
 ```
 
 
+### sidecarset webhook 
+
+```go
+var (
+	// HandlerGetterMap contains admission webhook handlers
+	HandlerGetterMap = map[string]types.HandlerGetter{
+		"mutate-apps-kruise-io-v1alpha1-sidecarset": func(mgr manager.Manager) admission.Handler {
+			return &SidecarSetCreateHandler{Decoder: admission.NewDecoder(mgr.GetScheme())}
+		},
+	}
+)
+```
+
+```go
+func (h *SidecarSetCreateHandler) Handle(ctx context.Context, req admission.Request) admission.Response {
+	obj := &appsv1alpha1.SidecarSet{}
+
+	err := h.Decoder.Decode(req, obj)
+	if err != nil {
+		return admission.Errored(http.StatusBadRequest, err)
+	}
+	var copy runtime.Object = obj.DeepCopy()
+	switch req.AdmissionRequest.Operation {
+	case admissionv1.Create, admissionv1.Update:
+		defaults.SetDefaultsSidecarSet(obj)
+		// 设置 hash 信息
+		if err := setHashSidecarSet(obj); err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+	}
+	klog.V(4).InfoS("sidecarset after mutating", "object", util.DumpJSON(obj))
+	if reflect.DeepEqual(obj, copy) {
+		return admission.Allowed("")
+	}
+	marshalled, err := json.Marshal(obj)
+	if err != nil {
+		return admission.Errored(http.StatusInternalServerError, err)
+	}
+	return admission.PatchResponseFromRaw(req.AdmissionRequest.Object.Raw, marshalled)
+}
+
+
+func setHashSidecarSet(sidecarset *appsv1alpha1.SidecarSet) error {
+	if sidecarset.Annotations == nil {
+		sidecarset.Annotations = make(map[string]string)
+	}
+
+	hash, err := sidecarcontrol.SidecarSetHash(sidecarset)
+	if err != nil {
+		return err
+	}
+	sidecarset.Annotations[sidecarcontrol.SidecarSetHashAnnotation] = hash
+
+	hash, err = sidecarcontrol.SidecarSetHashWithoutImage(sidecarset)
+	if err != nil {
+		return err
+	}
+	sidecarset.Annotations[sidecarcontrol.SidecarSetHashWithoutImageAnnotation] = hash
+
+	return nil
+}
+```
 
 
 ## 原地升级
+https://openkruise.io/zh/docs/core-concepts/inplace-update
 
 {{<figure src="./in-place_update_process.png#center" width=800px >}}
 
+目前支持原地升级的 Workload：
+
+- CloneSet: 高效管理无状态应用的能力，它可以对标原生的 Deployment.提供了很多增强功能: 支持 PVC 模板,多了 指定 Pod 缩容,
+- Advanced StatefulSet
+- Advanced DaemonSet
+- SidecarSet
 
 ### 需求
 
@@ -274,9 +428,10 @@ func HashContainerWithoutResources(container *v1.Container) uint64 {
 ```
 
 
-### kruise 原地升级原理
+### kruise  in-place 原地升级原理
 
-#### ContainerRecreateRequest
+#### ContainerRecreateRequest 重启/重建存量 Pod
+
 https://openkruise.io/docs/user-manuals/containerrecreaterequest
 
 {{<figure src="./ContainerRecreateRequest.png#center" width=800px >}}
@@ -364,10 +519,129 @@ func (c *Controller) manage(crr *appsv1alpha1.ContainerRecreateRequest) error {
 	return nil
 }
 ```
+
 #### SidecarSet
+https://openkruise.io/zh/docs/user-manuals/sidecarset#sidecar%E7%83%AD%E5%8D%87%E7%BA%A7%E7%89%B9%E6%80%A7
 
 SidecarSet 是 OpenKruise 的一个 CRD，它支持通过 admission webhook 来自动为集群中创建的符合条件的 Pod 注入 sidecar 容器。SidecarSet 将 sidecar 容器的定义和生命周期与业务容器解耦。
 它主要用于管理无状态的 sidecar 容器，比如监控、日志等 agent。
+
+协调
+```go
+func (r *ReconcileSidecarSet) Reconcile(_ context.Context, request reconcile.Request) (reconcile.Result, error) {
+	// Fetch the SidecarSet instance
+	sidecarSet := &appsv1alpha1.SidecarSet{}
+	err := r.Get(context.TODO(), request.NamespacedName, sidecarSet)
+    // ..
+	return r.processor.UpdateSidecarSet(sidecarSet)
+}
+
+```
+
+原地升级 in-place 和 热升级 Hot Upgrade
+
+热升级特性总共包含以下两个过程：
+
+1. Pod创建时，注入热升级容器
+2. 原地升级时，完成热升级流程
+   - Upgrade: 将empty容器升级为当前最新的sidecar容器，例如：envoy-2.Image = envoy:1.17.0
+   - Migration: lifecycle.postStart完成热升级流程中的状态迁移，当迁移完成后退出。(注意:PostStartHook在迁移过程中必须阻塞，迁移完成后退出。)
+   - Reset: 状态迁移完成后，热升级流程将设置envoy-1容器为empty镜像，例如：envoy-1.Image = empty:1.0
+
+
+```go
+func (p *Processor) UpdateSidecarSet(sidecarSet *appsv1alpha1.SidecarSet) (reconcile.Result, error) {
+	control := sidecarcontrol.New(sidecarSet)
+	
+	// 判断活跃情况
+	if !control.IsActiveSidecarSet() {
+		return reconcile.Result{}, nil
+	}
+	// 1. 过滤符合条件的pod
+	pods, err := p.getMatchingPods(sidecarSet)
+	if err != nil {
+		klog.ErrorS(err, "SidecarSet get matching pods error", "sidecarSet", klog.KObj(sidecarSet))
+		return reconcile.Result{}, err
+	}
+
+	// register new revision if this sidecarSet is the latest;
+	// return the latest revision that corresponds to this sidecarSet.
+	latestRevision, collisionCount, err := p.registerLatestRevision(sidecarSet, pods)
+	if latestRevision == nil {
+		klog.ErrorS(err, "SidecarSet register the latest revision error", "sidecarSet", klog.KObj(sidecarSet))
+		return reconcile.Result{}, err
+	}
+
+	// 2. calculate SidecarSet status based on pod and revision information
+	status := calculateStatus(control, pods, latestRevision, collisionCount)
+	//update sidecarSet status in store
+	if err := p.updateSidecarSetStatus(sidecarSet, status); err != nil {
+		return reconcile.Result{}, err
+	}
+	sidecarSet.Status = *status
+
+	// in case of informer cache latency
+	for _, pod := range pods {
+		sidecarcontrol.UpdateExpectations.ObserveUpdated(sidecarSet.Name, sidecarcontrol.GetSidecarSetRevision(sidecarSet), pod)
+	}
+	allUpdated, _, inflightPods := sidecarcontrol.UpdateExpectations.SatisfiedExpectations(sidecarSet.Name, sidecarcontrol.GetSidecarSetRevision(sidecarSet))
+	if !allUpdated {
+		klog.V(3).InfoS("Sidecarset matched pods has some update in flight, will sync later", "sidecarSet", klog.KObj(sidecarSet), "pods", inflightPods)
+		return reconcile.Result{RequeueAfter: time.Second}, nil
+	}
+
+	// 3. If sidecar container hot upgrade complete, then set the other one(empty sidecar container) image to HotUpgradeEmptyImage
+	if isSidecarSetHasHotUpgradeContainer(sidecarSet) {
+		var podsInHotUpgrading []*corev1.Pod
+		for _, pod := range pods {
+			// flip other hot sidecar container to empty, in the following:
+			// 1. the empty sidecar container image isn't equal HotUpgradeEmptyImage
+			// 2. all containers with exception of empty sidecar containers is updated and consistent
+			// 3. all containers with exception of empty sidecar containers is ready
+
+			// don't contain sidecar empty containers
+			sidecarContainers := sidecarcontrol.GetSidecarContainersInPod(sidecarSet)
+			for _, sidecarContainer := range sidecarSet.Spec.Containers {
+				if sidecarcontrol.IsHotUpgradeContainer(&sidecarContainer) { // 如果策略是 HotUpgrade
+					_, emptyContainer := sidecarcontrol.GetPodHotUpgradeContainers(sidecarContainer.Name, pod)
+					sidecarContainers.Delete(emptyContainer)
+				}
+			}
+			if isPodSidecarInHotUpgrading(sidecarSet, pod) && control.IsPodStateConsistent(pod, sidecarContainers) &&
+				isHotUpgradingReady(sidecarSet, pod) {
+				podsInHotUpgrading = append(podsInHotUpgrading, pod)
+			}
+		}
+		if err := p.flipHotUpgradingContainers(control, podsInHotUpgrading); err != nil {
+			return reconcile.Result{}, err
+		}
+	}
+
+	// 4. SidecarSet upgrade strategy type is NotUpdate
+	if isSidecarSetNotUpdate(sidecarSet) {
+		return reconcile.Result{}, nil
+	}
+
+	// 5. sidecarset already updates all matched pods, then return
+	if isSidecarSetUpdateFinish(status) {
+		klog.V(3).InfoS("SidecarSet matched pods were latest, and don't need update", "sidecarSet", klog.KObj(sidecarSet), "matchedPodCount", len(pods))
+		return reconcile.Result{}, nil
+	}
+
+	// 6. Paused indicates that the SidecarSet is paused to update matched pods
+	if sidecarSet.Spec.UpdateStrategy.Paused {
+		klog.V(3).InfoS("SidecarSet was paused", "sidecarSet", klog.KObj(sidecarSet))
+		return reconcile.Result{}, nil
+	}
+
+	// 7. upgrade pod sidecar
+	if err := p.updatePods(control, pods); err != nil {
+		return reconcile.Result{}, err
+	}
+	return reconcile.Result{}, nil
+}
+```
+
 
 ```go
 // https://github.com/openkruise/kruise/blob/6968bd8972ea176a584b676f4cd25379169e9389/pkg/util/inplaceupdate/inplace_update.go
