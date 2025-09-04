@@ -426,16 +426,16 @@ func (kl *Kubelet) SyncPod(_ context.Context, updateType kubetypes.SyncPodType, 
 ```go
 // SyncPod syncs the running pod into the desired pod by executing following steps:
 //
-//  1. Compute sandbox and container changes.
+//  1. 计算 sandbox and container 变化.
 //  2. Kill pod sandbox if necessary.
 //  3. Kill any containers that should not be running.
 //  4. Create sandbox if necessary.
-//  5. Create ephemeral containers.
-//  6. Create init containers.
+//  5. 创建 ephemeral 容器.
+//  6. 创建 init 容器.
 //  7. Resize running containers (if InPlacePodVerticalScaling==true)
 //  8. Create normal containers.
 func (m *kubeGenericRuntimeManager) SyncPod(ctx context.Context, pod *v1.Pod, podStatus *kubecontainer.PodStatus, pullSecrets []v1.Secret, backOff *flowcontrol.Backoff) (result kubecontainer.PodSyncResult) {
-    // ...
+    // ... 
 
 	// Step 4: 新建sandbox, 其实就是 pause 容器
 	podSandboxID := podContainerChanges.SandboxID

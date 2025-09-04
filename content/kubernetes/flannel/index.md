@@ -518,6 +518,30 @@ FLANNEL_IPMASQ=true
   ]
 }
 ```
+Delegate字段的意思是，这个CNI插件并不会自己做事儿，而是会调用Delegate指定的某种CNI内置插件来完成。对于Flannel来说，它调用的Delegate插件，就是前面介绍到的CNI bridge插件。
+
+
+```shell
+# Flannel CNI插件补充后的、完整的Delegate字段
+{
+    "hairpinMode":true,
+    "ipMasq":false,
+    "ipam":{
+        "routes":[
+            {
+                "dst":"10.244.0.0/16"
+            }
+        ],
+        "subnet":"10.244.1.0/24",
+        "type":"host-local"
+    },
+    "isDefaultGateway":true,
+    "isGateway":true,
+    "mtu":1410,
+    "name":"cbr0",
+    "type":"bridge"
+}
+```
 
 插件二进制调用
 ```go

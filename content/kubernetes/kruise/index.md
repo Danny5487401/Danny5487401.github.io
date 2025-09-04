@@ -304,12 +304,72 @@ https://openkruise.io/zh/docs/core-concepts/inplace-update
 
 如果我们修改了 Pod 中某个 container 的 image 字段，kubelet 会发现 container 的 hash 发生了变化、与机器上过去创建的容器 hash 不一致，而后 kubelet 就会把旧容器停掉，然后根据最新 Pod spec 中的 container 来创建新的容器。
 
+这个功能，其实就是针对单个 Pod 的原地升级的核心原理。
+
 
 ```go
+func (m *kubeGenericRuntimeManager) SyncPod(ctx context.Context, pod *v1.Pod, podStatus *kubecontainer.PodStatus, pullSecrets []v1.Secret, backOff *flowcontrol.Backoff) (result kubecontainer.PodSyncResult) {
+	// Step 1: 计算 sandbox and container 变化.
+	podContainerChanges := m.computePodActions(ctx, pod, podStatus)
+	klog.V(3).InfoS("computePodActions got for pod", "podActions", podContainerChanges, "pod", klog.KObj(pod))
+	if podContainerChanges.CreateSandbox {
+		ref, err := ref.GetReference(legacyscheme.Scheme, pod)
+		if err != nil {
+			klog.ErrorS(err, "Couldn't make a ref to pod", "pod", klog.KObj(pod))
+		}
+		if podContainerChanges.SandboxID != "" {
+			m.recorder.Eventf(ref, v1.EventTypeNormal, events.SandboxChanged, "Pod sandbox changed, it will be killed and re-created.")
+		} else {
+			klog.V(4).InfoS("SyncPod received new pod, will create a sandbox for it", "pod", klog.KObj(pod))
+		}
+	}
+
+	// Step 2: 杀掉 pod 如果 sandbox 变化
+	if podContainerChanges.KillPod {
+		if podContainerChanges.CreateSandbox {
+			klog.V(4).InfoS("Stopping PodSandbox for pod, will start new one", "pod", klog.KObj(pod))
+		} else {
+			klog.V(4).InfoS("Stopping PodSandbox for pod, because all other containers are dead", "pod", klog.KObj(pod))
+		}
+
+		killResult := m.killPodWithSyncResult(ctx, pod, kubecontainer.ConvertPodStatusToRunningPod(m.runtimeName, podStatus), nil)
+		result.AddPodSyncResult(killResult)
+		if killResult.Error() != nil {
+			klog.ErrorS(killResult.Error(), "killPodWithSyncResult failed")
+			return
+		}
+
+		if podContainerChanges.CreateSandbox {
+			m.purgeInitContainers(ctx, pod, podStatus)
+		}
+	} else {
+		// Step 3: 杀掉不需要的 容器
+		for containerID, containerInfo := range podContainerChanges.ContainersToKill {
+			klog.V(3).InfoS("Killing unwanted container for pod", "containerName", containerInfo.name, "containerID", containerID, "pod", klog.KObj(pod))
+			killContainerResult := kubecontainer.NewSyncResult(kubecontainer.KillContainer, containerInfo.name)
+			result.AddSyncResult(killContainerResult)
+			if err := m.killContainer(ctx, pod, containerID, containerInfo.name, containerInfo.message, containerInfo.reason, nil); err != nil {
+				killContainerResult.Fail(kubecontainer.ErrKillContainer, err.Error())
+				klog.ErrorS(err, "killContainer for pod failed", "containerName", containerInfo.name, "containerID", containerID, "pod", klog.KObj(pod))
+				return
+			}
+		}
+	}
+
+	// ....
+ }
+```
+
+
+```go
+
+// https://github.com/kubernetes/kubernetes/blob/9ddf1a02bd436e8ce16fb71ab832f4e0eca57a3a/pkg/kubelet/kuberuntime/kuberuntime_manager.go
+
 func (m *kubeGenericRuntimeManager) computePodActions(ctx context.Context, pod *v1.Pod, podStatus *kubecontainer.PodStatus) podActions {
 	klog.V(5).InfoS("Syncing Pod", "pod", klog.KObj(pod))
 
 	createPodSandbox, attempt, sandboxID := runtimeutil.PodSandboxChanged(pod, podStatus)
+	// pod 需改变的信息
 	changes := podActions{
 		KillPod:           createPodSandbox,
 		CreateSandbox:     createPodSandbox,
@@ -320,7 +380,7 @@ func (m *kubeGenericRuntimeManager) computePodActions(ctx context.Context, pod *
 	}
 
     // ..
-	// check the status of containers.
+	// 检查 container 状态
 	for idx, container := range pod.Spec.Containers {
 		containerStatus := podStatus.FindContainerStatusByName(container.Name)
 
@@ -330,6 +390,7 @@ func (m *kubeGenericRuntimeManager) computePodActions(ctx context.Context, pod *
 		var message string
 		var reason containerKillReason
 		restart := shouldRestartOnFailure(pod)
+		// 容器变化判断
 		// Do not restart if only the Resources field has changed with InPlacePodVerticalScaling enabled
 		if _, _, changed := containerChanged(&container, containerStatus); changed &&
 			(!isInPlacePodVerticalScalingAllowed(pod) ||
@@ -364,6 +425,7 @@ func (m *kubeGenericRuntimeManager) computePodActions(ctx context.Context, pod *
 			changes.ContainersToStart = append(changes.ContainersToStart, idx)
 		}
 
+		// 需要删除的容器
 		changes.ContainersToKill[containerStatus.ID] = containerToKillInfo{
 			name:      containerStatus.Name,
 			container: &pod.Spec.Containers[idx],
@@ -374,20 +436,15 @@ func (m *kubeGenericRuntimeManager) computePodActions(ctx context.Context, pod *
 	}
 
 	if keepCount == 0 && len(changes.ContainersToStart) == 0 {
+		// 需要杀掉 pod 
 		changes.KillPod = true
 	}
 
 	return changes
 }
 
-```
 
-
-
-```go
-// https://github.com/kubernetes/kubernetes/blob/9ddf1a02bd436e8ce16fb71ab832f4e0eca57a3a/pkg/kubelet/kuberuntime/kuberuntime_manager.go
-
-// container 判断
+// container 变化判断
 func containerChanged(container *v1.Container, containerStatus *kubecontainer.Status) (uint64, uint64, bool) {
 	// 计算 hash 
 	expectedHash := kubecontainer.HashContainer(container)
@@ -396,6 +453,7 @@ func containerChanged(container *v1.Container, containerStatus *kubecontainer.St
 ```
 
 ```go
+// 对容器进行 hash 计算
 func HashContainer(container *v1.Container) uint64 {
 	hash := fnv.New32a()
 	// Omit nil or empty field when calculating hash value
@@ -427,6 +485,64 @@ func HashContainerWithoutResources(container *v1.Container) uint64 {
 
 ```
 
+
+
+删除容器
+
+```go
+func (m *kubeGenericRuntimeManager) killContainer(ctx context.Context, pod *v1.Pod, containerID kubecontainer.ContainerID, containerName string, message string, reason containerKillReason, gracePeriodOverride *int64) error {
+	var containerSpec *v1.Container
+	if pod != nil {
+		if containerSpec = kubecontainer.GetContainerSpec(pod, containerName); containerSpec == nil {
+			return fmt.Errorf("failed to get containerSpec %q (id=%q) in pod %q when killing container for reason %q",
+				containerName, containerID.String(), format.Pod(pod), message)
+		}
+	} else {
+		// Restore necessary information if one of the specs is nil.
+		restoredPod, restoredContainer, err := m.restoreSpecsFromContainerLabels(ctx, containerID)
+		if err != nil {
+			return err
+		}
+		pod, containerSpec = restoredPod, restoredContainer
+	}
+
+	// From this point, pod and container must be non-nil.
+	gracePeriod := setTerminationGracePeriod(pod, containerSpec, containerName, containerID, reason)
+
+	if len(message) == 0 {
+		message = fmt.Sprintf("Stopping container %s", containerSpec.Name)
+	}
+	m.recordContainerEvent(pod, containerSpec, containerID.ID, v1.EventTypeNormal, events.KillingContainer, message)
+
+	// Run the pre-stop lifecycle hooks if applicable and if there is enough time to run it
+	if containerSpec.Lifecycle != nil && containerSpec.Lifecycle.PreStop != nil && gracePeriod > 0 {
+		gracePeriod = gracePeriod - m.executePreStopHook(ctx, pod, containerID, containerSpec, gracePeriod)
+	}
+	// always give containers a minimal shutdown window to avoid unnecessary SIGKILLs
+	if gracePeriod < minimumGracePeriodInSeconds {
+		gracePeriod = minimumGracePeriodInSeconds
+	}
+	if gracePeriodOverride != nil {
+		gracePeriod = *gracePeriodOverride
+		klog.V(3).InfoS("Killing container with a grace period override", "pod", klog.KObj(pod), "podUID", pod.UID,
+			"containerName", containerName, "containerID", containerID.String(), "gracePeriod", gracePeriod)
+	}
+
+	klog.V(2).InfoS("Killing container with a grace period", "pod", klog.KObj(pod), "podUID", pod.UID,
+		"containerName", containerName, "containerID", containerID.String(), "gracePeriod", gracePeriod)
+
+	err := m.runtimeService.StopContainer(ctx, containerID.ID, gracePeriod)
+	if err != nil && !crierror.IsNotFound(err) {
+		klog.ErrorS(err, "Container termination failed with gracePeriod", "pod", klog.KObj(pod), "podUID", pod.UID,
+			"containerName", containerName, "containerID", containerID.String(), "gracePeriod", gracePeriod)
+		return err
+	}
+	klog.V(3).InfoS("Container exited normally", "pod", klog.KObj(pod), "podUID", pod.UID,
+		"containerName", containerName, "containerID", containerID.String())
+
+	return nil
+}
+```
 
 ### kruise  in-place 原地升级原理
 
@@ -691,9 +807,8 @@ func SetOptionsDefaults(opts *UpdateOptions) *UpdateOptions {
 
 	return opts
 }
-```
 
-```go
+
 // 默认CalculateSpec函数, 这里体现出只支持label、annotation、镜像的更新的原地升级
 func defaultCalculateInPlaceUpdateSpec(oldRevision, newRevision *apps.ControllerRevision, opts *UpdateOptions) *UpdateSpec {
 	if oldRevision == nil || newRevision == nil {
@@ -784,49 +899,10 @@ func defaultCalculateInPlaceUpdateSpec(oldRevision, newRevision *apps.Controller
 	}
 
 	if len(metadataPatches) > 0 {
+		// 开启元数据修改特性
 		if utilfeature.DefaultFeatureGate.Enabled(features.InPlaceUpdateEnvFromMetadata) {
 			// for example: /metadata/labels/my-label-key
-			for _, op := range metadataPatches {
-				if op.Operation != "replace" && op.Operation != "add" {
-					continue
-				}
-				words := strings.SplitN(op.Path, "/", 4)
-				if len(words) != 4 || (words[2] != "labels" && words[2] != "annotations") {
-					continue
-				}
-				key := rfc6901Decoder.Replace(words[3])
-
-				for i := range newTemp.Spec.Containers {
-					c := &newTemp.Spec.Containers[i]
-					objMeta := updateSpec.ContainerRefMetadata[c.Name]
-					switch words[2] {
-					case "labels":
-						if !utilcontainermeta.IsContainerReferenceToMeta(c, "metadata.labels", key) {
-							continue
-						}
-						if objMeta.Labels == nil {
-							objMeta.Labels = make(map[string]string)
-						}
-						objMeta.Labels[key] = op.Value.(string)
-						delete(oldTemp.ObjectMeta.Labels, key)
-						delete(newTemp.ObjectMeta.Labels, key)
-
-					case "annotations":
-						if !utilcontainermeta.IsContainerReferenceToMeta(c, "metadata.annotations", key) {
-							continue
-						}
-						if objMeta.Annotations == nil {
-							objMeta.Annotations = make(map[string]string)
-						}
-						objMeta.Annotations[key] = op.Value.(string)
-						delete(oldTemp.ObjectMeta.Annotations, key)
-						delete(newTemp.ObjectMeta.Annotations, key)
-					}
-
-					updateSpec.ContainerRefMetadata[c.Name] = objMeta
-					updateSpec.UpdateEnvFromMetadata = true
-				}
-			}
+            // ... 
 		}
 
 		oldBytes, _ := json.Marshal(v1.Pod{ObjectMeta: oldTemp.ObjectMeta})

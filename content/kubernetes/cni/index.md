@@ -1352,8 +1352,12 @@ func (e *RawExec) ExecPlugin(ctx context.Context, pluginPath string, stdinData [
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	c := exec.CommandContext(ctx, pluginPath)
+	// 容器里网卡的名字eth0（CNI_IFNAME）、Pod的Network Namespace文件的路径（CNI_NETNS）、容器的ID（CNI_CONTAINERID）等。这些参数都属于上述环境变量里的内容。
+	// 在 CNI 环境变量里，还有一个叫作CNI_ARGS的参数。通过这个参数，CRI实现（比如dockershim）就可以以Key-Value的格式，传递自定义信息给网络插件。
 	c.Env = environ //作为环境变量
-	c.Stdin = bytes.NewBuffer(stdinData) // 作为标准输入
+
+	// dockershim会把Network Configuration以JSON数据的格式，通过标准输入（stdin）的方式传递给Flannel CNI插件。
+	c.Stdin = bytes.NewBuffer(stdinData) // 配置作为标准输入
 	c.Stdout = stdout
 	c.Stderr = stderr
 
@@ -1366,15 +1370,7 @@ func (e *RawExec) ExecPlugin(ctx context.Context, pluginPath string, stdinData [
 			break
 		}
 
-		// If the plugin is currently about to be written, then we wait a
-		// second and try it again
-		if strings.Contains(err.Error(), "text file busy") {
-			time.Sleep(time.Second)
-			continue
-		}
-
-		// All other errors except than the busy text file
-		return nil, e.pluginErr(err, stdout.Bytes(), stderr.Bytes())
+        // ...
 	}
 
 	// Copy stderr to caller's buffer in case plugin printed to both
