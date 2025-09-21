@@ -109,7 +109,7 @@ root@node1:~# cat /proc/sys/net/ipv4/conf/calid7b92ca9b15/proxy_arp
 ```
 
 
-### eXpress Data Path (XDP) 
+### XDP( eXpress Data Path) 
 
 XDP（eXpress Data Path）提供了一个内核态、高性能、可编程 BPF 包处理框架。
 本质上是Linux Kernel中的一个eBPF Hook（钩子），可以动态挂载，使得ebpf程序能够在数据报文到达网络驱动层时提前进行针对性的高速处理。
@@ -120,8 +120,8 @@ XDP 在内核收包函数 receive_skb() 之前
 {{<figure src="./xdp-process_before_skb.png#center" width=800px >}}
 
 在 receive_skb() 之后
-{{<figure src="./xdp-process_after_skb.png#center" width=800px >}}
 
+{{<figure src="./xdp-process_after_skb.png#center" width=800px >}}
 
 
 
@@ -141,6 +141,7 @@ XDP专为高性能而设计，相较与DPDK来说，具有以下优点：
 * 无需对网络配置或管理工具做任何修改。
 * 服务不中断的前提下动态重新编程，这意味着可以按需加入或移除功能，而不会引起任何流量中断，也能动态响应系统其他部分的的变化。
 * 主流的发行版中，Linux内核已经内置并启用了XDP，并且支持主流的高速网络驱动，4.8+的内核已内置，5.4+能够完全使用。
+
 缺点：
 
 * XDP不提供缓存队列（qdisc），TX设备太慢时会直接丢包，因而不能在接收队列（RX RING）比发送队列（TX RING）快的设备上使用XDP。
@@ -167,10 +168,22 @@ AF_XDP是XDP技术的一种应用场景，AF_XDP是一种高性能Linux socket
 
 ### IPIP 模式(不同网段)
 
-{{<figure src="./ip-in-ip.png#center" width=800px >}}
-Calico默认网络架构，IPIP 可理解为IPinIP，属于overlay的网络架构。不依赖于外部交换机设备，即可实现网络组网。缺点是报文的封装和解封装对网络效率有影响，节点规模有限制。
+
+Calico默认网络架构，IPIP 可理解为IPinIP，属于overlay的网络架构。不依赖于外部交换机设备，即可实现网络组网。
+缺点是报文的封装和解封装对网络效率有影响，节点规模有限制。
 
 {{<figure src="./ip-in-ip-communication.png#center" width=800px >}}
+
+```shell
+# 尽管这条规则的下一跳地址仍然是Node B 的IP地址，但这一次，要负责将IP包发出去的设备，变成了tunl0。
+10.5.2.0/16 via 10.120.179.8 tunl0
+```
+
+{{<figure src="./ip-in-ip.png#center" width=800px >}}
+
+经过封装后的新的IP包的目的地址，正是原IP包的下一跳地址，即Node B的IP地址：10.120.179.8。
+
+在实际测试中，Calico IPIP模式与Flannel VXLAN模式的性能大致相当。
 
 ### VXLAN (不同网段)
 
@@ -367,9 +380,9 @@ spec:
 
 {{<figure src="./standard_process.png#center" width=800px >}}
 
-1. 网卡收到一个包（通过 DMA 放到 ring-buffer）。
+1. 网卡收到一个包（通过 DMA 放到 ring-buffer）。然后通过硬中断，告诉中断处理程序已经收到了网络包。
 1. 包经过 XDP hook 点。
-1. 内核给包分配内存创建skb（包的内核结构体表示），然后送到内核协议栈。
+1. 内核给包分配内存创建（sk_buff）（包的内核结构体表示），然后再通过软中断，通知内核收到了新的网络帧.
 1. 包经过 GRO 处理，对分片包进行重组。
 1. 包进入 tc（traffic control）的 ingress hook。接下来，所有橙色的框都是 Netfilter 处理点。
 1. Netfilter：在 PREROUTING hook 点处理 raw table 里的 iptables 规则。

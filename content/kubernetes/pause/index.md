@@ -74,7 +74,22 @@ setns() 系统调用用于将一个进程加入到已经存在的命名空间中
 | UTS (UNIX Time-sharing System) | CLONE_NEWUTS |                                       Hostname and NIS domain name (since Linux 2.6.19)                                                                                                                                           |
 |             Cgroup             | CLONE_NEWCGROUP |                                       Cgroup root directory (since Linux 4.6)                                                                                                                                      |
 
+```C
+// include/linux/nsproxy.h
 
+struct nsproxy {
+	refcount_t count;
+	struct uts_namespace *uts_ns;
+	struct ipc_namespace *ipc_ns;
+	struct mnt_namespace *mnt_ns;
+	struct pid_namespace *pid_ns_for_children;
+	struct net 	     *net_ns;
+	struct time_namespace *time_ns;
+	struct time_namespace *time_ns_for_children;
+	struct cgroup_namespace *cgroup_ns;
+};
+
+```
 
 
 ## 功能

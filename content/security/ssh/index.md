@@ -114,7 +114,7 @@ SSH 连接协议定义的交互式登录终端会话、TCP/IP 端口转发、X11
 - 实现流控（窗口)
 
 
-```html
+```
 // 应用
 // https://www.rfc-editor.org/rfc/rfc4250#section-4.9.1
 Channel type                  Reference
@@ -136,9 +136,6 @@ direct-tcpip                  [SSH-CONNECT, Section 7.2]
 - 代理服务：使用SSH作为SOCKS代理来进行网络活动，增加通信的安全性。
 
 
-
-### 交互式会话
-在 SSH 语境下，会话（Session）代表远程执行一个程序。这个程序可能是 Shell、应用。同时，它可能有也可能没有一个 tty、可能涉及也可能不涉及 x11 forward。
 
 
 
@@ -278,6 +275,7 @@ curl -x socks5://localhost:50000 http://www.example.com
 
 
 ### 交互式会话 session
+在 SSH 语境下，会话（Session）代表远程执行一个程序。这个程序可能是 Shell、应用。同时，它可能有也可能没有一个 tty、可能涉及也可能不涉及 x11 forward。
 
 ```go
 // https://github.com/gravitational/teleport/blob/bfbc0276d4a0341f7170399a0062a2dcc5f90148/api/observability/tracing/ssh/client.go

@@ -70,11 +70,20 @@ PCI有三种地址空间：PCI I/O空间、PCI内存地址空间和PCI配置空�
 
 /proc/iomem 描写叙述了系统中全部的设备I/O在内存地址空间上的映射。
 
+有三个部分组成：
+
+- Bus Number：8 bits，也就是最多256条总线
+- Device Number：5 bits，也就是最多32个设备
+- Function Number：3 bits，也就是最多8个功能
+
+我们常说的BDF，它类似于网络中的IP地址，一般写作BB:DD.F的格式。
+
 一个PCI设备 40000000-400003ff : 0000:00:1f.1 解释
 * 40000000-400003ff是它所映射的内存地址空间，占领了内存地址空间的1024 bytes的位置，而
-* 0000:00:1f.1 则是一个PCI外设的地址,它以冒号和逗号分隔为4个部分，第一个16位表示域，第二个8位表示一个总线编号，第三个5位表示一 个设备号，最后是3位，表示功能号.
+* 0000:00:1f.1 则是一个PCI外设的地址,它以冒号和逗号分隔为4个部分，第一个16位表示域，第二个8位表示一个总线编号，第三个5位表示一个设备号，最后是3位，表示功能号.
   PCI设备的地址格式为<总线号>:<插槽号>.<功能号>
 
+由于默认BDF的方式最多只支持8个Function，可能不够用，所以PCIe还支持另一种解析方式，叫做ARI（Alternative Routing-ID Interpretation），它将Device Number和Function Number合并为一个8bit的字段，只用于表示Function，所以最多可以支持256个Function.
 
 一般一类设备在出厂的时候会有相同的一串classid,而classid记录在/sys/bus/pci/devices/*/class文件中
 
