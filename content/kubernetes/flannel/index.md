@@ -1,7 +1,7 @@
 ---
 title: "Flannel"
 date: 2025-02-27T20:51:18+08:00
-summary: "flannel 及源码 v0.26.0 实现"
+summary: "flannel 源码 v0.26.0 实现: 子网租约管理,三种数据包实现方式"
 categories:
   - kubernetes
 authors:
@@ -1071,6 +1071,92 @@ host-gw模式的工作原理，其实就是将每个Flannel子网（Flannel Subn
 例如，我们从etcd中监听到一个EventAdded事件subnet为10.1.15.0/24被分配给主机Public IP 192.168.0.100，hostgw要做的工作就是在本主机上添加一条目的地址为10.1.15.0/24，网关地址为192.168.0.100，输出设备为上文中选择的集群间交互的网卡即可。
 对于EventRemoved事件，只需删除对应的路由.
 
+
+
+## flannel 子网租约管理
+
+flannel的子网租约系统基于分布式状态机设计，核心数据结构围绕租约生命周期和事件传播构建。
+
+{{<figure src="./subnet_apply.png#center" width=800px >}}
+
+{{<figure src="./two_node_apply_subnet#center" width=800px >}}
+
+- 正常路径（NodeA）：租约创建→事务成功→获得子网
+- 冲突路径（NodeB）：租约创建→事务失败→重新选网→事务成功
+```go
+// https://github.com/flannel-io/flannel/blob/1bcfa6ce99f9a9660a539152a28db7f602b41021/subnet/etcd/registry.go
+
+func (esr *etcdSubnetRegistry) createSubnet(ctx context.Context, sn ip.IP4Net, sn6 ip.IP6Net, attrs *LeaseAttrs, ttl time.Duration) (time.Time, error) {
+	key := path.Join(esr.etcdCfg.Prefix, "subnets", MakeSubnetKey(sn, sn6))
+	value, err := json.Marshal(attrs)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	// 1. 创建etcd租约（TTL由flannel配置的--subnet-lease-duration指定，默认24小时）
+	lresp, err := esr.cli.Grant(ctx, int64(ttl.Seconds()))
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	// 2. 以事务方式创建子网键，绑定租约ID
+	req := etcd.OpPut(key, string(value), etcd.WithLease(lresp.ID))
+	cond := etcd.Compare(etcd.Version(key), "=", 0) // 检查键是否不存在（冲突检测）
+	tresp, err := esr.cli.Txn(ctx).If(cond).Then(req).Commit()
+	if err != nil {
+		_, rerr := esr.cli.Revoke(ctx, lresp.ID)
+		if rerr != nil {
+			log.Error(rerr)
+		}
+		return time.Time{}, err
+	}
+	if !tresp.Succeeded {
+		_, rerr := esr.cli.Revoke(ctx, lresp.ID)
+		if rerr != nil {
+			log.Error(rerr)
+		}
+		return time.Time{}, errSubnetAlreadyexists
+	}
+    // 3. 计算过期时间（当前时间+TTL）
+	exp := time.Now().Add(time.Duration(lresp.TTL) * time.Second)
+	return exp, nil
+}
+
+```
+
+etcd会自动删除过期租约绑定的键，触发EventRemoved事件。
+
+
+租约续约流程：节点心跳实现
+
+```go
+func (esr *etcdSubnetRegistry) updateSubnet(ctx context.Context, sn ip.IP4Net, sn6 ip.IP6Net, attrs *LeaseAttrs, ttl time.Duration, asof int64) (time.Time, error) {
+	key := path.Join(esr.etcdCfg.Prefix, "subnets", MakeSubnetKey(sn, sn6))
+	value, err := json.Marshal(attrs)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	lresp, lerr := esr.cli.Grant(ctx, int64(ttl.Seconds()))
+	if lerr != nil {
+		return time.Time{}, lerr
+	}
+
+	_, perr := esr.kv().Put(ctx, key, string(value), etcd.WithLease(lresp.ID))
+	if perr != nil {
+		_, rerr := esr.cli.Revoke(ctx, lresp.ID)
+		if rerr != nil {
+			log.Error(rerr)
+		}
+		return time.Time{}, perr
+	}
+
+	exp := time.Now().Add(time.Duration(lresp.TTL) * time.Second)
+
+	return exp, nil
+}
+
+```
 
 ## 参考
 - https://github.com/flannel-io/flannel

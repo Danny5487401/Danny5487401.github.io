@@ -350,9 +350,9 @@ root@node1:/opt/kubespray# source kubespray-venv/bin/activate
 ## 参考
 
 - https://kubernetes.io/zh-cn/docs/setup/production-environment/tools/
+- https://github.com/kubernetes/kubernetes/tree/v1.32.0/cmd/kubeadm
+- https://kubespray.io/#/
 - [11 基础篇 TCP连接的建立和断开受哪些系统配置影响](https://time.geekbang.org/column/article/284912)
 - [12 基础篇 TCP收发包过程会受哪些配置项影响？](https://learn.lianglianglee.com/%E4%B8%93%E6%A0%8F/Linux%E5%86%85%E6%A0%B8%E6%8A%80%E6%9C%AF%E5%AE%9E%E6%88%98%E8%AF%BE/12%20%E5%9F%BA%E7%A1%80%E7%AF%87%20TCP%E6%94%B6%E5%8F%91%E5%8C%85%E8%BF%87%E7%A8%8B%E4%BC%9A%E5%8F%97%E5%93%AA%E4%BA%9B%E9%85%8D%E7%BD%AE%E9%A1%B9%E5%BD%B1%E5%93%8D%EF%BC%9F.md)
 - [13 案例篇 TCP拥塞控制是如何导致业务性能抖动的](https://learn.lianglianglee.com/%E4%B8%93%E6%A0%8F/Linux%E5%86%85%E6%A0%B8%E6%8A%80%E6%9C%AF%E5%AE%9E%E6%88%98%E8%AF%BE/13%20%E6%A1%88%E4%BE%8B%E7%AF%87%20TCP%E6%8B%A5%E5%A1%9E%E6%8E%A7%E5%88%B6%E6%98%AF%E5%A6%82%E4%BD%95%E5%AF%BC%E8%87%B4%E4%B8%9A%E5%8A%A1%E6%80%A7%E8%83%BD%E6%8A%96%E5%8A%A8%E7%9A%84%EF%BC%9F.md)
 - [Kubespray实现生产环境一键部署k8s v1.25.6集群](https://www.magiccloudnet.com/kubespray/)
-- https://github.com/kubernetes/kubernetes/tree/v1.32.0/cmd/kubeadm
-- https://kubespray.io/#/

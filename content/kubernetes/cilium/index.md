@@ -119,11 +119,11 @@ eBPF 的执行需要三步：
 
 3. 向用户空间输出结果。
 
-#### eBPF应用
+#### eBPF 应用
 - bcc（https://github.com/iovisor/bcc）: 提供一套开发工具和脚本。
 
 
-#### eBPF的实现原理
+#### eBPF 的实现原理
 
 {{<figure src="./ebpf_principle.png#center" width=800px >}}
 
@@ -152,7 +152,11 @@ eBPF 的执行需要三步：
 用于提供大块的存储，这些存储可被用户空间程序用来进行访问，进而控制 eBPF 程序的运行状态。
 
 #### eBPF 程序分类和使用场景
+eBPF 程序类型决定了一个 eBPF 程序可以挂载的事件类型和事件参数，这也就意味着，内核中不同事件会触发不同类型的 eBPF 程序。
+
+根据内核头文件 include/uapi/linux/bpf.h 中 bpf_prog_type 的定义，Linux 内核 v5.13 已经支持 30 种不同类型的 eBPF 程序（
 ```shell
+# 查询当前系统支持的程序类型
 root@node5:~# bpftool feature probe | grep program_type
 eBPF program_type socket_filter is available
 eBPF program_type kprobe is available
@@ -199,10 +203,60 @@ tracepoint, kprobe, perf_event等，主要用于从系统中提取跟踪信息�
 
 xdp, sock_ops, cgroup_sock_addr , sk_msg等，主要用于对网络数据包进行过滤和处理，进而实现网络的观测、过滤、流量控制以及性能优化等各种丰富的功能，这里可以丢包，重定向。
 
+根据事件触发位置的不同，网络类 eBPF 程序又可以分为 XDP（eXpress Data Path，高速数据路径）程序、TC（Traffic Control，流量控制）程序、套接字程序以及 cgroup 程序，
+
 3. 安全和其他
 
 lsm，用于安全.
 
+##### kprobe
+
+kprobe 允许在内核函数的入口处插入一个断点。
+当 CPU 执行到这个位置时，会触发一个陷入（trap），CPU 切换到你预先定义的处理函数（probe handler）执行。
+这个处理函数可以访问和修改内核的状态，包括 CPU 寄存器、内核栈、全局变量等。执行完处理函数后，CPU 会返回到断点处，继续执行原来的内核代码.
+
+
+kretprobe 允许在内核函数返回时插入探测点。这对于追踪函数的返回值或者函数的执行时间非常有用。
+kretprobe 的工作原理是在函数的返回地址前插入一个断点。当函数返回时，CPU 会先跳转到你的处理函数，然后再返回到原来的地址。
+
+
+也不是所有的函数都是支持kprobe机制，可以通过cat /sys/kernel/debug/tracing/available_filter_functions查看当前系统支持的函数
+
+
+##### tracepoint
+tracepoints 是 Linux 内核中的一种机制，它们是在内核源代码中预定义的钩子点，用于插入用于跟踪和调试的代码
+
+tracepoints 是在内核源代码中预定义的，提供了稳定的 ABI。即使内核版本升级，tracepoint 的名称和参数也不会改变，这使得开发者可以编写依赖于特定 tracepoint 的代码，而不用担心在未来的内核版本中这些 tracepoint 会改变。
+
+tracepoints 对性能的影响非常小。只有当 tracepoint 被激活，并且有一个或多个回调函数（也称为探针）附加到它时，它才会消耗 CPU 时间。这使得 tracepoints 非常适合在生产环境中使用
+
+##### socket
+
+socket 就是和网络包相关的事件，常见的网络包处理函数有sock_filter和sockops。
+
+
+其中和socket相关的事件有：
+
+* BPF_PROG_TYPE_SOCKET_FILTER: 这种类型的 eBPF 程序设计用于处理网络数据包
+* BPF_PROG_TYPE_SOCK_OPS 和 BPF_PROG_TYPE_SK_SKB: 这两种类型的 eBPF 程序设计用于处理 socket 操作和 socket 缓冲区中的数据包
+* BPF_PROG_TYPE_SK_MSG：用于处理 socket 消息
+
+##### tc (traffic control 流量控制)
+
+Linux 流量控制通过网卡队列、排队规则、分类器、过滤器以及执行器等，实现了对网络流量的整形调度和带宽控制。
+
+子系统包括 qdisc（queueing discipline 队列规则）、class、classifier（filter）、action等概念，eBPF程序可以作为classifier被挂载
+
+TC 模块实现流量控制功能使用的排队规则分为两类：无分类排队规则、分类排队规则。无分类排队规则相对简单，而分类排队规则则引出了分类和过滤器等概念，使其流量控制功能增强
+
+
+##### xdp（eXpress Data Path）
+XDP机制的主要目标是在接收数据包时尽早处理它们，以提高网络性能和降低延迟。它通过将eBPF程序附加到网络设备的接收路径上来实现这一目标。
+
+
+##### uprobe(User Probe)
+
+利用了Linux内核中的ftrace（function trace）框架来实现。通过uprobe，可以在用户空间程序的指定函数入口或出口处插入探测点，当该函数被调用或返回时，可以触发事先定义的处理逻辑。
 
 
 #### 动态追踪的事件源
@@ -214,11 +268,32 @@ lsm，用于安全.
 - 动态探针，则是指没有事先在代码中定义，但却可以在运行时动态添加的探针，比如函数的调用和返回等。动态探针支持按需在内核或者应用程序中添加探测点，具有更高的灵活性。常见的动态探针有两种，即用于内核态的 kprobes 和用于用户态的 uprobes。
 
 
+## 安装要求
+https://docs.cilium.io/en/v1.8/operations/system_requirements/#features-kernel-matrix
+
+
+
+
 ## 组件
 https://docs.cilium.io/en/v1.8/concepts/overview/
 
 
 {{<figure src="./cilium-component.png#center" width=800px >}}
+
+
+### 整体架构：控制平面与数据平面
+
+
+数据平面 (Data Plane)：数据平面的核心职责是高效处理实际的网络流量。在 Cilium 中，数据平面主要由运行在每个 Kubernetes 节点（宿主机）Linux 内核中的 eBPF 程序构成。
+这些 eBPF 程序负责处理 L3/L4 层的网络连接、执行网络策略、进行负载均衡等。对于 L7 层的策略执行（例如 HTTP、Kafka 策略），Cilium 的数据平面还会集成一个 Envoy 代理。数
+
+
+控制平面 (Control Plane)：控制平面的主要职责是管理和配置数据平面组件。Cilium 的控制平面主要由运行在每个 Kubernetes 节点上的 cilium-agent 守护进程实现。
+每个 cilium-agent 都是一个独立的控制平面实例，它连接到 Kubernetes API 服务器，监视集群状态和配置变化（例如 Pod 的创建与删除、网络策略的更新等），并将这些高级配置翻译成具体的 eBPF 程序和规则，下发到其所在节点的数据平面执行。
+此外，cilium-agent 还会将其节点上创建的端点（Endpoints）或身份（Identities）等信息以 Kubernetes 自定义资源（CRD）的形式写回 Kubernetes API。
+
+
+### cilium operator
 
 
 ### Cilium Agent
@@ -241,6 +316,80 @@ Cilium Agent 以 daemonset 的形式运行，因此 Kubernetes 集群的每个�
 ### Hubble UI
 用于展示 Hubble Server 收集的观测数据，这里会直接连接到 Relay 去查询数据。
 
+
+### Cilium CLI (cilium 和 cilium-dbg)
+
+cilium CLI：这是一个用于快速安装、管理和故障排除运行 Cilium 的 Kubernetes 集群的命令行工具。用户可以使用它来安装 Cilium、检查 Cilium 安装状态、启用/禁用特性（如 ClusterMesh、Hubble）等。
+```shell
+root@node1:~# cilium --help
+CLI to install, manage, & troubleshooting Cilium clusters running Kubernetes.
+
+#  ...
+
+Usage:
+  cilium [flags]
+  cilium [command]
+
+Available Commands:
+  bgp          Access to BGP control plane
+  clustermesh  Multi Cluster Management
+  completion   Generate the autocompletion script for the specified shell
+  config       Manage Configuration
+  connectivity Connectivity troubleshooting
+  context      Display the configuration context
+  encryption   Cilium encryption
+  help         Help about any command
+  hubble       Hubble observability
+  install      Install Cilium in a Kubernetes cluster using Helm
+  status       Display status
+  sysdump      Collects information required to troubleshoot issues with Cilium and Hubble
+  uninstall    Uninstall Cilium using Helm
+  upgrade      Upgrade a Cilium installation a Kubernetes cluster using Helm
+  version      Display detailed version information
+```
+
+cilium-dbg (Debug Client)：这是一个与 Cilium Agent 一同安装在每个节点上的命令行工具。它通过与同一节点上运行的 Cilium Agent 的 REST API 交互，允许检查本地 Agent 的状态和各种内部信息。此外，它还提供了直接访问 eBPF 映射以验证其状态的工具。需要注意的是，这个内嵌于 Agent 的 cilium-dbg 与用于集群管理的 cilium CLI 是不同的工具。
+
+```shell
+root@node2:/home/cilium# cilium-dbg --help
+CLI for interacting with the local Cilium Agent
+
+Usage:
+  cilium-dbg [command]
+
+Available Commands:
+  bgp          Access to BGP control plane
+  bpf          Direct access to local BPF maps
+  build-config Resolve all of the configuration sources that apply to this node
+  cgroups      Cgroup metadata
+  cleanup      Remove system state installed by Cilium at runtime
+  completion   Output shell completion code
+  config       Cilium configuration options
+  debuginfo    Request available debugging information from agent
+  encrypt      Manage transparent encryption
+  endpoint     Manage endpoints
+  envoy        Manage Envoy Proxy
+  fqdn         Manage fqdn proxy
+  help         Help about any command
+  identity     Manage security identities
+  ip           Manage IP addresses and associated information
+  kvstore      Direct access to the kvstore
+  lrp          Manage local redirect policies
+  map          Access userspace cached content of BPF maps
+  metrics      Access metric status
+  monitor      Display BPF program events
+  node         Manage cluster nodes
+  nodeid       List node IDs and associated information
+  policy       Manage security policies
+  prefilter    Manage XDP CIDR filters
+  preflight    Cilium upgrade helper
+  recorder     Introspect or mangle pcap recorder
+  service      Manage services & loadbalancers
+  statedb      Inspect StateDB
+  status       Display status of daemon
+  troubleshoot Run troubleshooting utilities to check control-plane connectivity
+  version      Print version information
+```
 
 ## 目录结构说明
 
@@ -284,8 +433,17 @@ bpf/
 
 
 ## ipam
+https://docs.cilium.io/en/v1.8/concepts/networking/ipam/
 
-Cluster Scope 模式
+
+### cluster-pool 模式( 默认)
+https://docs.cilium.io/en/v1.8/concepts/networking/ipam/cluster-pool/
+
+cluster-pool 模式：为每一个 node 分配 pod cidr 交给部署的 cilium-operator 来做.
+
+这个 PodCIDRs 的分配与 Flannel 中的 PodCIDRs 分配 的不同：后者使用 v1.Node 上由 Kubernetes 分配的 podCIDR，这个与 Cilium 的 Kubernetes Host Scope 类似；
+而 Cilium 的 cluster-scope 使用的 PodCIDRs 则是由 Cilium operator 来分配和管理的，operator 将分配的 PodCIDR 附加在 v2.CiliumNode 上
+
 ```shell
 (⎈|kubeasz-test:nfs)➜  ~ kubectl get ciliumnode
 NAME    CILIUMINTERNALIP   INTERNALIP    AGE
@@ -295,9 +453,65 @@ node3   10.233.65.143      172.16.7.32   24d
 node4   10.233.68.229      172.16.7.33   24d
 node5   10.233.67.96       172.16.7.34   24d
 node6   10.233.69.139      172.16.7.35   23d
+
+(⎈|kubeasz-test:monitoring)➜  ~ kubectl get cn node1 -o yaml
+apiVersion: cilium.io/v2
+kind: CiliumNode
+metadata:
+  creationTimestamp: "2025-08-20T07:05:10Z"
+  generation: 33
+  labels:
+    beta.kubernetes.io/arch: amd64
+    beta.kubernetes.io/os: linux
+    kubernetes.io/arch: amd64
+    kubernetes.io/hostname: node1
+    kubernetes.io/os: linux
+    node-role.kubernetes.io/control-plane: ""
+    node.kubernetes.io/exclude-from-external-load-balancers: ""
+    openebs.io/nodename: node1
+  name: node1
+  ownerReferences:
+  - apiVersion: v1
+    kind: Node
+    name: node1
+    uid: add1b2b6-5a4d-4882-9c52-be844c221253
+  resourceVersion: "13826717"
+  uid: 34624aac-196e-4e8a-a9d7-c8f0d3813f0e
+spec:
+  addresses:
+  - ip: 172.16.7.30
+    type: InternalIP
+  - ip: 10.233.66.89
+    type: CiliumInternalIP
+  alibaba-cloud: {}
+  azure: {}
+  bootid: 5c26c664-8df0-4385-90f6-ace4c9cc9e80
+  encryption: {}
+  eni: {}
+  health:
+    ipv4: 10.233.66.85
+  ingress: {}
+  ipam:
+    podCIDRs:
+    - 10.233.66.0/24
+    pools: {}
+status:
+  alibaba-cloud: {}
+  azure: {}
+  eni: {}
+  ipam:
+    operator-status: {}
 ```
+
+
+### crd
+
+https://docs.cilium.io/en/v1.8/concepts/networking/ipam/crd/
 
 
 ## 参考
 - [深入浅出eBPF｜你要了解的7个核心问题](https://mp.weixin.qq.com/s/Xr8ECrS_fR3aCT1vKJ9yIg)
 - [BPF BTF 详解](https://www.cnblogs.com/linhaostudy/p/18060055)
+- [eBPF中常见的事件类型](https://blog.spoock.com/2023/08/19/eBPF-Hook/)
+- [Cilium datapath梳理](https://rexrock.github.io/post/cilium2/)
+- [eBPF 开源项目 Cilium 深入分析](https://blog.csdn.net/weixin_39145568/article/details/147960141)

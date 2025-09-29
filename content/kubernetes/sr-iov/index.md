@@ -300,6 +300,7 @@ Linux Kernel version 3.8.x 及以上版本可以通过上述调整 sriov_numvfs 
 如果VF已经被放入了其他网络名字空间，那么net目录下会显示为空，例如上图中的virtfn0。
 
 ```shell
+# 查看 pf 下面的 vf
 $ ip -d link show eth4
 6: eth4: <BROADCAST,MULTICAST,SLAVE,UP,LOWER_UP> mtu 1500 qdisc mq master bond0 state UP mode DEFAULT group default qlen 1000
     link/ether f0:33:e5:a3:92:81 brd ff:ff:ff:ff:ff:ff promiscuity 0 minmtu 68 maxmtu 9702 
@@ -307,6 +308,8 @@ $ ip -d link show eth4
     vf 0     link/ether 00:00:00:00:00:00, spoof checking off, link-state auto, trust off
     vf 1     link/ether 00:00:00:00:00:00, spoof checking off, link-state auto, trust off
     ... 
+    
+# 看 VF 的 net 设备
 $ ls /sys/class/net/eth4/device/virtfn*/net
 /sys/class/net/eth4/device/virtfn0/net:
 
@@ -1086,28 +1089,20 @@ func (s *sriovManager) FillOriginalVfInfo(conf *sriovtypes.NetConf) error {
 	return err
 }
 
-// 根据 pci 地址获取 pf 和 vfid
-func getVfInfo(vfPci string) (string, int, error) {
-	var vfID int
 
-	// 获取 pf name
-	pf, err := utils.GetPfName(vfPci)
-	if err != nil {
-		return "", vfID, err
+func getVfInfo(link netlink.Link, id int) *netlink.VfInfo {
+	attrs := link.Attrs()
+	for _, vf := range attrs.Vfs {
+		if vf.ID == id {
+			return &vf
+		}
 	}
-    
-	// 获取 vf id 
-	vfID, err = utils.GetVfid(vfPci, pf)
-	if err != nil {
-		return "", vfID, err
-	}
-
-	return pf, vfID, nil
+	return nil
 }
-
-
 ```
 
+
+重要工具函数
 
 ```go
 // https://github.com/k8snetworkplumbingwg/sriov-cni/blob/36e2d17af18803d0a1ced3c0c62a33b321d05a5b/pkg/utils/utils.go
@@ -1125,7 +1120,7 @@ var (
 	UserspaceDrivers = []string{"vfio-pci", "uio_pci_generic", "igb_uio"}
 )
 
-// 获取 pf 名字
+// 通过 vf pci 反向获取 pf name
 func GetPfName(vf string) (string, error) {
 	pfSymLink := filepath.Join(SysBusPci, vf, "physfn", "net")
 	_, err := os.Lstat(pfSymLink)
@@ -1145,7 +1140,7 @@ func GetPfName(vf string) (string, error) {
 	return strings.TrimSpace(files[0].Name()), nil
 }
 
-// 获取 vfid 
+//  根据 pci 地址及 pf 获取 vf id 
 func GetVfid(addr string, pfName string) (int, error) {
 	var id int
 	vfTotal, err := GetSriovNumVfs(pfName)
