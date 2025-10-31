@@ -376,6 +376,15 @@ spec:
 ## calico 数据面
 
 ### 传统标准数据面
+{{<figure src="./nic_n_driver.png#center" width=800px >}}
+NIC 在接收到数据包之后，首先需要将数据同步到内核中，这中间的桥梁是 rx ring buffer。它是由 NIC 和驱动程序共享的一片区域，事实上，rx ring buffer 存储的并不是实际的 packet 数据，而是一个描述符，这个描述符指向了它真正的存储地址，
+
+1. 驱动在内存中分配一片缓冲区用来接收数据包，叫做 sk_buffer；
+1. 将上述缓冲区的地址和大小（即接收描述符），加入到 rx ring buffer。描述符中的缓冲区地址是 DMA 使用的物理地址；
+1. 驱动通知网卡有一个新的描述符；
+1. 网卡从 rx ring buffer 中取出描述符，从而获知缓冲区的地址和大小；
+1. 网卡收到新的数据包；
+1. 网卡将新数据包通过 DMA 直接写到 sk_buffer 中。
 
 
 {{<figure src="./standard_process.png#center" width=800px >}}
@@ -383,8 +392,8 @@ spec:
 1. 网卡收到一个包（通过 DMA 放到 ring-buffer）。然后通过硬中断，告诉中断处理程序已经收到了网络包。
 1. 包经过 XDP hook 点。
 1. 内核给包分配内存创建（sk_buff）（包的内核结构体表示），然后再通过软中断，通知内核收到了新的网络帧.
-1. 包经过 GRO 处理，对分片包进行重组。
-1. 包进入 tc（traffic control）的 ingress hook。接下来，所有橙色的框都是 Netfilter 处理点。
+1. 包经过 GRO(Generic Receive Offload) 处理，对分片包进行重组。
+1. 包进入 tc（traffic conrtrol）的 ingress hook。接下来，所有橙色的框都是 Netfilter 处理点。
 1. Netfilter：在 PREROUTING hook 点处理 raw table 里的 iptables 规则。
 1. 包经过内核的连接跟踪（conntrack）模块。
 1. Netfilter：在 PREROUTING hook 点处理 mangle table 的 iptables 规则。

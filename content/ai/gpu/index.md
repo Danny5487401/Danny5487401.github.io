@@ -50,7 +50,7 @@ NVLink服务器指的是采用NVLink和NVSwitch技术来互联GPU的服务器，
 ## DMA( Direct Memory Access 直接内存访问)
 {{<figure src="./dma_info.png#center" width=800px >}}
 
-DMA 是单机内存和设备间数据传输的“发动机”。 它的核心目标是加速设备（如硬盘、显卡、网卡）与本地内存之间的数据流动，减少 CPU 的参与
+DMA 是单机内存和设备间数据传输的“发动机”。 它的核心目标是加速设备（如硬盘、显卡、网卡）与本地内存之间的数据流动，减少 CPU 的参与.
 
 红线部分为传统内存访问，需要通过CPU进行数据copy来移动数据，通过CPU将内存中的Buffer1移动到Buffer2中。
 在DMA模式：可以同DMA Engine之间通过硬件将数据从Buffer1移动到Buffer2,而不需要操作系统CPU的参与，大大降低了CPU Copy的开销。

@@ -1,5 +1,3 @@
-
-
 ---
 title: "Pod creation"
 date: 2024-10-30T22:30:14+08:00

@@ -10,6 +10,45 @@ tags:
 ---
 Volcano 主要用于AI、大数据、基因、渲染等诸多高性能计算场景，对主流通用计算框架均有很好的支持。它提供高性能计算任务调度，异构设备管理，任务运行时管理等能力.
 
+## 基本概念
+
+### cpu 相关
+```shell
+# 有2个socket，每个socket有10个核，每个核开超线程，总共2*10*2=40个逻辑处理器。每个socket划分到一个numa node，总共两个numa。
+# lscpu 查看 cpu 拓扑
+Architecture:          x86_64
+CPU op-mode(s):        32-bit, 64-bit
+Byte Order:            Little Endian
+CPU(s):                40
+On-line CPU(s) list:   0-39
+Thread(s) per core:    2
+Core(s) per socket:    10
+Socket(s):             2
+NUMA node(s):          2
+Vendor ID:             GenuineIntel
+CPU family:            6
+Model:                 79
+Model name:            Intel(R) Xeon(R) CPU E5-2630 v4 @ 2.20GHz
+Stepping:              1
+CPU MHz:               2200.134
+CPU max MHz:           2200.0000
+CPU min MHz:           1200.0000
+BogoMIPS:              4389.32
+Virtualization:        VT-x
+L1d cache:             32K
+L1i cache:             32K
+L2 cache:              256K
+L3 cache:              25600K
+NUMA node0 CPU(s):     0-9,20-29
+NUMA node1 CPU(s):     10-19,30-39
+Flags:                 fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon pebs bts rep_good nopl xtopology nonstop_tsc aperfmperf eagerfpu pni pclmulqdq dtes64 monitor ds_cpl vmx smx est tm2 ssse3 sdbg fma cx16 xtpr pdcm pcid dca sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand lahf_lm abm 3dnowprefetch epb cat_l3 cdp_l3 intel_ppin intel_pt ssbd ibrs ibpb stibp tpr_shadow vnmi flexpriority ept vpid fsgsbase tsc_adjust bmi1 hle avx2 smep bmi2 erms invpcid rtm cqm rdt_a rdseed adx smap xsaveopt cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local dtherm arat pln pts spec_ctrl intel_stibp flush_l1d
+```
+* Socket(s)：主板上面的物理 CPU 插槽。
+* Core(s)：Core就是平时说的核，双核、四核等，就是每个CPU上的核数
+* Thread(s)：一个 core 包含多个可以并行处理任务的 thread，即 Thread(s) per core， thread 是单个独立的执行上下文，竞争 core 内寄存器等共享资源。也称为Siblings Thread（兄弟线程），即由同一个 Core 超线程出来的 Threads。
+* NUMA nodes：一个 socket 可以划分为多个 NUMA node。Numa使用node来管理CPU和内存。
+对操作系统来说，其逻辑CPU的数量就是Socket*Core*Thread
+
 
 ## 为什么使用volcano
 
@@ -24,7 +63,7 @@ Volcano由scheduler、controllermanager、admission和vcctl组成
 - scheduler 通过一系列的action和plugin调度Job，并为它找到一个最适合的节点。与k8s本身的调度器相比，Volcano支持针对Job的多种调度算法。
 - controller manager管理CRD资源的生命周期。对用户创建的batch.volcano.sh/v1alpha1/job以及其他crd资源进行reconcile. 它主要由Queue ControllerManager、PodGroupControllerManager 、 VCJob ControllerManager构成。
 - admission负责对CRD API资源进行校验。
-- vcctl是Volcano的命令行客户端工具。
+- vcctl 是Volcano的命令行客户端工具。
 
 
 ## Volcano scheduler的工作流程
@@ -150,6 +189,104 @@ CPU.weight * (request + used) / allocatable
 ### DRF（Dominant Resource Fairness） Scheduling
 DRF 调度策略认为占用资源较少的任务具有更高的优先级。这样能够满足更多的作业，不会因为一个胖业务， 饿死大批小业务。
 DRF 调度算法能够确保在多种类型资源共存的环境下，尽可能满足分配的公平原则。
+
+
+### NUMA Aware Scheduling
+
+从糟糕的使用方式来看，如果两个进程的CPU内核在分配时，可能会没有遵循NUMA的亲和性，会带来很大的性能问题，体现在三个方面：
+
+- CPU争抢带来频繁的上下文切换时间；
+- 频繁的进程切换导致CPU高速缓存失败；
+- 跨NUMA访存会带来更严重的性能瓶颈。
+
+
+
+- https://github.com/volcano-sh/volcano/blob/master/docs/design/numa-aware.md
+- https://github.com/volcano-sh/volcano/blob/master/docs/user-guide/how_to_use_numa_aware.md
+
+{{<figure src="./smp_cache.png#center" width=800px >}}
+
+当CPU不断增长的情况下，共享的系统总线就会因为资源竞争(多核争抢总线资源以访问北桥上的内存)而出现扩展和性能问题,基于SMP架构上的优化，设计出了NUMA(Non-Uniform Memory Access)非均匀内存访问。
+
+{{<figure src="./numa_cache.png#center" width=800px >}}
+
+
+中断的问题上，当两个NUMA节点处理中断时，CPU实例化的softnet_data以及驱动分配的sk_buffer都可能是跨Node的，数据接收后对上层应用Redis来说，跨Node访问的几率也大大提高，并且无法充分利用L2、L3 cache，增加了延时。
+
+由于Linux wake affinity特性，如果两个进程频繁互动，调度系统会觉得它们很有可能共享同样的数据，把它们放到同一CPU核心或NUMA Node有助于提高缓存和内存的访问性能，所以当一个进程唤醒另一个的时候，被唤醒的进程可能会被放到相同的CPU core或者相同的NUMA节点上。
+
+
+在k8s管理容器的组件里，与NUMA有关的组件是拓扑管理器（topologyManager）.
+
+
+
+实现方案如下：
+1. resource-exporter 是部署在每个节点上的 DaemonSet，负责节点的拓扑信息采集，并将节点信息写入 CR 中（Numatopology）。
+2. Volcano 根据节点的 Numatopology，在调度 Pod 时进行 NUMA 调度感知。
+3. 节点 kubelet 完成绑核工作。
+
+```shell
+(⎈|kubeasz-test:monitoring)➜  ~ kubectl get numatopologies node5 -o yaml
+apiVersion: nodeinfo.volcano.sh/v1alpha1
+kind: Numatopology
+metadata:
+  creationTimestamp: "2025-10-26T08:34:49Z"
+  generation: 1
+  name: node5
+  resourceVersion: "26517897"
+  uid: b0fd84f3-9d97-4df5-b053-9e209f6e6e04
+spec:
+  # cpu的NUMANodeID、SocketID、CoreID的信息
+  cpuDetail:
+    "0": {}
+    "1":
+      core: 1
+    "2":
+      socket: 1
+    "3":
+      core: 1
+      socket: 1
+    "4":
+      socket: 2
+    "5":
+      core: 1
+      socket: 2
+    "6":
+      socket: 3
+    "7":
+      core: 1
+      socket: 3
+    "8":
+      socket: 4
+    "9":
+      core: 1
+      socket: 4
+    "10":
+      socket: 5
+    "11":
+      core: 1
+      socket: 5
+    "12":
+      socket: 6
+    "13":
+      core: 1
+      socket: 6
+    "14":
+      socket: 7
+    "15":
+      core: 1
+      socket: 7
+  # 资源的NUMA感知信息，包含可分配量和资源总量
+  numares:
+    cpu:
+      capacity: 16
+  # 包含cpuManager、topologyManager的策略配置。
+  policies:
+    CPUManagerPolicy: ""
+    TopologyManagerPolicy: ""
+```
+
+
 
 
 ## 云原生混部

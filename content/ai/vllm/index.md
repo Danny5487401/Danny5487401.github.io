@@ -1,11 +1,12 @@
 ---
 title: "vLLM"
 date: 2025-08-29T11:29:48+08:00
+summary: "PagedAttention 实现"
 draft: true
 ---
 
 
-vLLM 主要用于快速 LLM 推理和服务，其核心是 PagedAttention .
+vLLM 主要用于快速 LLM 推理和服务，其核心是 PagedAttention.
 
 ## 基本概念
 
@@ -34,7 +35,7 @@ MAC的开销主要来自两方面。一是从存储中读取数据；二是向�
 
 ## 序列建模的演进之路
 
-### RNN（ Recurrent Neural Networks）：序列处理的开拓者
+### RNN（ Recurrent Neural Networks)：序列处理的开拓者
 
 局限性：然而，由于梯度消失问题，普通RNN很难学习长距离依赖。随着序列长度增加，早期输入的信息会迅速衰减或爆炸。
 
@@ -55,7 +56,6 @@ MAC的开销主要来自两方面。一是从存储中读取数据；二是向�
 
 
 ## FlashAttention 基本原理
-
 
 
 

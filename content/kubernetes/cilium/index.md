@@ -1,7 +1,7 @@
 ---
 title: "Cilium"
 date: 2025-08-29T23:04:45+08:00
-summary: "ebpf 在 cilium 中的使用"
+summary: "ebpf 在 cilium 中的使用, cilium ipam 策略."
 categories:
   - cni
   - cilium
@@ -10,7 +10,21 @@ tags:
 ---
 
 
-## 基本知识
+## 容器的网络发展路线
+
+基于 Linux bridge 以及基于 ovs 实现的 overlay 的网络。
+
+基于 bgp/hostgw 等基于路由能力的网络。
+
+基于 macvlan，ipvlan 等偏物理网络的 underlay 的网络。
+
+基于 Kernel 的 eBPF 的技术实现的网络。
+
+基于 dpdk/sriov/vpp/virtio-user/offload/af-xdp 实现的用户态的网络
+
+## bpf 相关知识
+BPF( Berkeley Packet Filter). 包括了 cBPF(classic Berkeley Packet Filter) 和 eBPF(extended Berkeley Packet Filter)。
+
 
 ### bpftool
 
@@ -78,17 +92,6 @@ eBPF map_type cgrp_storage is available
 ```
 
 
-### 容器的网络发展路线
-
-基于 Linux bridge 以及基于 ovs 实现的 overlay 的网络。
-
-基于 bgp/hostgw 等基于路由能力的网络。
-
-基于 macvlan，ipvlan 等偏物理网络的 underlay 的网络。
-
-基于 Kernel 的 eBPF 的技术实现的网络。
-
-基于 dpdk/sriov/vpp/virtio-user/offload/af-xdp 实现的用户态的网络
 
 ### BTF（BPF Type Format）
 BTF（BPF Type Format）是内嵌在BPF（Berkeley Packet Filter）程序中的数据结构描述信息.
@@ -106,6 +109,13 @@ BTF 规范包含两个部分：
 
 内核 API 是用户空间和内核之间的约定。内核在使用之前使用 BTF 信息对其进行验证。ELF 文件格式是一个用户空间 ELF 文件和 libbpf 加载器之间的约定。
 
+### cBPF(classic BPF)
+
+cBPF 的工作原理很简单，编写一段 BPF 指令，用来判断给定的网络数据包是否符合过滤条件：如果符合过滤条件，则接收或不接收该数据包。
+换句话说，就是给 BPF 指令输入一个网络数据包，该段指令返回 0(表示拒绝数据包) 或 非 0 值(表示接收数据包)。当然，过滤指令是 BPF 虚拟机类型的，所以还要有一个 BPF 指令解释器，将 BPF 指令翻译成本地指令(如 ARM,x86)来执行。
+
+
+
 ### eBPF（extended BPF）
 eBPF 是嵌入在 Linux 内核中的虚拟机。它允许将小程序加载到内核中，并附加到钩子上，当某些事件发生时会触发这些钩子。这允许（有时大量）定制内核的行为。
 
@@ -118,6 +128,18 @@ eBPF 的执行需要三步：
 2. 加载到内核中运行；
 
 3. 向用户空间输出结果。
+
+#### eBPF 核心概念：指令集、映射、辅助函数、尾调用
+
+- 指令集 (Instruction Set)：eBPF 拥有一套通用的精简指令集（RISC），最初设计用于以 C 语言的子集编写程序，并通过编译器后端（如 LLVM）编译成 eBPF 指令。BPF 程序拥有 11 个 64 位寄存器（r0-r10）、一个程序计数器和一个 512 字节的栈空间。
+
+{{<figure src="./ebpf_maps.png#center" width=800px >}}
+- 映射 (Maps)：eBPF 映射是驻留在内核空间的高效键值存储，是 eBPF 程序存储和共享状态的关键机制。
+
+- 辅助函数 (Helper Functions)：辅助函数是内核提供的一组预定义函数，eBPF 程序可以通过调用这些函数来与内核其他子系统交互或执行特定操作，例如操作映射（查找、更新、删除元素）、修改数据包内容、获取当前时间戳、进行尾调用等。
+
+{{<figure src="./tal_call.png#center" width=800px >}}
+- 尾调用 (Tail Calls)：尾调用是一种机制，允许一个 eBPF 程序调用另一个 eBPF 程序，而无需返回到原始程序。
 
 #### eBPF 应用
 - bcc（https://github.com/iovisor/bcc）: 提供一套开发工具和脚本。
@@ -267,11 +289,39 @@ XDP机制的主要目标是在接收数据包时尽早处理它们，以提高�
 - 静态探针，是指事先在代码中定义好，并编译到应用程序或者内核中的探针。这些探针只有在开启探测功能时，才会被执行到；未开启时并不会执行。常见的静态探针包括内核中的跟踪点（tracepoints）和 USDT（Userland Statically Defined Tracing）探针。
 - 动态探针，则是指没有事先在代码中定义，但却可以在运行时动态添加的探针，比如函数的调用和返回等。动态探针支持按需在内核或者应用程序中添加探测点，具有更高的灵活性。常见的动态探针有两种，即用于内核态的 kprobes 和用于用户态的 uprobes。
 
+## tc(Traffic Control)命令
+
+Linux操作系统中的流量控制器TC（Traffic Control）用于Linux内核的流量控制，主要是通过在输出端口处建立一个队列来实现流量控制。
+
+
+### 流量控制方式
+流量控制包括以下几种方式：
+
+- SHAPING(限制)： 当流量被限制，它的传输速率就被控制在某个值以下。限制值可以大大小于有效带宽，这样可以平滑突发数据流量，使网络更为稳定。shaping（限制）只适用于向外的流量。
+- SCHEDULING(调度)： 通过调度数据包的传输，可以在带宽范围内，按优先级分配带宽。SCHEDULING(调度)也只适于向外的流量。
+- POLICING(策略)： SHAPING用于处理向外的流量，而 POLICING(策略)用于处理接收到的数据。
+- DROPPING(丢弃)： 如果流量超过某个设定的带宽，就丢弃数据包，不管是向内还是向外。
+
+### 流量控制处理对象
+流量的处理由三种对象控制，它们是：
+
+- qdisc（排队规则）: 内核如果需要通过某个网络接口发送数据包，它都需要按照为这个接口配置的qdisc(排队规则)把数据包加入队列。然后，内核会尽可能多地从qdisc里面取出数据包，把它们交给网络适配器驱动模块。
+```shell
+# 查看现有的队列
+root@node1:~# tc -s qdisc ls dev ens32
+qdisc pfifo_fast 0: root refcnt 2 bands 3 priomap 1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1
+ Sent 435417331994 bytes 895868720 pkt (dropped 0, overlimits 0 requeues 302340)
+ backlog 0b 0p requeues 302340
+```
+- class（类别）:某些QDisc(排队规则)可以包含一些类别，不同的类别中可以包含更深入的QDisc(排队规则)
+- filter（过滤器): 用于为数据包分类，决定它们按照何种QDisc进入队列
+
+
+
+
 
 ## 安装要求
 https://docs.cilium.io/en/v1.8/operations/system_requirements/#features-kernel-matrix
-
-
 
 
 ## 组件
@@ -320,76 +370,11 @@ Cilium Agent 以 daemonset 的形式运行，因此 Kubernetes 集群的每个�
 ### Cilium CLI (cilium 和 cilium-dbg)
 
 cilium CLI：这是一个用于快速安装、管理和故障排除运行 Cilium 的 Kubernetes 集群的命令行工具。用户可以使用它来安装 Cilium、检查 Cilium 安装状态、启用/禁用特性（如 ClusterMesh、Hubble）等。
-```shell
-root@node1:~# cilium --help
-CLI to install, manage, & troubleshooting Cilium clusters running Kubernetes.
 
-#  ...
 
-Usage:
-  cilium [flags]
-  cilium [command]
+cilium-dbg (Debug  Cilium Agent)：这是一个与 Cilium Agent 一同安装在每个节点上的命令行工具。它通过与同一节点上运行的 Cilium Agent 的 REST API 交互，允许检查本地 Agent 的状态和各种内部信息。此外，它还提供了直接访问 eBPF 映射以验证其状态的工具。需要注意的是，这个内嵌于 Agent 的 cilium-dbg 与用于集群管理的 cilium CLI 是不同的工具。
 
-Available Commands:
-  bgp          Access to BGP control plane
-  clustermesh  Multi Cluster Management
-  completion   Generate the autocompletion script for the specified shell
-  config       Manage Configuration
-  connectivity Connectivity troubleshooting
-  context      Display the configuration context
-  encryption   Cilium encryption
-  help         Help about any command
-  hubble       Hubble observability
-  install      Install Cilium in a Kubernetes cluster using Helm
-  status       Display status
-  sysdump      Collects information required to troubleshoot issues with Cilium and Hubble
-  uninstall    Uninstall Cilium using Helm
-  upgrade      Upgrade a Cilium installation a Kubernetes cluster using Helm
-  version      Display detailed version information
-```
-
-cilium-dbg (Debug Client)：这是一个与 Cilium Agent 一同安装在每个节点上的命令行工具。它通过与同一节点上运行的 Cilium Agent 的 REST API 交互，允许检查本地 Agent 的状态和各种内部信息。此外，它还提供了直接访问 eBPF 映射以验证其状态的工具。需要注意的是，这个内嵌于 Agent 的 cilium-dbg 与用于集群管理的 cilium CLI 是不同的工具。
-
-```shell
-root@node2:/home/cilium# cilium-dbg --help
-CLI for interacting with the local Cilium Agent
-
-Usage:
-  cilium-dbg [command]
-
-Available Commands:
-  bgp          Access to BGP control plane
-  bpf          Direct access to local BPF maps
-  build-config Resolve all of the configuration sources that apply to this node
-  cgroups      Cgroup metadata
-  cleanup      Remove system state installed by Cilium at runtime
-  completion   Output shell completion code
-  config       Cilium configuration options
-  debuginfo    Request available debugging information from agent
-  encrypt      Manage transparent encryption
-  endpoint     Manage endpoints
-  envoy        Manage Envoy Proxy
-  fqdn         Manage fqdn proxy
-  help         Help about any command
-  identity     Manage security identities
-  ip           Manage IP addresses and associated information
-  kvstore      Direct access to the kvstore
-  lrp          Manage local redirect policies
-  map          Access userspace cached content of BPF maps
-  metrics      Access metric status
-  monitor      Display BPF program events
-  node         Manage cluster nodes
-  nodeid       List node IDs and associated information
-  policy       Manage security policies
-  prefilter    Manage XDP CIDR filters
-  preflight    Cilium upgrade helper
-  recorder     Introspect or mangle pcap recorder
-  service      Manage services & loadbalancers
-  statedb      Inspect StateDB
-  status       Display status of daemon
-  troubleshoot Run troubleshooting utilities to check control-plane connectivity
-  version      Print version information
-```
+https://docs.cilium.io/en/stable/cheatsheet/
 
 ## 目录结构说明
 
@@ -508,10 +493,602 @@ status:
 
 https://docs.cilium.io/en/v1.8/concepts/networking/ipam/crd/
 
+## 路由方式
+https://docs.cilium.io/en/stable/network/concepts/routing/
+
+### vxlan 方式
+
+
+开启方式
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cilium-config
+  namespace: kube-system
+data:
+  routing-mode: tunnel
+  tunnel-protocol: vxlan
+```
+
+```shell
+root@node6:~# ip --detail link show cilium_vxlan
+7: cilium_vxlan: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether ba:41:db:f7:e0:e1 brd ff:ff:ff:ff:ff:ff promiscuity 0  allmulti 0 minmtu 68 maxmtu 65535
+    vxlan external id 0 srcport 0 0 dstport 8472 nolearning ttl auto ageing 300 udpcsum noudp6zerocsumtx noudp6zerocsumrx addrgenmode eui64 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535 tso_max_size 65536 tso_max_segs 65535 gro_max_size 65536
+```
+
+Cilium Agent 在启动的时候，会初始化这个虚拟的网络设备。主要的作用就是完成在 overlay 网络模式下，基于 vxlan/vtep 完成跨主机的网络数据通信。
+Cilium 使用 UDP 8472 端口作为 vtep 端点的服务。
+vxlan 的数据包路由，也是通过 Kernel 的路由子系统完成路由发现，最后通过物理网卡，完成跨主机的 overlay 网络。cilium_vxlan 挂载的 eBPF 程序通过 tc 的方式完成，包括 from-overlay 和 to-overlay，
+
+
+```shell
+root@node6:/home/cilium# ip route
+default via 172.16.0.254 dev ens32 proto static
+10.233.64.0/24 via 10.233.69.139 dev cilium_host proto kernel src 10.233.69.139 mtu 1450
+10.233.65.0/24 via 10.233.69.139 dev cilium_host proto kernel src 10.233.69.139 mtu 1450
+10.233.66.0/24 via 10.233.69.139 dev cilium_host proto kernel src 10.233.69.139 mtu 1450
+10.233.67.0/24 via 10.233.69.139 dev cilium_host proto kernel src 10.233.69.139 mtu 1450
+10.233.68.0/24 via 10.233.69.139 dev cilium_host proto kernel src 10.233.69.139 mtu 1450
+10.233.69.0/24 via 10.233.69.139 dev cilium_host proto kernel src 10.233.69.139
+10.233.69.139 dev cilium_host proto kernel scope link
+172.16.0.0/16 dev ens32 proto kernel scope link src 172.16.7.35
+```
+
+cilium_host/cilium_net：
+```shell
+root@node6:/home/cilium# ip addr ls
+5: cilium_net@cilium_host: <BROADCAST,MULTICAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether be:ef:8a:3c:d5:99 brd ff:ff:ff:ff:ff:ff
+    inet6 fe80::bcef:8aff:fe3c:d599/64 scope link
+       valid_lft forever preferred_lft forever
+6: cilium_host@cilium_net: <BROADCAST,MULTICAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether ea:5e:98:86:cd:e2 brd ff:ff:ff:ff:ff:ff
+    inet 10.233.69.139/32 scope global cilium_host
+       valid_lft forever preferred_lft forever
+    inet6 fe80::e85e:98ff:fe86:cde2/64 scope link
+       valid_lft forever preferred_lft forever
+```
+cilium_host 有设置 ip 地址，这个 ip 地址会作为 Pod 的网关，可以查看 Pod 的路由信息，看到对应的网关地址就是 cilium_host 的 ip 地址。
+
+
+```shell
+# cilium_host 和  cilium_net 是一对
+root@node6:/home/cilium# ip link ls
+
+5: cilium_net@cilium_host: <BROADCAST,MULTICAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether be:ef:8a:3c:d5:99 brd ff:ff:ff:ff:ff:ff
+6: cilium_host@cilium_net: <BROADCAST,MULTICAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether ea:5e:98:86:cd:e2 brd ff:ff:ff:ff:ff:ff
+```
+
+
+
+网卡 lxc-xxx/eth0：
+每一个 Pod 都会有的一对 veth pair。这也是容器网络中最常见 Linux 提供的虚拟网络设备。一端在主机的网络空间，一端在容器的网络空间。
+
+其中 eth0 是容器端的，lxc-xxx 是主机端的。eth0 有自己的 ip 地址，lxc-xxx 是没有 ip 地址的。对于容器的出口流量，使用了 tc ingress 的方式，在 lxc-xxx 主机端的设备上挂载了 eBPF 程序，程序的 Section 是 from-container，
+
+
+### Host Routing 本地路由
+
+
+## 创建网络的过程
+
+1. 创建网络设备（例如 veth-pair, IPVLAN dev）
+2. 分配IP地址 
+3. 配置Pod的网络配置（例如IP地址，路由表项，sysctl） 
+4. 创建Endpoint对象（作用域仅限于Node内部），通过Cilium agent的API 
+5. 创建CiliumEndpoint对象（通过k8s的apiserver，创建一个CRD） 
+6. 通过集群的kvstore，为Endpoint获取/分配一个identity 
+7. 计算处理 network policy 
+8. 存储IP相关的信息（例如 IP与Identity之间的映射）到kvstore内 
+9. 编译，生成BPF程序代码并且加载到内核中执行
+
+
+```go
+// plugins/cilium-cni/cmd/cmd.go
+func (cmd *Cmd) Add(args *skel.CmdArgs) (err error) {
+	//  1. 从args中加载相应的网络配置
+	n, err := types.LoadNetConf(args.StdinData)
+	if err != nil {
+		return fmt.Errorf("unable to parse CNI configuration %q: %w", string(args.StdinData), err)
+	}
+
+    // ...
+
+	cniArgs := &types.ArgsSpec{}
+	if err = cniTypes.LoadArgs(args.Args, cniArgs); err != nil {
+		return fmt.Errorf("unable to extract CNI arguments: %w", err)
+	}
+	scopedLogger = buildLogAttrsWithCNIArgs(scopedLogger, cniArgs)
+
+	c, err := client.NewDefaultClientWithTimeout(defaults.ClientConnectTimeout)
+	if err != nil {
+		return fmt.Errorf("unable to connect to Cilium agent: %w", client.Hint(err))
+	}
+
+	conf, err := getConfigFromCiliumAgent(c)
+	if err != nil {
+		return err
+	}
+
+    // ...
+
+	for _, epConf := range configs {
+		if err = ns.Do(func() error {
+			return link.DeleteByName(epConf.IfName())
+		}); err != nil {
+			return fmt.Errorf("failed removing interface %q from namespace %q: %w",
+				epConf.IfName(), args.Netns, err)
+		}
+
+		var ipam *models.IPAMResponse
+		var releaseIPsFunc func(context.Context)
+		// 获取 ipam 信息
+		if conf.IpamMode == ipamOption.IPAMDelegatedPlugin {
+			ipam, releaseIPsFunc, err = allocateIPsWithDelegatedPlugin(context.TODO(), conf, n, args.StdinData)
+		} else {
+			ipam, releaseIPsFunc, err = allocateIPsWithCiliumAgent(scopedLogger, c, cniArgs, epConf.IPAMPool())
+		}
+
+		// release addresses on failure
+		defer func() {
+			if err != nil && releaseIPsFunc != nil {
+				releaseIPsFunc(context.TODO())
+			}
+		}()
+
+		if err != nil {
+			return err
+		}
+
+		if err = connector.SufficientAddressing(ipam.HostAddressing); err != nil {
+			return fmt.Errorf("IP allocation addressing is insufficient: %w", err)
+		}
+
+		if !ipv6IsEnabled(ipam) && !ipv4IsEnabled(ipam) {
+			return errors.New("IPAM did provide neither IPv4 nor IPv6 address")
+		}
+
+		state, ep, err := epConf.PrepareEndpoint(ipam)
+		if err != nil {
+			return fmt.Errorf("unable to prepare endpoint configuration: %w", err)
+		}
+
+		cniID := ep.ContainerID + ":" + ep.ContainerInterfaceName
+		linkConfig := connector.LinkConfig{
+			GROIPv6MaxSize: int(conf.GROMaxSize),
+			GSOIPv6MaxSize: int(conf.GSOMaxSize),
+			GROIPv4MaxSize: int(conf.GROIPV4MaxSize),
+			GSOIPv4MaxSize: int(conf.GSOIPV4MaxSize),
+			DeviceMTU:      int(conf.DeviceMTU),
+		}
+		var hostLink, epLink netlink.Link
+		var tmpIfName string
+		var l2Mode bool
+        // 3. 根据配置的模式, 选择对应的设备初始化方式
+		switch conf.DatapathMode {
+		case datapathOption.DatapathModeVeth:
+			l2Mode = true
+			hostLink, epLink, tmpIfName, err = connector.SetupVeth(scopedLogger, cniID, linkConfig, sysctl)
+		case datapathOption.DatapathModeNetkit, datapathOption.DatapathModeNetkitL2:
+			l2Mode = conf.DatapathMode == datapathOption.DatapathModeNetkitL2
+			hostLink, epLink, tmpIfName, err = connector.SetupNetkit(scopedLogger, cniID, linkConfig, l2Mode, sysctl)
+		}
+		if err != nil {
+			return fmt.Errorf("unable to set up link on host side: %w", err)
+		}
+		defer func() {
+			if err != nil {
+				if err2 := netlink.LinkDel(hostLink); err2 != nil {
+					scopedLogger.Warn(
+						"Failed to clean up and delete link",
+						logfields.Error, err2,
+						logfields.Veth, hostLink.Attrs().Name,
+					)
+				}
+			}
+		}()
+
+		iface := &cniTypesV1.Interface{
+			Name: hostLink.Attrs().Name,
+		}
+		if l2Mode {
+			iface.Mac = hostLink.Attrs().HardwareAddr.String()
+		}
+		res.Interfaces = append(res.Interfaces, iface)
+
+		// CNI插件将对端veth放置到容器所在的网络空间中
+		if err := netlink.LinkSetNsFd(epLink, ns.FD()); err != nil {
+			return fmt.Errorf("unable to move netkit pair %q to netns %s: %w", epLink, args.Netns, err)
+		}
+		// 重命名对端设备,会将容器内的veth从tmp53057 重命名为eth0
+		err = connector.RenameLinkInRemoteNs(ns, tmpIfName, epConf.IfName())
+		if err != nil {
+			return fmt.Errorf("unable to set up netkit on container side: %w", err)
+		}
+
+		if l2Mode {
+			ep.Mac = epLink.Attrs().HardwareAddr.String()
+			ep.HostMac = hostLink.Attrs().HardwareAddr.String()
+		}
+		ep.InterfaceIndex = int64(hostLink.Attrs().Index)
+		ep.InterfaceName = hostLink.Attrs().Name
+
+		var (
+			ipConfig   *cniTypesV1.IPConfig
+			ipv6Config *cniTypesV1.IPConfig
+			routes     []*cniTypes.Route
+		)
+        // ...
+
+		if ipv4IsEnabled(ipam) && conf.Addressing.IPV4 != nil {
+			ep.Addressing.IPV4 = ipam.Address.IPV4
+			ep.Addressing.IPV4PoolName = ipam.Address.IPV4PoolName
+			ep.Addressing.IPV4ExpirationUUID = ipam.IPV4.ExpirationUUID
+
+			// 准备 IP 配置信息
+			ipConfig, routes, err = prepareIP(ep.Addressing.IPV4, state, int(conf.RouteMTU))
+			if err != nil {
+				return fmt.Errorf("unable to prepare IP addressing for %s: %w", ep.Addressing.IPV4, err)
+			}
+			// set the addresses interface index to that of the container-side interface
+			ipConfig.Interface = cniTypesV1.Int(len(res.Interfaces))
+			res.IPs = append(res.IPs, ipConfig)
+			res.Routes = append(res.Routes, routes...)
+		}
+
+		if needsEndpointRoutingOnHost(conf) {
+			if ipam.IPV4 != nil && ipConfig != nil {
+				err = interfaceAdd(scopedLogger, ipConfig, ipam.IPV4, conf)
+				if err != nil {
+					return fmt.Errorf("unable to setup interface datapath: %w", err)
+				}
+			}
+
+			if ipam.IPV6 != nil && ipv6Config != nil {
+				err = interfaceAdd(scopedLogger, ipv6Config, ipam.IPV6, conf)
+				if err != nil {
+					return fmt.Errorf("unable to setup interface datapath: %w", err)
+				}
+			}
+		}
+
+		var macAddrStr string
+
+		if err = ns.Do(func() error {
+			if err := reserveLocalIPPorts(conf, sysctl); err != nil {
+				scopedLogger.Warn(
+					"Unable to reserve local ip ports",
+					logfields.Error, err,
+				)
+			}
+
+            // 4. 分配IP给Pod的网络设备
+			macAddrStr, err = configureIface(scopedLogger, ipam, epConf.IfName(), state)
+			return err
+		}); err != nil {
+			return fmt.Errorf("unable to configure interfaces in container namespace: %w", err)
+		}
+
+		var cookie uint64
+		if getNetnsCookie {
+			if err = ns.Do(func() error {
+				cookie, err = netns.GetNetNSCookie()
+				return err
+			}); err != nil {
+				if errors.Is(err, unix.ENOPROTOOPT) {
+					getNetnsCookie = false
+				}
+				scopedLogger.Info(
+					"Unable to get netns cookie",
+					logfields.Error, err,
+					logfields.ContainerID, args.ContainerID,
+				)
+			}
+		}
+		ep.NetnsCookie = strconv.FormatUint(cookie, 10)
+
+		// Specify that endpoint must be regenerated synchronously. See GH-4409.
+		ep.SyncBuildEndpoint = true
+		var newEp *models.Endpoint
+		// 创建endpoint对象
+		if newEp, err = c.EndpointCreate(ep); err != nil {
+			scopedLogger.Warn(
+				"Unable to create endpoint",
+				logfields.Error, err,
+				logfields.ContainerID, ep.ContainerID,
+			)
+			return fmt.Errorf("unable to create endpoint: %w", err)
+		}
+		if newEp != nil && newEp.Status != nil && newEp.Status.Networking != nil && newEp.Status.Networking.Mac != "" {
+			// Set the MAC address on the interface in the container namespace
+			if conf.DatapathMode != datapathOption.DatapathModeNetkit {
+				err = ns.Do(func() error {
+					return mac.ReplaceMacAddressWithLinkName(args.IfName, newEp.Status.Networking.Mac)
+				})
+				if err != nil {
+					return fmt.Errorf("unable to set MAC address on interface %s: %w", args.IfName, err)
+				}
+			}
+			macAddrStr = newEp.Status.Networking.Mac
+		}
+		if err = ns.Do(func() error {
+			return configureCongestionControl(conf, sysctl)
+		}); err != nil {
+			return fmt.Errorf("unable to configure congestion control: %w", err)
+		}
+		res.Interfaces = append(res.Interfaces, &cniTypesV1.Interface{
+			Name:    epConf.IfName(),
+			Mac:     macAddrStr,
+			Sandbox: args.Netns,
+		})
+		scopedLogger.Debug(
+			"Endpoint successfully created",
+			logfields.Error, err,
+			logfields.ContainerID, ep.ContainerID,
+		)
+	}
+
+	return cniTypes.PrintResult(res, n.CNIVersion)
+}
+```
+
+
+一个Endpoint其实就是一个 “命名空间下的某个网络接口”，而cilium将会把相应的网络管理策略作用在这样的接口上。
+```shell
+~ kubectl get ciliumendpoint -n monitoring
+NAME                                           SECURITY IDENTITY   ENDPOINT STATE   IPV4            IPV6
+alertmanager-main-0                            17144               ready            10.233.67.49
+alertmanager-main-1                            17144               ready            10.233.68.15
+```
+
+```go
+// pkg/endpoint/api/endpoint_api_manager.go
+
+// HTTP Handle 创建Endpoint对象
+func (m *endpointAPIManager) CreateEndpoint(ctx context.Context, epTemplate *models.EndpointChangeRequest) (*endpoint.Endpoint, int, error) {
+    // ...
+
+	// We don't need to create the endpoint with the labels. This might cause
+	// the endpoint regeneration to not be triggered further down, with the
+	// ep.UpdateLabels or the ep.RunMetadataResolver, because the regeneration
+	// is only triggered in case the labels are changed, which they might not
+	// change because NewEndpointFromChangeModel would contain the
+	// epTemplate.Labels, the same labels we would be calling ep.UpdateLabels or
+	// the ep.RunMetadataResolver.
+	apiLabels := labels.NewLabelsFromModel(epTemplate.Labels)
+	epTemplate.Labels = nil
+
+	ep, err := m.endpointCreator.NewEndpointFromChangeModel(ctx, epTemplate)
+	if err != nil {
+		return invalidDataError(ep, fmt.Errorf("unable to parse endpoint parameters: %w", err))
+	}
+
+	oldEp := m.endpointManager.LookupCiliumID(ep.ID)
+	if oldEp != nil {
+		return invalidDataError(ep, fmt.Errorf("endpoint ID %d already exists", ep.ID))
+	}
+
+	oldEp = m.endpointManager.LookupCNIAttachmentID(ep.GetCNIAttachmentID())
+	if oldEp != nil {
+		return invalidDataError(ep, fmt.Errorf("endpoint for CNI attachment ID %s already exists", ep.GetCNIAttachmentID()))
+	}
+
+	// 这个端点的ID并校验它是否合法
+	var checkIDs []string
+
+	if ep.IPv4.IsValid() {
+		checkIDs = append(checkIDs, endpointid.NewID(endpointid.IPv4Prefix, ep.IPv4.String()))
+	}
+
+	if ep.IPv6.IsValid() {
+		checkIDs = append(checkIDs, endpointid.NewID(endpointid.IPv6Prefix, ep.IPv6.String()))
+	}
+
+	for _, id := range checkIDs {
+		oldEp, err := m.endpointManager.Lookup(id)
+		if err != nil {
+			return invalidDataError(ep, err)
+		} else if oldEp != nil {
+			return invalidDataError(ep, fmt.Errorf("IP %s is already in use", id))
+		}
+	}
+
+	if err = endpoint.APICanModify(ep); err != nil {
+		return invalidDataError(ep, err)
+	}
+
+	infoLabels := labels.NewLabelsFromModel([]string{})
+
+	if len(apiLabels) > 0 {
+		if lbls := apiLabels.FindReserved(); lbls != nil {
+			return invalidDataError(ep, fmt.Errorf("not allowed to add reserved labels: %s", lbls))
+		}
+
+		apiLabels, _ = labelsfilter.Filter(apiLabels)
+		if len(apiLabels) == 0 {
+			return invalidDataError(ep, fmt.Errorf("no valid labels provided"))
+		}
+	}
+
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithCancel(ctx)
+	m.endpointCreations.NewCreateRequest(ep, cancel)
+	defer m.endpointCreations.EndCreateRequest(ep)
+
+	identityLbls := maps.Clone(apiLabels)
+
+	if ep.K8sNamespaceAndPodNameIsSet() && m.clientset.IsEnabled() {
+		pod, k8sMetadata, err := m.handleOutdatedPodInformer(ctx, ep)
+		if errors.Is(err, endpointmetadata.ErrPodStoreOutdated) {
+            // ...
+		}
+
+		if err != nil {
+			ep.Logger("api").Warn("Unable to fetch kubernetes labels", logfields.Error, err)
+		} else {
+			ep.SetPod(pod)
+			ep.SetK8sMetadata(k8sMetadata.ContainerPorts)
+			identityLbls.MergeLabels(k8sMetadata.IdentityLabels)
+			infoLabels.MergeLabels(k8sMetadata.InfoLabels)
+			if _, ok := pod.Annotations[bandwidth.IngressBandwidth]; ok && !m.bandwidthManager.Enabled() {
+				m.logger.Warn("Endpoint has bandwidth annotation, but BPF bandwidth manager is disabled. This annotation is ignored.",
+					logfields.K8sPodName, epTemplate.K8sNamespace+"/"+epTemplate.K8sPodName,
+					logfields.Annotation, bandwidth.IngressBandwidth,
+					logfields.Annotations, pod.Annotations,
+				)
+			}
+			if _, ok := pod.Annotations[bandwidth.EgressBandwidth]; ok && !m.bandwidthManager.Enabled() {
+				m.logger.Warn("Endpoint has %s annotation, but BPF bandwidth manager is disabled. This annotation is ignored.",
+					logfields.K8sPodName, epTemplate.K8sNamespace+"/"+epTemplate.K8sPodName,
+					logfields.Annotation, bandwidth.EgressBandwidth,
+					logfields.Annotations, pod.Annotations,
+				)
+			}
+			if hwAddr, ok := pod.Annotations[annotation.PodAnnotationMAC]; !ep.GetDisableLegacyIdentifiers() && ok {
+				mac, err := mac.ParseMAC(hwAddr)
+				if err != nil {
+					m.logger.Error("Unable to parse MAC address",
+						logfields.Error, err,
+						logfields.K8sPodName, epTemplate.K8sNamespace+"/"+epTemplate.K8sPodName,
+					)
+					return invalidDataError(ep, err)
+				}
+				ep.SetMac(mac)
+			}
+		}
+	}
+
+	// The following docs describe the cases where the init identity is used:
+	// http://docs.cilium.io/en/latest/policy/lifecycle/#init-identity
+	if len(identityLbls) == 0 {
+		// If the endpoint has no labels, give the endpoint a special identity with
+		// label reserved:init so we can generate a custom policy for it until we
+		// get its actual identity.
+		identityLbls = labels.Labels{
+			labels.IDNameInit: labels.NewLabel(labels.IDNameInit, "", labels.LabelSourceReserved),
+		}
+	}
+
+	// e.ID assigned here
+	err = m.endpointManager.AddEndpoint(ep)
+	if err != nil {
+		return m.errorDuringCreation(ep, fmt.Errorf("unable to insert endpoint into manager: %w", err))
+	}
+
+	var regenTriggered bool
+	if ep.K8sNamespaceAndPodNameIsSet() && m.clientset.IsEnabled() {
+		// We need to refetch the pod labels again because we have just added
+		// the endpoint into the endpoint manager. If we have received any pod
+		// events, more specifically any events that modified the pod labels,
+		// between the time the pod was created and the time it was added
+		// into the endpoint manager, the pod event would not have been processed
+		// since the pod event handler would not find the endpoint for that pod
+		// in the endpoint manager. Thus, we will fetch the labels again
+		// and update the endpoint with these labels.
+		// Wait for the regeneration to be triggered before continuing.
+		regenTriggered = ep.RunMetadataResolver(false, true, apiLabels, m.endpointMetadata.FetchK8sMetadataForEndpoint)
+	} else {
+		regenTriggered = ep.UpdateLabels(ctx, labels.LabelSourceAny, identityLbls, infoLabels, true)
+	}
+
+	select {
+	case <-ctx.Done():
+		return m.errorDuringCreation(ep, fmt.Errorf("request cancelled while resolving identity"))
+	default:
+	}
+
+	if !regenTriggered {
+		regenMetadata := &regeneration.ExternalRegenerationMetadata{
+			Reason:            "Initial build on endpoint creation",
+			ParentContext:     ctx,
+			RegenerationLevel: regeneration.RegenerateWithDatapath,
+		}
+		build, err := ep.SetRegenerateStateIfAlive(regenMetadata)
+		if err != nil {
+			return m.errorDuringCreation(ep, err)
+		}
+		if build {
+			ep.Regenerate(regenMetadata)
+		}
+	}
+
+	if epTemplate.SyncBuildEndpoint {
+		if err := ep.WaitForFirstRegeneration(ctx); err != nil {
+			return m.errorDuringCreation(ep, err)
+		}
+	}
+
+	// The endpoint has been successfully created, stop the expiration
+	// timers of all attached IPs
+	if addressing := epTemplate.Addressing; addressing != nil {
+		if uuid := addressing.IPV4ExpirationUUID; uuid != "" {
+			if ip := net.ParseIP(addressing.IPV4); ip != nil {
+				pool := ipam.PoolOrDefault(addressing.IPV4PoolName)
+				if err := m.ipam.StopExpirationTimer(ip, pool, uuid); err != nil {
+					return m.errorDuringCreation(ep, err)
+				}
+			}
+		}
+		if uuid := addressing.IPV6ExpirationUUID; uuid != "" {
+			if ip := net.ParseIP(addressing.IPV6); ip != nil {
+				pool := ipam.PoolOrDefault(addressing.IPV6PoolName)
+				if err := m.ipam.StopExpirationTimer(ip, pool, uuid); err != nil {
+					return m.errorDuringCreation(ep, err)
+				}
+			}
+		}
+	}
+
+	return ep, 0, nil
+}
+```
+
+创建CiliumEndpoint
+```go
+func (mgr *endpointManager) AddEndpoint(ep *endpoint.Endpoint) (err error) {
+    // ..
+
+	err = mgr.expose(ep)
+    // ...
+}
+
+
+func (mgr *endpointManager) expose(ep *endpoint.Endpoint) error {
+	newID, err := mgr.allocateID(ep.ID)
+	if err != nil {
+		return err
+	}
+
+	mgr.mutex.Lock()
+	// Get a copy of the identifiers before exposing the endpoint
+	identifiers := ep.Identifiers()
+	ep.PolicyMapPressureUpdater = mgr.policyMapPressure
+	ep.Start(newID)
+	mgr.mcastManager.AddAddress(ep.IPv6)
+	mgr.updateIDReferenceLocked(ep)
+	mgr.updateReferencesLocked(ep, identifiers)
+	mgr.mutex.Unlock()
+
+	ep.InitEndpointHealth(mgr.health)
+	mgr.RunK8sCiliumEndpointSync(ep, ep.GetReporter("cep-k8s-sync"))
+
+	return nil
+}
+```
+
+
 
 ## 参考
+- https://docs.cilium.io/en/stable/reference-guides/bpf/
+- https://arthurchiao.art/blog/cilium-code-cni-create-network/
 - [深入浅出eBPF｜你要了解的7个核心问题](https://mp.weixin.qq.com/s/Xr8ECrS_fR3aCT1vKJ9yIg)
 - [BPF BTF 详解](https://www.cnblogs.com/linhaostudy/p/18060055)
 - [eBPF中常见的事件类型](https://blog.spoock.com/2023/08/19/eBPF-Hook/)
 - [Cilium datapath梳理](https://rexrock.github.io/post/cilium2/)
 - [eBPF 开源项目 Cilium 深入分析](https://blog.csdn.net/weixin_39145568/article/details/147960141)
+- [TC(Traffic Control)命令—linux自带高级流控](https://cloud.tencent.com/developer/article/1409664)
+- [云原生网络利器--Cilium 之 eBPF 篇](https://zhuanlan.zhihu.com/p/475638461)

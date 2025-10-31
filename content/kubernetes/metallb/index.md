@@ -1,6 +1,7 @@
 ---
-title: "Metallb"
+title: "Metallb 负载均衡器"
 date: 2025-07-20T16:27:23+08:00
+summary: "Metallb 实现原理"
 draft: true
 ---
 
@@ -16,7 +17,7 @@ MetalLB对此的实现方式主要有三种：ARP/NDP和BGP；其中ARP/NDP分�
 
 
 
-##  LB (LoadBalancer 负载均衡器 )
+## LB (LoadBalancer 负载均衡器)
 
 调度后方的多台机器，以统一的接口对外提供服务，承担此职责的技术组件。
 

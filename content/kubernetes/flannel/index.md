@@ -1079,7 +1079,7 @@ flannel的子网租约系统基于分布式状态机设计，核心数据结构�
 
 {{<figure src="./subnet_apply.png#center" width=800px >}}
 
-{{<figure src="./two_node_apply_subnet#center" width=800px >}}
+{{<figure src="./two_node_apply_subnet.png#center" width=800px >}}
 
 - 正常路径（NodeA）：租约创建→事务成功→获得子网
 - 冲突路径（NodeB）：租约创建→事务失败→重新选网→事务成功

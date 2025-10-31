@@ -15,9 +15,10 @@ categories:
 
 
 ## 基本概念
+{{<figure src="./ring_structure.png#center" width=800px >}}
 
+传统的x86架构的运行级别有4种，从ring 0到ring 3，ring 0是最高特权级，通常用于操作系统内核，ring 3是最低特权级，通常用于用户程序。
 
-ring0是指CPU的运行级别，ring0是最高级别，ring1次之，ring2更次之.
 操作系统（内核）的代码运行在最高运行级别ring0上，可以使用特权指令，控制中断、修改页表、访问设备等等
 
 
@@ -51,13 +52,22 @@ KVM 是硬件辅助的虚拟化技术，主要负责 比较繁琐的 CPU 和内�
 
 ## VMM（ Virtual Machine Monitor 虚拟机监视器）
 
+在一台物理机上可以模拟出多台虚拟机（Virtual Machine，简称VM），每个虚拟机中都可以运行一个操作系统（OS）。
+提供虚拟化的平台被称为VMM(Virtual Machine Monitor)，在其上运行的虚拟机被称为guest VM（客户机）。
+
 Hypervisor: 一种运行在基础物理服务器和操作系统之间的中间软件层,可允许多个操作系统和应用共享硬件。
 也可叫做VMM（ virtual machine monitor ），即虚拟机监视器。
 
+## 主流模型
+主流的虚拟化技术的实现架构可分为三类
 
-### 裸机虚拟化模型（Hypervisor Model）
+### 1 裸机虚拟化模型（Hypervisor Model）
 
 {{<figure src="./HypervisorModel.png#center" width=800px >}}
+
+在hypervisor模型中，VMM是一个完备的操作系统，它除了具备传统操作系统的功能，还具备虚拟化功能。
+包括CPU、内存和I/O设备在内的所有物理资源都归VMM所有，因此VMM不仅要负责虚拟机环境的创建和管理，还承担着管理物理资源的责任。
+
 
 裸机虚拟化模型，也称为Type-I型虚拟化模型.
 
@@ -66,14 +76,32 @@ Hypervisor: 一种运行在基础物理服务器和操作系统之间的中间�
 
 
 
-### 宿主机虚拟化模型（Host-based Model）
+### 2 宿主机虚拟化模型（Host-based Model）
 
 {{<figure src="./Host-basedModel.png#center" width=800px >}}
 
+在host模型中，物理资源由host OS管理，host OS是传统操作系统（比如Linux），这些传统操作系统并不是为虚拟化而设计的，因此本身并不具备虚拟化功能，实际的虚拟化功能由VMM来提供
+
+
+VMM作为host OS中一个独立的内核模块，通过调用host OS的服务来获得资源，实现CPU、内存和I/O设备的虚拟化。VMM创建出虚拟机之后，通常将虚拟机作为host OS的一个进程参与调度。
+
+
 宿主机虚拟化模型，也称为Type-II型虚拟化模型。
 
-采用该模型的虚拟化平台有VMware Workstation和Xen等。
+采用该模型的虚拟化平台有 VMware Workstation 等。
 
+由Qumranet公司开发的KVM（Kernel-based Virtual Machine 基于内核的虚拟机）就是属于host模型的，是Linux内核的一个可加载模块，通过调用Linux本身内核功能，实现对CPU的底层虚拟化和内存的虚拟化，使Linux内核成为虚拟化层，需要x86架构的，支持虚拟化功能的硬件支持（比如Intel-VT，AMD-V），是一种全虚拟化架构。
+
+
+KVM是linux内核的模块，它需要CPU的支持，采用硬件辅助虚拟化技术Intel-VT，AMD-V，内存的相关如Intel的EPT和AMD的RVI技术，Guest OS的CPU指令不用再经过Qemu转译，直接运行，大大提高了速度，KVM通过/dev/kvm暴露接口，用户态程序可以通过ioctl函数来访问这个接口。
+
+
+
+### 3 混合模型
+在混合模型中，VMM依然位于最底层，拥有所有的物理资源，但为了利用现有操作系统的I/O设备驱动程序，VMM会将大部分的I/O设备交由一个运行在特权级别的虚拟机操作系统（Service OS）来处理，自己则主要负责CPU管理和内存管理。
+
+
+混合模型的代表有Xen，Intel最近推出的Acrn，以及我国工程师写的minos。
 
 
 ## 常用虚拟化技术
@@ -96,14 +124,17 @@ virtio 并不是半虚拟化领域的唯一形式，Xen 也提供了类似的半
 
 
 
-## kvm(kernel base virtual machine基于内核的虚拟机)
-Kernel-Based Virtual Machine 基于内核的虚拟机，是Linux内核的一个可加载模块，通过调用Linux本身内核功能，实现对CPU的底层虚拟化和内存的虚拟化，使Linux内核成为虚拟化层，需要x86架构的，支持虚拟化功能的硬件支持（比如Intel-VT，AMD-V），是一种全虚拟化架构。
-
-
-KVM是linux内核的模块，它需要CPU的支持，采用硬件辅助虚拟化技术Intel-VT，AMD-V，内存的相关如Intel的EPT和AMD的RVI技术，Guest OS的CPU指令不用再经过Qemu转译，直接运行，大大提高了速度，KVM通过/dev/kvm暴露接口，用户态程序可以通过ioctl函数来访问这个接口。
 
 
 ## I/O 虚拟化
+
+
+在虚拟化系统中，I/O外设只有一套，需要被多个guest VMs共享。VMM/hypervisor提供了两种机制来实现对I/O设备的访问，一种是透传（passthrough），一种是模拟（emulation）
+
+{{<figure src="./io_evolution.png#center" width=800px >}}
+
+I/O 虚拟化经历了从 I/O 全虚拟化、I/O 半虚拟化、硬件直通再到 vDPA 加速 Vhost-user 技术的演进。
+
 
 网络包的接收与发送，都是典型的生产者-消费者模型，简单来说，CPU会在内存中维护两个ring-buffer，分别代表RX和TX，ring-buffer中存放的是描述符，描述符里包含了一个网络包的信息，包括了网络包地址、长度、状态等信息；
 ring-buffer有头尾两个指针，
@@ -113,9 +144,6 @@ ring-buffer有头尾两个指针，
 
 双倍数据率同步动态随机存储器( Double Data Rate Synchronous Dynamic Random Access Memory，简称DDR SDRAM或DDR), 一种高级类型的SDRAM，允许每个时钟周期传输两倍的内存。
 
-{{<figure src="./io_evolution.png#center" width=800px >}}
-
-I/O 虚拟化经历了从 I/O 全虚拟化、I/O 半虚拟化、硬件直通再到 vDPA 加速 Vhost-user 技术的演进。
 
 ### 全虚拟化方案
 
@@ -168,12 +196,19 @@ Qemu中，设备的模拟称为前端，比如e1000，前端与后端通信，�
 
 Virtio 目前被用作虚拟机（VM）访问块设备（virtio-blk）和网络设备（virtio-net）的标准开放接口。
 
+构建 Virtio 需要以下组件：
+
+{{<figure src="./virtio-structure.png#center" width=800px >}}
+- KVM - Kernel-based Virtual Machine（基于内核的虚拟机）
+- QEMU - Host 上的 VMM（virtual machine monitor），为 guest 模拟各种不同的硬件设备。
+- Libvirt - 将前端 XML 配置转换为 QEMU Cli 配置，它同时提供了一个管理守护进程用于配置和管理 QEMU。
+
 Virtio是一种前后端架构，包括前端驱动（Guest内部）、后端设备（QEMU设备）、传输协议（vring）。
 
 将 Virtio-net 分为两个平面： 数据面需要尽可能快的转发数据包，控制面则需要做到尽可能的灵活
 
 * 控制面 - 用于在 Host 与 Guest 之间进行能力协商，同时用于建立和终止数据面。
-* 数据面 - 用于 Host 与 Guset 之间传输数据包。
+* 数据面 - 用于 Host 与 Guest 之间传输数据包。
 
 {{<figure src="./virtio-optimization.png#center" width=800px >}}
 第一行是针对网卡的实现，第二行更进一步的抽象，第三行是通用的解决方案了，对I/O操作的虚拟化通用支持；
@@ -198,3 +233,4 @@ virtio网络的发展
 - [x86 体系结构的虚拟化](https://www.cnblogs.com/jmilkfan-fanguiju/p/11825029.html)
 - [Linux虚拟化KVM-Qemu分析（八）之virtio初探](https://rtoax.blog.csdn.net/article/details/113819423)
 - [virtio 网络的演化：原始virtio ＞ vhost-net(内核态) ＞ vhost-user(DPDK) ＞ vDPA](https://blog.csdn.net/Rong_Toa/article/details/113819506)
+- [virtio 与 vhost-net 架构](https://cloud.tencent.com/developer/article/2312202)
