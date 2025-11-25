@@ -103,7 +103,6 @@ x:1
 StrictModes no
 ```
 
-
 ## 连接协议  Connection Protocol
 RFC 4254: The Secure Shell (SSH) Connection Protocol 连接协议，包括：交互式登录会话、TCP/IP 端口转发、X11 Forwarding
 
@@ -138,7 +137,6 @@ direct-tcpip                  [SSH-CONNECT, Section 7.2]
 
 
 
-
 ### 端口转发（port forwarding）
 又称 SSH 隧道（tunnel）。
 
@@ -155,8 +153,9 @@ X11 Forwarding，通过SSH连接并运行Linux上有GUI的程序，就像是在W
 X11 中的 X 指的就是 X 协议，11 指的是采用 X 协议的第 11 个版本。
 
 
-#### 本地端口转发（local forwarding）（direct-tcpip）
+#### 本地端口转发（local port forwarding）（direct-tcpip）
 
+本地端口转发是将 本地机器 的某个端口通过 SSH 隧道转发到 远程机器 的某个端口。所有通过本地端口的流量都会被加密并通过 SSH 隧道传输到远程目标地址。
 
 
 使用场景
@@ -182,7 +181,7 @@ X11 中的 X 指的就是 X 协议，11 指的是采用 X 协议的第 11 个版
 {{<figure src="./local-port-forward.png#center" width=800px >}}
 ```shell
 # 创建一个本地端口，将发往该端口的所有通信都通过 SSH 服务器，转发到指定的远程服务器的端口。
-ssh -L  -N -f localPort : remoteHost : remotePort  sshServer
+ssh -L  -N -f localPort : remoteHost : remotePort  用户名@sshServer
 
 ssh -L 9000:host2:80 host3
 ```
@@ -192,7 +191,7 @@ ssh -L 9000:host2:80 host3
 * -f：将 SSH 连接放到后台。没有这个参数，暂时不用 SSH 连接时，终端会失去响应。
 
 
-#### 远程端口转发 （forwarded-tcpip）
+#### 远程端口转发(Remote Port Forwarding) （forwarded-tcpip）
 远程转发指的是在远程 SSH 服务器建立的转发规则。
 
 它跟本地转发正好反过来。建立本地计算机到远程 SSH 服务器的隧道以后，本地转发是通过本地计算机访问远程 SSH 服务器，而远程转发则是通过远程 SSH 服务器访问本地计算机。
@@ -240,10 +239,11 @@ ssh -R 2121:my.private.server:80 -N local
 ```
 
 
-#### 动态转发
-目标：将本地主机（或局域网）服务监听的端口转发到远程服务器
+#### 动态转发（Dynamic Port Forwarding）
+动态端口转发是通过 SSH 创建一个 SOCKS 代理，动态地将流量转发到多个目标地址。所有通过 SOCKS 代理的流量都会被加密并通过 SSH 隧道传输。
 
-相对于本地转发和远程转发的单一端口转发模式而言，动态转发有点更加强劲的端口转发功能，即是无需固定指定被访问目标主机的端口号。这个端口号需要在本地通过协议指定，该协议就是简单、安全、实用的 SOCKS 协议。
+相对于本地转发和远程转发的单一端口转发模式而言，动态转发有点更加强劲的端口转发功能，即是无需固定指定被访问目标主机的端口号。
+这个端口号需要在本地通过协议指定，该协议就是简单、安全、实用的 SOCKS 协议。
 
 动态转发需要把本地端口绑定到 SSH 服务器。至于 SSH 服务器要去访问哪一个网站，完全是动态的，取决于原始通信，所以叫做动态转发。
 
@@ -272,6 +272,22 @@ curl -x socks5://localhost:50000 http://www.example.com
 ```
 
 如果经常使用动态转发，可以将设置写入 SSH 客户端的用户个人配置文件 ~/.ssh/config
+
+
+
+| 特性             | 本地端口转发（Local Port Forwarding） | 远程端口转发（Remote Port Forwarding）     | 动态端口转发（Dynamic Port Forwarding）             |
+|------------------|----------------------------------------|---------------------------------------------|----------------------------------------------------|
+| 基本命令         | `ssh -L local_port:remote_host:remote_port user@server` | `ssh -R remote_port:local_host:local_port user@server` | `ssh -D local_port user@server`                     |
+| 命令参数         | `-L`                                  | `-R`                                       | `-D`                                               |
+| 流量方向         | 本地 → 远程                            | 远程 → 本地                                 | 动态（通过 SOCKS 代理）                            |
+| 监听位置         | 本地机器的指定端口                      | 远程服务器的指定端口                        | 本地机器的 SOCKS 代理端口                           |
+| 主要用途         | 访问远程服务或内网资源                  | 将本地服务暴露给外网访问                    | 提供通用的网络代理服务                             |
+| 典型场景         | 访问远程数据库、连接内网服务、绕过防火墙      | 展示本地开发环境、临时文件共享、网页浏览代理   | 应用程序代理、加密流量、绕过网络限制                 |
+| 配置复杂度       | 简单，只需指定端口映射                   | 中等，需要配置远程服务器                     | 简单，但应用需支持 SOCKS                            |
+| 安全考虑         | 本地端口暴露风险                        | 远程端口暴露风险                            | 完整的加密代理                                     |
+| 使用限制         | 受本地端口限制、一般为单一服务转发         | 受远程服务器策略限制                         | 代理性能考虑                                       |
+| 适用环境         | 企业内网环境、数据库访问                 | 暴露本地服务给外部访问                       | 安全浏览、科学上网、访问多个远程服务                 |
+| 性能特点         | 直接转发，延迟低                         | 延迟可能稍高，受限于远程服务器及网络          | 适合多协议应用，动态路由开销                         |
 
 
 ### 交互式会话 session
@@ -480,8 +496,6 @@ func (s *Server) newRemoteClient(ctx context.Context, systemLogin string) (*trac
 ```
 
 
-
-
 ## 常见命令
 
 ssh-keygen:产生公钥和私钥对.
@@ -519,3 +533,4 @@ useradd 命令属于比较难用的命令 (low level utility for adding users)�
 - [SSH 端口转发](https://wangdoc.com/ssh/port-forwarding)
 - [Go语言自定义自己的SSH-Server](https://zh.mojotv.cn/go/create-your-own-ssh-server)
 - [开发扩展SSH的使用领域和功能](https://zh.mojotv.cn/golang/ssh-pty-im)
+- [深入理解 SSH 端口转发：本地 vs 远程 vs 动态转发](https://blog.csdn.net/weixin_46445090/article/details/145194314)

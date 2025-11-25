@@ -8,7 +8,8 @@ tags:
   - scheduler
   - k8s
 ---
-Volcano 主要用于AI、大数据、基因、渲染等诸多高性能计算场景，对主流通用计算框架均有很好的支持。它提供高性能计算任务调度，异构设备管理，任务运行时管理等能力.
+Volcano 主要用于AI、大数据、基因、渲染等诸多高性能计算场景，对主流通用计算框架均有很好的支持。
+它提供高性能计算任务调度，异构设备管理，任务运行时管理等能力.
 
 ## 基本概念
 
@@ -61,12 +62,77 @@ Flags:                 fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca 
 Volcano由scheduler、controllermanager、admission和vcctl组成
 
 - scheduler 通过一系列的action和plugin调度Job，并为它找到一个最适合的节点。与k8s本身的调度器相比，Volcano支持针对Job的多种调度算法。
-- controller manager管理CRD资源的生命周期。对用户创建的batch.volcano.sh/v1alpha1/job以及其他crd资源进行reconcile. 它主要由Queue ControllerManager、PodGroupControllerManager 、 VCJob ControllerManager构成。
+- controller manager 管理CRD资源的生命周期。对用户创建的batch.volcano.sh/v1alpha1/job以及其他crd资源进行reconcile. 它主要由Queue ControllerManager、PodGroupControllerManager 、 VCJob ControllerManager构成。
 - admission负责对CRD API资源进行校验。
 - vcctl 是Volcano的命令行客户端工具。
+- volcano Agent（可选组件）：在节点上收集资源使用情况和硬件信息，为调度器提供更精确的节点资源信息，支持GPU、FPGA等异构资源的管理
 
 
-## Volcano scheduler的工作流程
+## Volcano controller
+
+控制器注册
+- framework.RegisterController(&gccontroller{})
+- framework.RegisterController(&jobcontroller{})
+- framework.RegisterController(&jobflowcontroller{})
+- framework.RegisterController(&pgcontroller{})
+- framework.RegisterController(&queuecontroller{})
+- 等等
+
+
+### Queue Controller
+主要监听三个资源对象：
+- Queue
+- PodGroup
+- Command
+
+### PodGroup Controller
+PodGroup Controller比较简单， 它负责为未指定PodGroup的Pod分配PodGroup
+
+```go
+func (pg *pgcontroller) processNextReq() bool {
+	// ...
+
+	// 获取pod对象
+	pod, err := pg.podLister.Pods(req.podNamespace).Get(req.podName)
+	if err != nil {
+		klog.Errorf("Failed to get pod by <%v> from cache: %v", req, err)
+		return true
+	}
+
+	// 根据调度器名称过滤
+	if !commonutil.Contains(pg.schedulerNames, pod.Spec.SchedulerName) {
+		klog.V(5).Infof("pod %v/%v field SchedulerName is not matched", pod.Namespace, pod.Name)
+		return true
+	}
+    // 如果pod已经有podgroup， 则不再处理
+	if pod.Annotations != nil && pod.Annotations[scheduling.KubeGroupNameAnnotationKey] != "" {
+		klog.V(5).Infof("pod %v/%v has created podgroup", pod.Namespace, pod.Name)
+		return true
+	}
+
+    // 为pod分配 podgroup
+	klog.V(4).Infof("Try to create podgroup for pod %s/%s", pod.Namespace, pod.Name)
+	if err := pg.createNormalPodPGIfNotExist(pod); err != nil {
+		klog.Errorf("Failed to handle Pod <%s/%s>: %v", pod.Namespace, pod.Name, err)
+		pg.queue.AddRateLimited(req)
+		return true
+	}
+
+	// If no error, forget it.
+	pg.queue.Forget(req)
+
+	return true
+}
+
+```
+
+### Job Controller
+Job是volcano中的核心资源对象， 为了避免与k8s中的Job对象混淆， 也会称之为vcjob或者vj。
+
+
+## Volcano scheduler 
+
+### scheduler 工作流程
 https://volcano.sh/zh/docs/schduler_introduction/
 
 Scheduler是负责Pod调度的组件，它由一系列action和plugin组成。
@@ -81,21 +147,262 @@ Volcano scheduler具有高度的可扩展性，我们可以根据需要实现自
 1. 遍历所有的待调度Job，按照定义的次序依次执行enqueue、allocate、preempt、reclaim、backfill等动作，为每个Job找到一个最合适的节点。将该Job 绑定到这个节点。action中执行的具体算法逻辑取决于注册的plugin中各函数的实现。
 1. 关闭本次session
 
+
+
+cache组件会list/watch， 维护最新的资源信息. 这里拿事件监听 pod add 为例
 ```go
+// https://github.com/volcano-sh/volcano/blob/1693cb0f59841ee21d9fd842516631ebc5b813a1/pkg/scheduler/cache/event_handlers.go
+
 // 新增了一个 pod
 func (sc *SchedulerCache) addPod(pod *v1.Pod) error {
+	// 封装成 task 
 	pi, err := sc.NewTaskInfo(pod)
 	if err != nil {
 		klog.Errorf("generate taskInfo for pod(%s) failed: %v", pod.Name, err)
 		sc.resyncTask(pi)
 	}
 
+	// 写入
 	return sc.addTask(pi)
+}
+
+
+func (sc *SchedulerCache) addTask(pi *schedulingapi.TaskInfo) error {
+	if len(pi.NodeName) != 0 {
+		if _, found := sc.Nodes[pi.NodeName]; !found {
+			sc.Nodes[pi.NodeName] = schedulingapi.NewNodeInfo(nil)
+			sc.Nodes[pi.NodeName].Name = pi.NodeName
+		}
+
+		node := sc.Nodes[pi.NodeName]
+		if !isTerminated(pi.Status) {
+			if err := node.AddTask(pi); err != nil {
+				return err
+			}
+		} else {
+			klog.V(4).Infof("Pod <%v/%v> is in status %s.", pi.Namespace, pi.Name, pi.Status.String())
+		}
+	}
+
+	// 获取或则添加 job
+	job := sc.getOrCreateJob(pi)
+	if job != nil {
+		job.AddTaskInfo(pi)
+	}
+
+	return nil
+}
+
+func (sc *SchedulerCache) getOrCreateJob(pi *schedulingapi.TaskInfo) *schedulingapi.JobInfo {
+	if len(pi.Job) == 0 {
+		if !slices.Contains(sc.schedulerNames, pi.Pod.Spec.SchedulerName) {
+			klog.V(4).Infof("Pod %s/%s will not scheduled by %#v, skip creating PodGroup and Job for it",
+				pi.Pod.Namespace, pi.Pod.Name, sc.schedulerNames)
+		}
+		return nil
+	}
+
+	if _, found := sc.Jobs[pi.Job]; !found {
+		sc.Jobs[pi.Job] = schedulingapi.NewJobInfo(pi.Job)
+	}
+
+	return sc.Jobs[pi.Job]
+}
+```
+
+
+调度开始
+```go
+// pkg/scheduler/scheduler.go
+
+func (pc *Scheduler) Run(stopCh <-chan struct{}) {
+    // ...
+
+	// 调度器周期性执行逻辑
+	go wait.Until(pc.runOnce, pc.schedulePeriod, stopCh)
+	if options.ServerOpts.EnableCacheDumper {
+		pc.dumper.ListenForSignal(stopCh)
+	}
+	go runSchedulerSocket()
+}
+
+func (pc *Scheduler) runOnce() {
+	klog.V(4).Infof("Start scheduling ...")
+	scheduleStartTime := time.Now()
+	defer klog.V(4).Infof("End scheduling ...")
+
+	pc.mutex.Lock()
+	actions := pc.actions
+	plugins := pc.plugins
+	configurations := pc.configurations
+	pc.mutex.Unlock()
+
+	// Load ConfigMap to check which action is enabled.
+	conf.EnabledActionMap = make(map[string]bool)
+	for _, action := range actions {
+		conf.EnabledActionMap[action.Name()] = true
+	}
+
+	// 打开 session
+	ssn := framework.OpenSession(pc.cache, plugins, configurations)
+	defer func() {
+		framework.CloseSession(ssn)
+		metrics.UpdateE2eDuration(metrics.Duration(scheduleStartTime))
+	}()
+
+	// 遍历 actions, 执行 action
+	for _, action := range actions {
+		actionStartTime := time.Now()
+		action.Execute(ssn) // 传递了一个 ssn（*Session 类型）对象进去
+		metrics.UpdateActionDuration(action.Name(), metrics.Duration(actionStartTime))
+	}
+}
+```
+
+session 说明
+
+```go
+func OpenSession(cache cache.Cache, tiers []conf.Tier, configurations []conf.Configuration) *Session {
+	ssn := openSession(cache)
+	ssn.Tiers = tiers // 存储启用的 tier , 即多层插件
+	ssn.Configurations = configurations
+	ssn.NodeMap = GenerateNodeMapAndSlice(ssn.Nodes)
+	ssn.PodLister = NewPodLister(ssn)
+
+	// 遍历 tier
+	for _, tier := range tiers {
+		for _, plugin := range tier.Plugins {
+			if pb, found := GetPluginBuilder(plugin.Name); !found {
+				klog.Errorf("Failed to get plugin %s.", plugin.Name)
+			} else {
+				// 初始化插件
+				plugin := pb(plugin.Arguments)
+				// session 注册插件
+				ssn.plugins[plugin.Name()] = plugin
+				onSessionOpenStart := time.Now()
+				plugin.OnSessionOpen(ssn)
+				metrics.UpdatePluginDuration(plugin.Name(), metrics.OnSessionOpen, metrics.Duration(onSessionOpenStart))
+			}
+		}
+	}
+
+	ssn.InitCycleState()
+
+	return ssn
+}
+
+// 初始化 session 结构体
+func openSession(cache cache.Cache) *Session {
+	ssn := &Session{
+		UID:             uuid.NewUUID(),
+		// ...
+		
+		//  用于存储cache中的资源信息, 这些信息是深拷贝的
+		Jobs:           map[api.JobID]*api.JobInfo{},
+		Nodes:          map[string]*api.NodeInfo{},
+		CSINodesStatus: map[string]*api.CSINodeStatusInfo{},
+		RevocableNodes: map[string]*api.NodeInfo{},
+		Queues:         map[api.QueueID]*api.QueueInfo{},
+
+		plugins:                map[string]Plugin{},
+		jobOrderFns:            map[string]api.CompareFn{},
+		queueOrderFns:          map[string]api.CompareFn{},
+		victimQueueOrderFns:    map[string]api.VictimCompareFn{},
+		taskOrderFns:           map[string]api.CompareFn{},
+		clusterOrderFns:        map[string]api.CompareFn{},
+		predicateFns:           map[string]api.PredicateFn{},
+		prePredicateFns:        map[string]api.PrePredicateFn{},
+		bestNodeFns:            map[string]api.BestNodeFn{},
+		nodeOrderFns:           map[string]api.NodeOrderFn{},
+		batchNodeOrderFns:      map[string]api.BatchNodeOrderFn{},
+		nodeMapFns:             map[string]api.NodeMapFn{},
+		nodeReduceFns:          map[string]api.NodeReduceFn{},
+		hyperNodeOrderFns:      map[string]api.HyperNodeOrderFn{},
+		preemptableFns:         map[string]api.EvictableFn{},
+		reclaimableFns:         map[string]api.EvictableFn{},
+		overusedFns:            map[string]api.ValidateFn{},
+		preemptiveFns:          map[string]api.ValidateWithCandidateFn{},
+		allocatableFns:         map[string]api.AllocatableFn{},
+		jobReadyFns:            map[string]api.ValidateFn{},
+		jobPipelinedFns:        map[string]api.VoteFn{},
+		jobValidFns:            map[string]api.ValidateExFn{},
+		jobEnqueueableFns:      map[string]api.VoteFn{},
+		jobEnqueuedFns:         map[string]api.JobEnqueuedFn{},
+		targetJobFns:           map[string]api.TargetJobFn{},
+		reservedNodesFns:       map[string]api.ReservedNodesFn{},
+		victimTasksFns:         map[string][]api.VictimTasksFn{},
+		jobStarvingFns:         map[string]api.ValidateFn{},
+		simulateRemoveTaskFns:  map[string]api.SimulateRemoveTaskFn{},
+		simulateAddTaskFns:     map[string]api.SimulateAddTaskFn{},
+		simulatePredicateFns:   map[string]api.SimulatePredicateFn{},
+		simulateAllocatableFns: map[string]api.SimulateAllocatableFn{},
+	}
+
+	snapshot := cache.Snapshot()
+
+	ssn.Jobs = snapshot.Jobs
+	for _, job := range ssn.Jobs {
+		if job.PodGroup != nil {
+			ssn.PodGroupOldState.Status[job.UID] = *job.PodGroup.Status.DeepCopy()
+			ssn.PodGroupOldState.Annotations[job.UID] = job.PodGroup.GetAnnotations()
+		}
+	}
+	ssn.NodeList = util.GetNodeList(snapshot.Nodes, snapshot.NodeList)
+	ssn.HyperNodes = snapshot.HyperNodes
+	ssn.HyperNodesSetByTier = snapshot.HyperNodesSetByTier
+	ssn.parseHyperNodesTiers()
+	ssn.RealNodesList = util.GetRealNodesListByHyperNode(snapshot.RealNodesSet, snapshot.Nodes)
+	ssn.HyperNodesReadyToSchedule = snapshot.HyperNodesReadyToSchedule
+	ssn.Nodes = snapshot.Nodes
+	ssn.CSINodesStatus = snapshot.CSINodesStatus
+	ssn.RevocableNodes = snapshot.RevocableNodes
+	ssn.Queues = snapshot.Queues
+	ssn.NamespaceInfo = snapshot.NamespaceInfo
+	// calculate all nodes' resource only once in each schedule cycle, other plugins can clone it when need
+	for _, n := range ssn.Nodes {
+		ssn.TotalResource.Add(n.Allocatable)
+	}
+
+	klog.V(3).Infof("Open Session %v with <%d> Job and <%d> Queues",
+		ssn.UID, len(ssn.Jobs), len(ssn.Queues))
+
+	return ssn
 }
 
 ```
 
-## plugin
+多层级(Tiers)数组结构
+
+```yaml
+tiers:
+- plugins:  # 第一层插件
+  - name: priority
+  - name: gang
+- plugins:  # 第二层插件
+  - name: drf
+  - name: predicates
+```
+为什么使用多层级(tiers)数组结构来配置Plugins？
+
+1. 优先级分层执行：
+
+- 不同层级（tier）的插件有着严格的优先级顺序
+- 高层级（第一个数组）中的插件会先执行，其决策结果会影响或限制低层级插件的决策空间
+- 只有当高层级的所有插件都允许一个调度决策时，才会继续执行低层级的插件
+2. 决策流程的过滤机制：
+
+- 第一层级的插件（如 priority、gang、conformance）主要负责基本的筛选和约束
+- 第二层级的插件（如 drf、predicates、proportion 等）负责更细粒度的资源分配和优化
+- 这种分层设计形成了一种"粗筛-细筛"的决策流水线
+3. 解决冲突的明确机制：
+
+- 当不同插件之间可能产生冲突决策时，层级结构提供了明确的优先级规则
+- 例如，如果 gang 插件（第一层）决定某个任务不能被调度（因为它的所有成员无法同时运行），那么即使 binpack 插件（第二层）认为该任务可以被有效打包，该任务也不会被调度
+
+
+
+
+### plugin
 丰富的调度策略
 - Gang Scheduling：确保作业的所有任务同时启动，适用于分布式训练、大数据等场景
 - Binpack Scheduling：通过任务紧凑分配优化资源利用率
@@ -108,7 +415,7 @@ func (sc *SchedulerCache) addPod(pod *v1.Pod) error {
 - NUMA Aware Scheduling：支持NUMA架构的调度，优化任务在多核处理器上的资源分配，提升内存访问效率和计算性能
 
 
-### Binpack Scheduling
+#### Binpack Scheduling
 
 Binpack 调度算法的目标是尽量把已被占用的节点填满（尽量不往空白节点分配）。
 
@@ -186,12 +493,12 @@ CPU.weight * (request + used) / allocatable
 * allocatable 为当前节点 CPU 可用总量
 
 
-### DRF（Dominant Resource Fairness） Scheduling
+#### DRF（Dominant Resource Fairness） Scheduling
 DRF 调度策略认为占用资源较少的任务具有更高的优先级。这样能够满足更多的作业，不会因为一个胖业务， 饿死大批小业务。
 DRF 调度算法能够确保在多种类型资源共存的环境下，尽可能满足分配的公平原则。
 
 
-### NUMA Aware Scheduling
+#### NUMA Aware Scheduling
 
 从糟糕的使用方式来看，如果两个进程的CPU内核在分配时，可能会没有遵循NUMA的亲和性，会带来很大的性能问题，体现在三个方面：
 
@@ -287,7 +594,70 @@ spec:
 ```
 
 
+### action
+https://volcano.sh/zh/docs/actions/
 
+action中有enqueue、allocate、preempt、reclaim、backfill、shuffle
+
+```go
+// https://github.com/volcano-sh/volcano/blob/b27b4bbe7d19e225e75a11e424bee38ec29a4041/pkg/scheduler/actions/factory.go
+
+func init() {
+	// 注册 action
+	framework.RegisterAction(reclaim.New())   // 根据队列权重回收队列的资源。
+	framework.RegisterAction(allocate.New())  // 执行调度操作（分配node）
+	framework.RegisterAction(backfill.New()) // 回填步骤，处理待调度Pod列表中没有指明资源申请量的Pod调度。 Backfill能够提高集群吞吐量，提高资源利用率。
+	framework.RegisterAction(preempt.New()) // 抢占资源， 用于处理高优先级调度问题。 可以在同queue或同job中抢占资源。
+	framework.RegisterAction(enqueue.New()) // 调度器的准备阶段， 判断资源是否满足调度条件
+	framework.RegisterAction(shuffle.New()) // 根据资源状况重新分配节点
+}
+
+```
+
+active 接口
+```go
+type Action interface {
+	// action 名称
+	Name() string
+
+	// Initialize initializes the allocator plugins.
+	Initialize()
+
+	// 执行动作
+	Execute(ssn *Session)
+
+	// UnIntialize un-initializes the allocator plugins.
+	UnInitialize()
+}
+
+```
+
+
+
+#### Enqueue
+
+Enqueue action筛选符合要求的作业进入待调度队列。当一个Job下的最小资源申请量不能得到满足时，即使为Job下的Pod执行调度动作，Pod也会因为gang约束没有达到而无法进行调度；
+经过这个action，任务的状态将由pending变为 inqueue。
+
+
+
+
+#### allocate
+allocate对Queue和Job这两个资源排序， 如果job状态为pending，则会尝试为其分配node资源。
+
+
+#### preempt
+支持队列内资源抢占。高优先级作业可以抢占同队列内低优先级作业的资源，确保关键任务的及时执行
+
+#### reclaim
+支持队列间的资源回收。当队列资源紧张时，触发资源回收机制。优先回收超出队列deserved值的资源，并结合队列/作业优先级选择合适的牺牲者
+
+#### backfill
+
+Backfill action 是调度流程中处理BestEffort Pod（即没有指定资源申请量的Pod）的调度步骤。与Allocate action类似，Backfill也会遍历所有节点寻找合适的调度位置，主要区别在于它处理的是没有明确资源申请量的Pod。
+
+
+在集群中，除了需要明确资源申请的工作负载外，还存在一些对资源需求不明确的工作负载。这些工作负载通常以BestEffort的方式运行，Backfill action负责为这类 Pod寻找合适的调度位置。
 
 ## 云原生混部
 
@@ -334,18 +704,23 @@ podgroups                           pg,podgroup-v1beta1   scheduling.volcano.sh/
 queues                              q,queue-v1beta1       scheduling.volcano.sh/v1beta1          false        Queue
 hypernodes                          hn                    topology.volcano.sh/v1alpha1           false        HyperNode
 ```
-### PodGroup
+
+### PodGroup 
 https://volcano.sh/zh/docs/v1-12-0/podgroup/
 
 PodGroup 一组相关的 Pod 集合。这主要解决了 Kubernetes 原生调度器中单个 Pod 调度的限制。
 
 ### Volcano Job(vcjob)
+
 https://volcano.sh/zh/docs/v1-12-0/vcjob/
+
 区别于Kubernetes Job，vcjob提供了更多高级功能，如可指定调度器、支持最小运行pod数、 支持task、支持生命周期管理、支持指定队列、支持优先级调度等。
 Volcano Job更加适用于机器学习、大数据、科学计算等高性能计算场景。
 
 ### queue
+
 https://volcano.sh/zh/docs/v1-12-0/queue/
+Queue是Volcano调度系统中的核心概念，用于管理和分配集群资源。 它充当了资源池的角色，允许管理员将集群资源划分给不同的用户组或应用场景。该自定义资源可以很好地用于多租户场景下的资源隔离
 
 queue是容纳一组podgroup的队列.volcano启动后，会默认创建名为default的queue，weight为1。后续下发的job，若未指定queue，默认属于default queue
 
@@ -413,96 +788,6 @@ status:
 ```
 
 
-## action
-action中有enqueue、allocate、preempt、reclaim、backfill、shuffle
-
-```go
-// https://github.com/volcano-sh/volcano/blob/b27b4bbe7d19e225e75a11e424bee38ec29a4041/pkg/scheduler/actions/factory.go
-func init() {
-	// 注册 action
-	framework.RegisterAction(reclaim.New())
-	framework.RegisterAction(allocate.New())
-	framework.RegisterAction(backfill.New())
-	framework.RegisterAction(preempt.New())
-	framework.RegisterAction(enqueue.New())
-	framework.RegisterAction(shuffle.New())
-}
-
-```
-
-active 接口
-```go
-type Action interface {
-	// The unique name of Action.
-	Name() string
-
-	// Initialize initializes the allocator plugins.
-	Initialize()
-
-	// Execute allocates the cluster's resources into each queue.
-	Execute(ssn *Session)
-
-	// UnIntialize un-initializes the allocator plugins.
-	UnInitialize()
-}
-
-```
-
-调度器执行逻辑
-
-```go
-func (pc *Scheduler) runOnce() {
-	klog.V(4).Infof("Start scheduling ...")
-	scheduleStartTime := time.Now()
-	defer klog.V(4).Infof("End scheduling ...")
-
-	pc.mutex.Lock()
-	actions := pc.actions
-	plugins := pc.plugins
-	configurations := pc.configurations
-	pc.mutex.Unlock()
-
-	// Load ConfigMap to check which action is enabled.
-	conf.EnabledActionMap = make(map[string]bool)
-	for _, action := range actions {
-		conf.EnabledActionMap[action.Name()] = true
-	}
-
-	ssn := framework.OpenSession(pc.cache, plugins, configurations)
-	defer func() {
-		framework.CloseSession(ssn)
-		metrics.UpdateE2eDuration(metrics.Duration(scheduleStartTime))
-	}()
-
-	// 遍历 actions, 执行 action
-	for _, action := range actions {
-		actionStartTime := time.Now()
-		action.Execute(ssn) // 传递了一个 ssn（*Session 类型）对象进去
-		metrics.UpdateActionDuration(action.Name(), metrics.Duration(actionStartTime))
-	}
-}
-```
-
-### Enqueue
-
-Enqueue action筛选符合要求的作业进入待调度队列。当一个Job下的最小资源申请量不能得到满足时，即使为Job下的Pod执行调度动作，Pod也会因为gang约束没有达到而无法进行调度；
-经过这个action，任务的状态将由pending变为inqueue。
-
-
-
-
-### allocate
-allocate对Queue和Job这两个资源排序， 如果job状态为pending，则会尝试为其分配node资源。
-
-
-### preempt
-支持队列内资源抢占。高优先级作业可以抢占同队列内低优先级作业的资源，确保关键任务的及时执行
-
-### reclaim
-支持队列间的资源回收。当队列资源紧张时，触发资源回收机制。优先回收超出队列deserved值的资源，并结合队列/作业优先级选择合适的牺牲者
-
-### backfill
-backfill action负责将处于pending状态的任务尽可能的调度下去以保证节点资源的最大化利用。
 
 
 ## 参考
@@ -510,3 +795,5 @@ backfill action负责将处于pending状态的任务尽可能的调度下去以�
 - https://volcano.sh/zh/docs/v1-12-0/
 - [volcano之Scheduler调度器详解（一）](https://zhuanlan.zhihu.com/p/700565336)
 - [使用 Volcano Binpack 调度策略](https://docs.daocloud.io/kpanda/user-guide/gpu/volcano/volcano_binpack#binpack)
+- [Volcano Controller控制器源码解析](https://www.cyisme.top/cloud_native/volcano/controller)
+- [Volcano Scheduler调度器源码解析](https://www.cyisme.top/cloud_native/volcano/scheduler/flow/)

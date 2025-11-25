@@ -2,6 +2,8 @@
 title: "Descheduler 集群均衡器"
 summary: "节点Pod重平衡, 策略包括 LowNodeUtilization 等."
 date: 2025-03-11T20:47:47+08:00
+categories:
+  - kubernetes
 ---
 
 ## 为什么需要集群均衡器
@@ -36,6 +38,7 @@ date: 2025-03-11T20:47:47+08:00
 ### LowNodeUtilization
 
 该策略主要用于查找未充分利用资源的节点，并从其他节点驱逐 Pod 将它们重新调度到这些未充分利用的节点上。
+
 ```yaml
     apiVersion: "descheduler/v1alpha2"
     kind: "DeschedulerPolicy"
@@ -46,7 +49,7 @@ date: 2025-03-11T20:47:47+08:00
           evictLocalStoragePods: true
           ignorePvcPods: true
         name: DefaultEvictor
-      // ...
+      # ...
       - args:
           targetThresholds:
             cpu: 50
@@ -377,6 +380,38 @@ func evictPodsFromSourceNodes(
 }
 
 ```
+
+
+## koordinator 负载感知重调度
+
+https://koordinator.sh/zh-Hans/docs/user-manuals/load-aware-descheduling
+
+LowNodeLoad 插件有两个最重要的参数：
+
+- highThresholds 表示负载水位的目标安全阈值，超过该阈值的节点上的 Pod 将参与重调度；
+- lowThresholds 表示负载水位的空闲安全水位。低于该阈值的节点上的 Pod 不会被重调度。
+
+lowThresholds 为 45%，highThresholds 为 70%，我们可以把节点归为三类：
+{{<figure src="./koordinator_node.png#center" width=800px >}}
+- 空闲节点(Idle Node)。资源利用率低于 45% 的节点；
+- 正常节点(Normal Node)。资源利用率高于 45% 但低于 70% 的节点，这个负载水位区间是我们期望的合理的区间范围
+- 热点节点(Hotspot Node)。如果节点资源利用率高于 70%，这个节点就会被判定为不安全了，属于热点节点，应该驱逐一部分 Pod，降低负载水位，使其不超过 70%。
+
+
+在迁移前，koord-descheduler 会计算出实际空闲容量，确保要迁移的 Pod 的实际利用率之和不超过集群内空闲总量。
+这些实际空闲容量来自于空闲节点，一个空闲节点实际空闲容量 = (highThresholds - 节点当前负载) x 节点总容量。
+假设节点 A 的负载水位是 20%，highThreshold 是 70%，节点 A 的 CPU 总量为 96C，那么 (70%-20%) x 96 = 48C，这 48C 就是可以承载的空闲容量了。
+
+在迁移热点节点时，会过滤筛选节点上的 Pod，目前 koord-descheduler 支持多种筛选参数，可以避免迁移驱逐非常重要的 Pod:
+
+- 按 namespace 过滤。可以配置成只筛选某些 namespace 或者过滤掉某些 namespace
+- 按 pod selector 过滤。可以通过 label selector 筛选出 Pod，或者排除掉具备某些 Label 的 Pod
+- 配置 nodeFit 检查调度规则是否有备选节点。当开启后，koord-descheduler 根据备选 Pod 对应的 Node
+
+
+筛选 Pod 并完成排序后，开始执行迁移操作。迁移前会检查剩余空闲容量是否满足和当前节点的负载水位是否高于目标安全阈值，如果这两个条件中的一个不能满足，将停止重调度。
+每迁移一个 Pod 时，会预扣剩余空闲容量，同时也会调整当前节点的负载水位，直到剩余容量不足或者水位达到安全阈值。
+
 
 
 ## 参考
