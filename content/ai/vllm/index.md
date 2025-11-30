@@ -2,13 +2,19 @@
 title: "vLLM"
 date: 2025-08-29T11:29:48+08:00
 summary: "PagedAttention 实现"
-draft: true
+categories:
+  - ai
 ---
 
+vLLM是伯克利大学LMSYS组织开源的大语言模型高速推理框架.
 
-vLLM 主要用于快速 LLM 推理和服务，其核心是 PagedAttention.
+vLLM 主要用于快速 LLM 推理和服务，通过一种名为PagedAttention的技术，动态地为请求分配KV cache显存，提升显存利用率。
 
 ## 基本概念
+
+FLOPS：等同于FLOP/s，表示Floating Point Operations Per Second，即每秒执行的浮点数操作次数，用于衡量硬件计算性能。
+
+FLOPs：表示Floating Point Operations，表示某个算法的总计算量（即总浮点运算次数），用于衡量一个算法的复杂度。
 
 ### 计算强度 (arithmetic intensity)
 
@@ -28,8 +34,14 @@ MAC的开销主要来自两方面。一是从存储中读取数据；二是向�
 
 
 
+## 大模型推理
 
-## 大模型推理框架
+一个常规的LLM推理过程通常分为两个阶段：预填充阶段( prefill ) 和 生成response的阶段( decode)。通常会使用KV cache技术加速推理。
+
+{{<figure src="./prefill_n_decode.png#center" width=800px >}}
+
+
+
 
 
 
@@ -55,9 +67,41 @@ MAC的开销主要来自两方面。一是从存储中读取数据；二是向�
 
 
 
-## FlashAttention 基本原理
+## FlashAttention(Fast and Memory Efficient Exact Attention with IO-Awareness）)
 
+(1）Fast（with IO-Awareness），计算快。计算慢的卡点不在运算能力，而是在读写速度上。所以它通过降低对显存（HBM）的访问次数来加快整体运算速度，这种方法又被称为O-Awareness。
+
+（2）Memory Efficient，节省显存。
+
+（3）Exact Attention，精准注意力。
+
+
+## PagedAttention
+
+
+PagedAttention的设计灵感来自操作系统的虚拟内存分页管理技术。
+
+
+### 场景
+PagedAttention在Parallel Sampling和Beam Search场景上的优势
+
+#### Parallel Sampling
+
+
+{{<figure src="./ParallelSampling.png.png#center" width=800px >}}
+
+Parallel Sampling：我给模型发送一个请求，希望它对prompt做续写，并给出三种不同的回答。我们管这个场景叫parallel sampling. 
+
+
+#### Beam Search
+Beam Search：束搜索，这是LLM常用的decode策略之一，即在每个decode阶段，我不是只产生1个token，而是产生top k个token（这里k也被称为束宽）。top k个token必然对应着此刻的top k个序列。
+我把这top k个序列喂给模型，假设词表的大小为|V|，那么在下一时刻，我就要在k*|V|个候选者中再选出top k.
+
+{{<figure src="./BeamSearch.png.png#center" width=800px >}}
 
 
 ## 参考
+- https://docs.vllm.ai/en/latest/
 - [第1.1讲：Transformers 的崛起：从RNN到Self-Attention](https://www.cnblogs.com/1314520xh/p/18845484)
+- [图解大模型计算加速系列之：vLLM核心技术PagedAttention原理](https://mp.weixin.qq.com/s/-5EniAmFf1v9RdxI5-CwiQ)
+- [图解大模型计算加速系列：FlashAttention V1，从硬件到计算逻辑](https://zhuanlan.zhihu.com/p/669926191)

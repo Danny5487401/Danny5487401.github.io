@@ -2,6 +2,8 @@
 title: "A2A( Agent-to-Agent Protocol 协议 )"
 date: 2025-10-18T16:41:54+08:00
 summary: "负责 Agent 智能体之间的通信、协作和能力发现"
+categories:
+  - ai
 ---
 Agent to Agent Protocol (A2A) 是由 Google 推出的开源协议，旨在实现不透明 Agent 智能体应用程序之间的通信和互操作性。
 

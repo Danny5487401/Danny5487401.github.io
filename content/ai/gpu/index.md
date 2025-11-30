@@ -24,14 +24,14 @@ InfiniBand采用以应用程序为中心的消息传递方法，找到从一个�
 
 
 
-#### IB(Infiniband 协议)
+#### IB( Infiniband 协议)
 {{<figure src="./Infiniband_structure.png#center" width=800px >}}
 - 物理层定义了在线路上如何将比特信号组 成符号,然后再组成帧、 数据符号以及包之间的数据填 充等,详细说明了构建有效包的信令协议等；
 - 链路层定义了数据包的格式以及数据包操作的协议,如流控、 路由选择、 编码、解码等；网络层通过在数据包上添加一个40字节的全局的路由报头(Global Route Header,GRH)来进行路由的选择,对数据进行转发。在转发的过程中,路由 器仅仅进行可变的CRC校验,这样就保证了端到端的数据传输的完整性；
 - 传输层再将数据包传送到某个指定 的队列偶(QueuePair,QP)中,并指示QP如何处理该数据 包以及当信息的数据净核部分大于通道的最大传输单 元MTU时,对数据进行分段和重组。
 
 
-#### InfiniBand的速度与以太网相比如何？
+#### InfiniBand 的速度与以太网相比如何？
 
 答：与传统以太网相比，InfiniBand的速度要高得多。以太网的运行速度通常为 1Gbps、10Gbps或100Gbps，而InfiniBand可以提供高达200Gbps 甚至更高的速度。
 
@@ -56,7 +56,7 @@ DMA 是单机内存和设备间数据传输的“发动机”。 它的核心目
 在DMA模式：可以同DMA Engine之间通过硬件将数据从Buffer1移动到Buffer2,而不需要操作系统CPU的参与，大大降低了CPU Copy的开销。
 
 
-### DMA传输过程
+### DMA 传输过程
 
 {{<figure src="./dma-process.png#center" width=800px >}}
 
@@ -173,6 +173,12 @@ GPU设备存储：
 * NVLINK：显卡之间的一种专用的数据传输通道，由NVIDIA公司推出
 
 
+## GPU是如何做计算
+
+{{<figure src="./gpu_compute.png#center" width=800px >}}
+
+负责GPU计算的一个核心组件叫SM（Streaming Multiprocessors，流式多处理器），可以将其理解成GPU的计算单元，一个SM又可以由若干个SMP（SM Partition）组成，例如图中就由4个SMP组成。
+SM就好比CPU中的一个核，但不同的是一个CPU核一般运行一个线程，但是一个SM却可以运行多个轻量级线程（由Warp Scheduler控制，一个Warp Scheduler会抓一束线程（32个）放入cuda core（图中绿色小块）中进行计算）。
 
 ## GPU 内存管理
 
