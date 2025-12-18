@@ -35,13 +35,17 @@ CUDA 和 CTM 的推出使得开发者可以更灵活地利用 GPU 的计算能�
 {{<figure src="./cuda_structure.png#center" width=800px >}}
 
 
+
+在异构计算架构中，GPU与CPU通过PCIe总线连接在一起来协同工作，CPU所在位置称为为主机端（host），而GPU所在位置称为设备端（device）
+
+
 CUDA（Compute Unified Device Architecture）的软件堆栈由驱动层、运行时层和函数库层构成。
 
 CUDA软件堆栈中的驱动层API和运行时层API的区别如下
 
 - 驱动层API（Driver API）：功能较完整，但是使用复杂。
 
-- 运行时API（CUDA Runtime API）：封装了部分驱动的API，将某些驱动初始化操作隐藏，使用方便
+- 运行时API（CUDA Runtime API）：封装了部分驱动的API，将某些驱动初始化操作隐藏，使用方便.
 
 
 典型的CUDA程序的执行流程如下：
@@ -51,6 +55,17 @@ CUDA软件堆栈中的驱动层API和运行时层API的区别如下
 3. 调用CUDA的核函数在device上完成指定的运算；
 4. 将device上的运算结果拷贝到host上；
 5. 释放device和host上分配的内存。
+
+{{<figure src="./gpu_kernel_structure.png#center" width=800px >}}
+
+kernel在device上执行时实际上是启动很多线程，一个kernel所启动的所有线程称为一个网格（grid），同一个网格上的线程共享相同的全局内存空间，grid是线程结构的第一层次，而网格又可以分为很多线程块（block），一个线程块里面包含很多线程，这是第二个层次。
+
+#### CUDA的内存模型
+
+{{<figure src="./cuda_memory_structure.png#center" width=800px >}}
+可以看到，每个线程有自己的私有本地内存（Local Memory），而每个线程块有包含共享内存（Shared Memory）,可以被线程块中所有线程共享，其生命周期与线程块一致。
+此外，所有的线程都可以访问全局内存（Global Memory）。还可以访问一些只读内存块：常量内存（Constant Memory）和纹理内存（Texture Memory）。
+
 
 ### CPU 对比 GPU
 {{<figure src="./gpu_vs_cpu.png#center" width=800px >}}
