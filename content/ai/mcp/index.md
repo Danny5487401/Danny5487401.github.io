@@ -50,13 +50,21 @@ Resources（资源）是 MCP 协议中的核心原语之一，服务器通过它
 
 提示词 允许服务器定义可复用的提示词模板和工作流，客户端可以轻松将这些模板呈现给用户或 LLM。
 
+
+## mcp 连接方式
+
+* Stdio：英文全称是Standard Input/Output，标准输入输出，是最常见的一种连接方式。MCP服务和MCP客户端运行在同一台电脑上，所有通讯都在计算机内部完成，无需通过互联网传输信息。
+* SSE：英文全称是Server-Sent Events，是一种基于 HTTP 协议的服务端向客户端单向推送实时数据的技术，它允许服务器主动、持续地向已建立连接的客户端发送数据流，无需客户端频繁发起请求（如轮询），适用于实时通知、数据更新、日志推送等场景。客户端无法向服务器发送事件，客户端如果需要向服务器发送事件，就只能通过另一种方式HTTP。
+* HTTP：这种连接方式也可以叫做Streamable HTTP（流式HTTP），客户端和服务器建立一个持久的 HTTP 连接后，这条连接就变成了一个双向通道。客户端可以随时通过这个通道向服务器发送请求，服务器也可以通过同一个通道向客户端推送数据或响应。
+
 ## 案例 
 
-客户端: https://github.com/modelcontextprotocol/python-sdk/tree/main/examples/clients/simple-chatbot/mcp_simple_chatbot
+- 官方案例: https://github.com/modelcontextprotocol/python-sdk/tree/v1.25.0/examples
+
+- gitlab mcp: https://github.com/zereight/gitlab-mcp
 
 
-
-## 手动开发 MCP 开发
+### 手动开发 MCP 开发
 
 
 ```go
@@ -121,7 +129,7 @@ func main() {
 	}
 }
 
-// handleInitialize负责向Claude Code"自我介绍"
+// handleInitialize 负责向Claude Code"自我介绍"
 func handleInitialize(req Request) {
 	// 符合MCP协议的initialize响应
 	initializeResult := map[string]any{
@@ -215,7 +223,26 @@ func sendJSON(v any) {
 
 ```
 
+claude  添加MCP 
 ```shell
+$ claude mcp add --help
+Usage: claude mcp add [options] <name> <commandOrUrl> [args...]
+
+Add an MCP server to Claude Code.
+
+Examples:
+  # Add HTTP server:
+  claude mcp add --transport http sentry https://mcp.sentry.dev/mcp
+
+  # Add SSE server:
+  claude mcp add --transport sse asana https://mcp.asana.com/sse
+
+  # Add stdio server:
+  claude mcp add --transport stdio airtable --env AIRTABLE_API_KEY=YOUR_KEY -- npx -y airtable-mcp-server
+# ....
+  
+  
+# 这里使用 stdio 类型
 $ claude mcp add --transport stdio hello -- go run hello-mcp-server.go
 
 # 工具的完整名称是 mcp__hello__greet
