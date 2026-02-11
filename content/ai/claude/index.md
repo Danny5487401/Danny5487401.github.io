@@ -1,6 +1,7 @@
 ---
 title: "Claude"
 date: 2026-02-11T11:58:17+08:00
+summary: "一个可编程、可扩展、可组合的 AI Agent 框架。"
 categories:
   - ai
 ---
@@ -35,7 +36,7 @@ https://code.claude.com/docs/en/common-workflows
 
 ### 1. 图片处理
 
-mac 使用 ctrl+v 粘贴
+mac 使用 ctrl+v 粘贴 (不是 cmd+v)
 
 
 ### 2. 引用文件或则目录
@@ -131,8 +132,19 @@ claude -p "使用go-code-security-reviewer subagent 审查@internal/converter/co
 
 ## 规范驱动开发（Spec-Driven Development, SDD）
 
+![sdd.png](sdd.png)
+
+核心产物—— spec.md、plan.md 和 tasks.md
+
+AI Agent 扮演了多个“编译器”的角色：
+- 需求编译器：将你用自然语言描述的模糊想法，“编译”成一份结构化的、无歧义的需求规范（spec.md）。
+- 方案编译器：将需求规范与你的技术约束（如使用 Go 语言）相结合，“编译”成一份详尽的技术实现蓝图（plan.md）。
+- 任务编译器：将技术蓝图，“编译”成一份带依赖关系的、原子化的任务指令集（tasks.md）。
+- 代码编译器（生成器）：最终，它根据任务指令集，生成最终的可执行代码。
+
+![sdd-process.png](sdd-process.png)
 
 ## 参考
 - [极客时间: Claude Code 工程化实践](https://time.geekbang.org/column/article/942438)
-- [AI 原生开发工作流实战](https://time.geekbang.org/column/article/924983)
+- [极客时间: AI 原生开发工作流实战](https://time.geekbang.org/column/article/924983)
 
