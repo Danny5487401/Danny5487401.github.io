@@ -1,7 +1,7 @@
 ---
 title: "向量数据库"
 date: 2025-07-31T11:06:36+08:00
-summary: 常见向量数据库
+summary: 向量数据库原理与常用向量库
 categories:
   - vector database
 ---
@@ -38,15 +38,26 @@ categories:
 
 ## 常见向量数据库
 
-1. [Milvus](https://github.com/milvus-io/milvus) - 开源，由Zilliz开发，专为大规模向量相似性搜索设计，支持多种索引类型，适用于图像检索、推荐系统等场景。
 
-2. [Faiss](https://github.com/facebookresearch/faiss) - 开源库，由Facebook AI Research (FAIR)开发，针对相似性搜索进行了优化，特别是对于GPU加速的场景非常有效。
+依据是否开源与是否为专用向量数据库，将其分为四类。
 
-3. [qdrant](https://github.com/qdrant/qdrant)- 开源
+第一类是开源的专用向量数据库，如 Chroma、Vespa、LanceDB、Marqo、Qdrant 和 Milvus，这些数据库专门设计用于处理向量数据。
+- [Milvus](https://github.com/milvus-io/milvus) - 开源，由Zilliz开发，专为大规模向量相似性搜索设计，支持多种索引类型，适用于图像检索、推荐系统等场景。
+- [qdrant](https://github.com/qdrant/qdrant)- 开源,是一款高性能的开源向量数据库，采用Rust开发，支持二进制量化技术。它提供多种索引策略和向量混合搜索功能，能够实现极高的性能（RPS>4000）和低延迟搜索。Qdrant特别适合性能敏感应用、高并发场景以及中小规模部署。
+- [FAISS (Facebook AI Similarity Search)](https://github.com/facebookresearch/faiss) - 开源库，由Facebook AI Research (FAIR)开发，针对相似性搜索进行了优化，特别是对于GPU加速的场景非常有效。当与 LangChain 结合使用时，它可以作为一个强大的本地向量存储方案，非常适合快速原型设计和中小型应用。
 
-4. [pgvector](https://github.com/pgvector/pgvector)- 开源 pg 插件
 
-5. elasticsearch 8.0: https://www.elastic.co/search-labs/blog/vector-search-improvements
+第二类是支持向量搜索的开源数据库，如 OpenSearch、PostgreSQL、ClickHouse 和 Cassandra，它们是常规数据库，但支持向量搜索功能。
+- [pgvector](https://github.com/pgvector/pgvector)- 开源 pg 插件
+
+
+第三类是商用的专用向量数据库，如 Weaviate 和 Pinecone，它们专门用于处理向量数据，但属于商业产品或通过商业许可获得源码。
+
+
+第四类是支持向量搜索的商用数据库，如 Elasticsearch、Redis、Rockset 和 SingleStore，这些常规数据库支持向量搜索功能，同时属于商业产品或可通过商业许可获得源码。
+- elasticsearch 8.0: https://www.elastic.co/search-labs/blog/vector-search-improvements
+
+
 
 
 ### milvus
