@@ -115,7 +115,7 @@ PagedAttention在Parallel Sampling和Beam Search 场景上的优势
 #### Parallel Sampling
 
 
-{{<figure src="./ParallelSampling.png.png#center" width=800px >}}
+{{<figure src="./ParallelSampling.png#center" width=800px >}}
 
 Parallel Sampling：我给模型发送一个请求，希望它对prompt做续写，并给出三种不同的回答。我们管这个场景叫parallel sampling. 
 
@@ -124,7 +124,7 @@ Parallel Sampling：我给模型发送一个请求，希望它对prompt做续写
 Beam Search：束搜索，这是LLM常用的decode策略之一，即在每个decode阶段，我不是只产生1个token，而是产生top k个token（这里k也被称为束宽）。top k个token必然对应着此刻的top k个序列。
 我把这top k个序列喂给模型，假设词表的大小为|V|，那么在下一时刻，我就要在k*|V|个候选者中再选出top k.
 
-{{<figure src="./BeamSearch.png.png#center" width=800px >}}
+{{<figure src="./BeamSearch.png#center" width=800px >}}
 
 
 ## 参考
