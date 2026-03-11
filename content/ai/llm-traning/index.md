@@ -1,5 +1,5 @@
 ---
-title: "Llm Traning 大模型训练 "
+title: "Llm Training 大模型训练 "
 date: 2026-02-28T18:01:49+08:00
 draft: true
 ---
