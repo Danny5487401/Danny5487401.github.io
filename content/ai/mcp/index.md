@@ -229,6 +229,19 @@ $ claude mcp add --transport stdio hello -- go run hello-mcp-server.go
 ⏺ 工具返回了问候语：Hello, Danny xia! Welcome to the world of MCP in Go.
 ```
 
+
+
+## 开发工具: MCP Inspector
+
+https://modelcontextprotocol.io/docs/tools/inspector
+
+{{<figure src="./mcp-inspector.png#center" width=800px >}}
+
+```shell
+(⎈|sandbox:clm-dev1)➜  ~ npx @modelcontextprotocol/inspector
+```
+
+
 ## 参考
 - https://modelcontextprotocol.io/docs/getting-started/intro
 - https://github.com/modelcontextprotocol

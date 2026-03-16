@@ -1,9 +1,8 @@
-
-
 # Danny 博客
 
 ## 基本知识
 ![](.README_images/blog_section.png)
+
 ### Front-matter 前言
 
 [**Front-matter**](https://docs.hugoblox.com/reference/front-matter/) 是 markdown 文件最上方以 --- 分隔的区域，用于指定个别markdown的变量。

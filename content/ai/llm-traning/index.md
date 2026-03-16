@@ -1,6 +1,7 @@
 ---
 title: "Llm Training 大模型训练 "
 date: 2026-02-28T18:01:49+08:00
+summary: "大模型训练流程"
 draft: true
 ---
 
@@ -67,7 +68,6 @@ draft: true
 
 
 ### 为什么不建议轻易微调大模型？首选提示词+RAG+数据清洗
-
 
 
 

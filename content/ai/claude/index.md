@@ -199,6 +199,30 @@ cat nginx-error.log | claude -p "请分析这份Nginx错误日志，总结出最
 claude -p "使用go-code-security-reviewer subagent 审查@internal/converter/converter.go，检查是否有安全漏洞" --output-format stream-json --verbose
 ```
 
+
+### 6 WebFetch
+默认集成了 WebFetch 命令，就是指定 URL 读取网页内容，这个理论上就是一个本地执行的 curl 命令，没有云端成本，不需要云端协作。
+但是有个问题：（一）CC 在访问地址之前，会先调用 anthropic.com 的一个风控接口，判断这个网络地址是否有安全风险。
+（二）政策原因，anthropic.com 会拒绝所有来自中国大陆、香港的请求，风控接口返回 404 或者其他。
+（三）风控不通过，WebFetch 失败。
+
+```shell
+❯ 帮我查看 https://mp.weixin.qq.com/s/x9wUAM6QI1Ogv2B0biawbg 这个链接的内容
+
+⏺ Fetch(https://mp.weixin.qq.com/s/x9wUAM6QI1Ogv2B0biawbg)
+  ⎿  Error: Unable to verify if domain mp.weixin.qq.com is safe to fetch. This may be due to network restrictions or enterprise security policies blocking claude.ai.
+```
+
+在 ~/.claude/settings.json 中添加如下配置，禁用 WebFetch 工具前置的风控检查
+```json
+{
+  "skipWebFetchPreflight":true,
+}
+```
+
+详见解决方式: https://linux.do/t/topic/1148954
+
+
 ## 规范驱动开发（Spec-Driven Development, SDD）
 
 
