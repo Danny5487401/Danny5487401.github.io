@@ -7,7 +7,7 @@ categories:
 ---
 
 
-OAuth是一个关于授权（authorization）的开放网络标准.
+OAuth 是一个关于授权（authorization）的开放网络标准.
 
 OpenID Connect 是在OAuth2.0 协议基础上增加了身份验证层 （identity layer）。
 OAuth 2.0 定义了通过access token去获取请求资源的机制，但是没有定义提供用户身份信息的标准方法。
@@ -655,3 +655,4 @@ func (s *sso) HandleCallback(w http.ResponseWriter, r *http.Request) {
 - [理解 OIDC 流程](https://old-docs.authing.cn/authentication/oidc/understand-oidc.html)
 - [理解OAuth 2.0](https://www.ruanyifeng.com/blog/2014/05/oauth_2_0.html)
 - [Keycloak 梳理](https://juejin.cn/post/7087587016610840589)
+- [oauth 2.0 实战课](https://time.geekbang.org/column/article/254565)

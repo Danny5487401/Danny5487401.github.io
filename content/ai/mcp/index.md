@@ -43,7 +43,16 @@ https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle
 JSON-RPC 2.0是一种基于JSON（JavaScript Object Notation）的远程过程调用（RPC）协议。它是一种轻量级的、无状态的、跨语言的通信协议，常用于客户端与服务端之间的交互。
 
 MCP 协议使用 JSON-RPC 2.0 作为消息传输格式.
+
 MCP 支持两种标准传输方式：标准输入/输出（stdio) 和 Streamable HTTP(替代 HTTP+SSE transport from protocol version 2024-11-05) 。
+
+2024-11-05版本采用的HTTP+SSE双通道方案存在三大结构性缺陷：
+
+|  问题类型   | 具体表现 | 技术后果 |
+|:-------:|:----:|::|
+| 连接管理复杂  |   需维护POST请求端与SSE事件流双通道   | 客户端需实现双重连接保活机制 |
+|    断线恢复困难     |  SSE流中断后需重新建立完整会话  | 长任务场景可能丢失上下文数据 |
+|    断线恢复困难     |  简单请求被迫使用流式传输  | 额外30%的网络资源消耗（基于MCP工作组基准测试） |
 
 ### 消息格式
 在JSON-RPC 2.0中，有以下三种主要的消息类型：
@@ -115,9 +124,67 @@ Resources（资源）是 MCP 协议中的核心原语之一，服务器通过它
 
 ## 客户端端特性 
 
+
+## MCP 的两种认证模式：API 密钥 vs OAuth 2.1
+
+
+### 1. API 密钥：适合简单场景的"快速方案"
+
+### 2. OAuth 2.1：生产环境的"标准方案"
+
+
+MCP 授权的核心是标准的 OAuth 2.1 流程，通常涉及三个角色：MCP 客户端（比如本地 LLM 应用 Claude Desktop）、OAuth 服务器（比如 WorkOS）、MCP 服务器（比如处理 GitHub 议题的服务、Playwright UI 测试服务）
+
+
+
+完整流程拆解（以"创建 GitHub 议题"为例）：
+
+{{<figure src="./oauth_for_mcp.png#center" width=800px >}}
+- 用户通过 MCP 客户端，尝试访问需要对接 MCP 服务器的功能（比如创建 GitHub 议题）。
+- 客户端打开浏览器，将用户重定向到 OAuth 服务器（比如 WorkOS）。
+- 用户完成登录，并授权客户端访问自己的账户。
+- OAuth 服务器向客户端返回一个授权码。
+- 客户端用这个授权码，换取访问令牌（Access Token）。
+- 客户端携带访问令牌，向 MCP 服务器发起请求。
+
+
+大多数 MCP 客户端是"公网客户端"（比如桌面应用、移动端应用），没法安全存储密钥------一旦打包在应用里，就有可能被提取出来。这时
+
+{{<figure src="./pkce.png#center" width=800px >}}
+
+- 客户端发起授权流程时，生成一个随机字符串（称为"代码验证器"），并对其进行哈希处理，得到"代码挑战"。
+- 客户端在初始的授权请求中，将"代码挑战"发送给 OAuth 服务器。
+- 后续用授权码换令牌时，客户端必须提交原始的"代码验证器"。
+
+
+
+
+#### 让客户端"自动读懂"服务器的安全规则
+
+客户端知道 MCP 服务器的 URL 后，还需要搞清楚：服务器接受哪种令牌格式？信任哪些授权服务器？有哪些可用的权限范围？
+
+如果手动配置这些信息，不仅麻烦还容易出错。MCP 采用了标准化的元数据发现方案，让服务器主动暴露这些配置，客户端自动读取适配。
+
+https://modelcontextprotocol.io/seps/985-align-oauth-20-protected-resource-metadata-with-rf
+
+
+1. 受保护资源元数据（MCP 服务器的"安全指南"）
+```shell
+/.well-known/oauth-protected-resource
+```
+
+2.  授权服务器元数据（OAuth 服务器的"通信手册"）
+
+```shell
+/.well-known/oauth-authorization-server
+```
+
+
+
 ## 案例 
 
 客户端: https://github.com/modelcontextprotocol/python-sdk/tree/main/examples/clients/simple-chatbot/mcp_simple_chatbot
+
 
 
 
@@ -323,3 +390,4 @@ MCP Inspector 的强大功能源于其独特的双组件架构，两者协同工
 - [MCP（Model Context Protocol）初体验：企业数据与大模型融合初探](https://www.cnblogs.com/CareySon/p/18805011/mcp_for_crm_demo)
 - [MCP (Model Context Protocol)，一篇就够了](https://zhuanlan.zhihu.com/p/29001189476)
 - [一文掌握 MCP 上下文协议：从理论到实践](https://zhuanlan.zhihu.com/p/1891139164952584541)
+- [吃透 MCP 认证授权：OAuth 2.1+PKCE 实战指南](https://juejin.cn/post/7570339961909346347)

@@ -178,6 +178,15 @@ haiku  可能漏掉细微的安全问题 ❌
 
 opus  对于审查任务来说成本太高 ❌
 
+## AI 编程工具
+
+常见 AI 编程工具 CLI:
+
+- [Codex CLI](https://developers.openai.com/codex)
+- Claude Code
+- Gemini CLI
+
+
 
 
 ## 常见工作流
