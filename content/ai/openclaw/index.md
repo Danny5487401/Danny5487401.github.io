@@ -167,34 +167,64 @@ https://docs.openclaw.ai/concepts/agent-workspace
 workspace 是agent 的家目录.
 
 ### agent memory
+{{<figure src="./claw_memory_structure.png#center" width=800px >}}
 
+#### L1 数据源层
+Memory 系统的原始数据来自两类 Markdown 文件：
+- MEMORY.md：长期记忆文件，存放用户手动维护的重要信息，如项目背景、技术栈偏好、团队成员信息。这类记忆被标记为“常青记忆”，不受时间衰减影响。
+- memory/YYYY-MM-DD.md：每日会话日志，由 Memory Flush 机制自动生成。每次会话中值得记住的信息会被追加到当天的文件中
+
+#### L2 处理层：文本如何变成向量
+将文本转换为高维向量（Embedding）
+
+#### L3 存储层：数据怎么持久化 
 SQLite-vec：Local-First 的向量存储选择 SQLite-vec 而非 Pinecone 或 Milvus，体现了 OpenClaw 的 Local-First 哲学。
 所有数据都存储在本地，用户拥有完全的数据主权。SQLite 的单文件部署特性，也让整个系统的安装和迁移变得极其简单——只需要复制一个.db 文件
+
+OpenClaw 选择 SQLite 作为存储引擎，配合两个关键扩展：
+- sqlite-vec：向量搜索扩展，支持余弦相似度计算，实现高效的 ANN（近似最近邻）检索。
+- FTS5：SQLite 内置的全文搜索引擎，支持 BM25（Best Matching 25） 排序算法。
 
 memory设置: https://docs.openclaw.ai/reference/memory-config 
 ```shell
 # 默认使用sqlite
-node@danny-agent-0:/app$ openclaw memory status
+node@danny-agent-0:/app$ openclaw memory status --deep
 
-🦞 OpenClaw 2026.3.12 (unknown) — I'll butter your workflow like a lobster roll: messy, delicious, effective.
+🦞 OpenClaw 2026.3.24 (cff6dc9) — Pairing codes exist because even bots believe in consent—and good security hygiene.
 
 Memory Search (main)
 Provider: none (requested: auto)
 Model: none
 Sources: memory
-Indexed: 0/0 files · 0 chunks
+Indexed: 0/1 files · 0 chunks
 Dirty: yes
 Store: ~/.openclaw/memory/main.sqlite
 Workspace: ~/.openclaw/workspace
+Embeddings: unavailable
+Embeddings error: No API key found for provider "openai". You are authenticated with OpenAI Codex OAuth. Use openai-codex/gpt-5.4 (OAuth) or set OPENAI_API_KEY to use openai/gpt-5.4.
+
+No API key found for provider "google". Auth store: /Users/python/.openclaw/agents/main/agent/auth-profiles.json (agentDir: /Users/python/.openclaw/agents/main/agent). Configure auth for this agent (openclaw agents add <id>) or copy auth-profiles.json from the main agentDir.
+
+No API key found for provider "voyage". Auth store: /Users/python/.openclaw/agents/main/agent/auth-profiles.json (agentDir: /Users/python/.openclaw/agents/main/agent). Configure auth for this agent (openclaw agents add <id>) or copy auth-profiles.json from the main agentDir.
+
+No API key found for provider "mistral". Auth store: /Users/python/.openclaw/agents/main/agent/auth-profiles.json (agentDir: /Users/python/.openclaw/agents/main/agent). Configure auth for this agent (openclaw agents add <id>) or copy auth-profiles.json from the main agentDir.
 By source:
-  memory · 0/0 files · 0 chunks
+  memory · 0/1 files · 0 chunks
 Vector: unknown
 FTS: ready
 Embedding cache: enabled (0 entries)
 Batch: disabled (failures 0/2)
-Issues:
-  memory directory missing (~/.openclaw/workspace/memory)
+
 ```
+
+
+#### L4 搜索层：检索策略的编排
+
+搜索层是整个系统的“大脑”，负责编排复杂的检索策略：
+- 混合搜索：同时执行向量搜索和关键词搜索，综合两者的优势。 
+- 加权合并：默认 70% 向量权重 + 30% 关键词权重。 
+- 时间衰减：为每条结果乘以时间衰减因子，近期记忆得分更高。 
+- MMR 去重：通过最大边际相关性算法，剔除高度相似的结果。
 
 
 
