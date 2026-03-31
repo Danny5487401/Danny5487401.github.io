@@ -70,6 +70,9 @@ Gateway API Inference Extension 定义了两个核心 CRD：InferencePool 和 In
 ## 第三方实现
 
 ### higress
+https://github.com/alibaba/higress/blob/1bcef0c00c4d14b2af42921de2e955600b91fda2/docs/architecture.md
+
+{{<figure src="./higress-structure.png#center" width=800px >}}
 
 首先对于长连接的问题，Higress 的内核是基于 envoy 和 istio 的，实现了连接无损的热更新，可以避免类似 nginx 等网关变更配置时需要 reload，导致连接断开。
 
@@ -77,7 +80,93 @@ Gateway API Inference Extension 定义了两个核心 CRD：InferencePool 和 In
 
 对于大带宽的问题，解决方案是流式输出。因此 Higress 也支持了完全流式转发，并且数据面是基于 C++ 编写的 Envoy，在大带宽场景下，所需的内存占用极低。
 
+```mermaid
+flowchart LR
+    subgraph Clients[调用方]
+        A[浏览器 / App / AI Agent / MCP Client]
+    end
 
+    subgraph Gateway[Higress Gateway]
+        B1[Pilot Agent]
+        B2[Envoy]
+        B3[Wasm Plugins\nplugins/wasm-go/extensions]
+        B4[Go Filters\nplugins/golang-filter]
+        B5[MCP Session Filter\nplugins/golang-filter/mcp-session]
+        B6[MCP Server Filter\nplugins/golang-filter/mcp-server]
+    end
+
+    subgraph Control[控制面下发]
+        C1[xDS from Discovery]
+        C2[EnvoyFilter / WasmPlugin]
+        C3[MCP 路由配置\npkg/ingress/kube/configmap + pkg/ingress/kube/mcpserver]
+    end
+
+    subgraph MCPBackends[MCP 后端]
+        D1[托管型 MCP Server\nplugins/wasm-go/mcp-servers]
+        D2[远程 MCP Server]
+        D3[OpenAPI 转 MCP]
+        D4[注册中心发现的 MCP Server\nregistry/nacos/mcpserver]
+    end
+
+    subgraph Biz[普通后端]
+        E1[HTTP / gRPC / Dubbo / 微服务]
+        E2[LLM Provider / AI Service]
+    end
+
+    A --> B2
+    B1 --> B2
+    C1 --> B1
+    C2 --> B2
+    C3 --> B5
+    C3 --> B6
+
+    B3 --> B2
+    B4 --> B2
+    B5 --> B2
+    B6 --> B2
+
+    B2 --> D1
+    B2 --> D2
+    B2 --> D3
+    B2 --> D4
+    B2 --> E1
+    B2 --> E2
+
+```
+
+生命周期
+```mermaid
+
+  sequenceDiagram
+      autonumber
+
+      participant X as Discovery / Controller
+      participant PA as Pilot Agent
+      participant E as Envoy Gateway
+      participant P as Wasm / Go Filters
+      participant B as Backend Service
+      participant C as Client
+
+      Note over X,PA: 启动或配置变更时
+      X->>PA: 下发 xDS / SDS 配置
+      PA->>E: 启动 Envoy 并注入监听/路由/集群/证书配置
+
+      Note over C,B: 运行时请求链路
+      C->>E: 发起 HTTP / HTTPS / gRPC 请求
+      E->>P: 进入 HTTP Filter 链 / Wasm 插件链
+      P-->>P: 认证 / 鉴权 / 限流 / 改写 / AI 统计 / 安全检测
+      alt 命中本地拒绝策略
+          P-->>E: 返回拒绝结果
+          E-->>C: 4xx / 5xx 响应
+      else 允许转发
+          P-->>E: 继续路由
+          E->>B: 转发到上游集群 / 服务实例
+          B-->>E: 返回响应
+          E->>P: 响应阶段过滤
+          P-->>P: 响应改写 / 统计 / 日志 / trace
+          E-->>C: 返回最终响应
+      end
+```
 
 #### WasmPlugin
 
