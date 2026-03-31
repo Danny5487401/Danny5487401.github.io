@@ -14,6 +14,8 @@ sections:
         style: 'text-align: justify; font-size: 0.8em;'
   - block: collection
     content:
+      sort_by: Date
+      sort_ascending: false
       filters:
         folders:
           - post
@@ -21,6 +23,9 @@ sections:
           - security
           - golang
           - ai
+      archive:
+        link: /articles/
+        text: See all articles
     design:
       spacing:
         padding: ['3rem', 0, '6rem', 0]
