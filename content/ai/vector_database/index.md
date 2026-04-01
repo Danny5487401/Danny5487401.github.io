@@ -23,14 +23,6 @@ categories:
 - 生成句子Embeddings的常用方法包括Doc2Vec (Document-to-vector)
 - 卷积神经网络(cnn)和视觉几何组(VGG)用于生成图像Embeddings
 
-下面这个示例把本地 `05_embeddings/main.py` 里的训练样本、相似文档检索和分类验证流程搬到了浏览器端。为了让页面可以直接运行，示例没有继续依赖 `gensim.Doc2Vec`，而是改成了一个 **Pyodide + NumPy 的轻量 Embeddings 版本**：
-
-- 保留相同的训练样本、测试样本和查询文本
-- 保留“文本向量化 -> 相似文档检索 -> 类别中心分类”的教学流程
-- 使用确定性的 token 向量平均方式来构造文档 Embeddings，便于在浏览器里即时运行和修改
-
-你可以直接编辑代码，然后点击运行：
-
 {{< pyodide-runner script="embeddings_demo.py" height="34rem" >}}
 
 
