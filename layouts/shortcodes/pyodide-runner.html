@@ -1,0 +1,126 @@
+{{- $id := printf "pyodide-runner-%d" .Ordinal -}}
+{{- $scriptName := .Get "script" -}}
+{{- $scriptResource := .Page.Resources.GetMatch $scriptName -}}
+{{- if not $scriptResource -}}
+<div class="hb-alert hb-alert-error">
+  未找到 Pyodide 示例脚本: {{ $scriptName }}
+</div>
+{{- else -}}
+{{- $defaultCode := $scriptResource.Content -}}
+<div
+  id="{{ $id }}"
+  style="margin: 1.5rem 0; border: 1px solid #d4d4d8; border-radius: 1rem; overflow: hidden; background: linear-gradient(180deg, #fafaf9 0%, #ffffff 100%);"
+>
+  <div style="padding: 1rem 1rem 0.75rem 1rem; border-bottom: 1px solid #e4e4e7; background: #f8fafc;">
+    <div style="font-size: 1rem; font-weight: 700; color: #111827;">Pyodide Embeddings Demo</div>
+    <div style="margin-top: 0.35rem; font-size: 0.92rem; color: #4b5563;">
+      在浏览器里运行 Python。首次点击会下载 Pyodide 和 NumPy，通常需要几秒钟。
+    </div>
+  </div>
+
+  <textarea
+    data-role="editor"
+    spellcheck="false"
+    style="display: block; width: 100%; min-height: {{ .Get "height" | default "28rem" }}; padding: 1rem; border: 0; resize: vertical; outline: none; font: 13px/1.6 SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace; background: #0f172a; color: #e2e8f0;"
+  >{{ $defaultCode }}</textarea>
+
+  <div style="display: flex; gap: 0.75rem; align-items: center; padding: 0.85rem 1rem; border-top: 1px solid #1f2937; background: #111827;">
+    <button
+      type="button"
+      data-role="run"
+      style="border: 0; border-radius: 999px; padding: 0.6rem 1rem; font-size: 0.92rem; font-weight: 600; color: #111827; background: #facc15; cursor: pointer;"
+    >运行代码</button>
+    <button
+      type="button"
+      data-role="reset"
+      style="border: 1px solid #374151; border-radius: 999px; padding: 0.6rem 1rem; font-size: 0.92rem; font-weight: 600; color: #e5e7eb; background: transparent; cursor: pointer;"
+    >重置示例</button>
+    <span data-role="status" style="font-size: 0.9rem; color: #93c5fd;">等待运行</span>
+  </div>
+
+  <pre
+    data-role="output"
+    style="margin: 0; padding: 1rem; min-height: 12rem; white-space: pre-wrap; word-break: break-word; border-top: 1px solid #e5e7eb; background: #f8fafc; color: #111827; font: 13px/1.65 SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;"
+  >点击“运行代码”查看 embeddings 检索与分类结果。</pre>
+</div>
+
+<script type="module">
+  (() => {
+    const root = document.getElementById('{{ $id }}');
+    if (!root) return;
+
+    const editor = root.querySelector('[data-role="editor"]');
+    const runButton = root.querySelector('[data-role="run"]');
+    const resetButton = root.querySelector('[data-role="reset"]');
+    const status = root.querySelector('[data-role="status"]');
+    const output = root.querySelector('[data-role="output"]');
+    const defaultCode = {{ jsonify $defaultCode }};
+
+    async function getPyodide() {
+      if (!globalThis.__codexPyodidePromise) {
+        globalThis.__codexPyodidePromise = (async () => {
+          const version = "0.27.7";
+          const indexURL = `https://cdn.jsdelivr.net/pyodide/v${version}/full/`;
+          const { loadPyodide } = await import(`${indexURL}pyodide.mjs`);
+          const pyodide = await loadPyodide({ indexURL });
+          await pyodide.loadPackage(["numpy"]);
+          return pyodide;
+        })();
+      }
+      return globalThis.__codexPyodidePromise;
+    }
+
+    async function runCode() {
+      runButton.disabled = true;
+      runButton.style.opacity = "0.7";
+      status.textContent = "正在准备 Python 运行时...";
+      output.textContent = "加载中，请稍候...";
+
+      try {
+        const pyodide = await getPyodide();
+        status.textContent = "正在执行 Python...";
+        pyodide.globals.set("USER_CODE", editor.value);
+        const result = await pyodide.runPythonAsync(`
+import io
+import sys
+import traceback
+
+_stdout = sys.stdout
+_stderr = sys.stderr
+_buffer = io.StringIO()
+sys.stdout = _buffer
+sys.stderr = _buffer
+
+try:
+    exec(USER_CODE, {"__name__": "__main__"})
+except Exception:
+    traceback.print_exc()
+finally:
+    sys.stdout = _stdout
+    sys.stderr = _stderr
+
+_buffer.getvalue()
+        `);
+
+        output.textContent = result && result.trim()
+          ? result
+          : "执行完成，没有额外输出。";
+        status.textContent = "执行完成";
+      } catch (error) {
+        output.textContent = String(error);
+        status.textContent = "执行失败";
+      } finally {
+        runButton.disabled = false;
+        runButton.style.opacity = "1";
+      }
+    }
+
+    runButton.addEventListener("click", runCode);
+    resetButton.addEventListener("click", () => {
+      editor.value = defaultCode;
+      output.textContent = "代码已重置，点击“运行代码”重新执行。";
+      status.textContent = "已重置";
+    });
+  })();
+</script>
+{{- end -}}
