@@ -35,6 +35,7 @@ https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle
 
 
 案例流程
+
 {{<figure src="./mcp_process_example.png#center" width=800px >}}
 
 

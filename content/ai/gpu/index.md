@@ -218,6 +218,60 @@ SM就好比CPU中的一个核，但不同的是一个CPU核一般运行一个线
 ## nvidia-smi(NVIDIA System Management Interface)
 
 nvidia-smi 调用的是 NVML。NVML 全称是 NVIDIA Management Library，提供了一组 C API，用于 NVIDIA GPU 监控和管理的库。
+```shell
+(⎈|sandbox:clm-dev)➜  ~ KUBECTL_NODE_SHELL_POD_RUNNING_TIMEOUT=5m kubectl node-shell 10.26.1.33 --image swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/nvidia/cuda:13.2.0-devel-ubuntu24.04
+
+$ nvidia-smi -h
+NVIDIA System Management Interface -- v535.129.03
+
+NVSMI provides monitoring information for Tesla and select Quadro devices.
+The data is presented in either a plain text or an XML format, via stdout or a file.
+NVSMI also provides several management operations for changing the device state.
+
+Note that the functionality of NVSMI is exposed through the NVML C-based
+library. See the NVIDIA developer website for more information about NVML.
+Python wrappers to NVML are also available.  The output of NVSMI is
+not guaranteed to be backwards compatible; NVML and the bindings are backwards
+compatible.
+
+http://developer.nvidia.com/nvidia-management-library-nvml/
+http://pypi.python.org/pypi/nvidia-ml-py/
+
+
+# 查看GPU运行情况
+$ nvidia-smi
+Thu Apr 16 14:17:04 2026
++---------------------------------------------------------------------------------------+
+| NVIDIA-SMI 535.129.03             Driver Version: 535.129.03   CUDA Version: 12.2     |
+|-----------------------------------------+----------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |         Memory-Usage | GPU-Util  Compute M. |
+|                                         |                      |               MIG M. |
+|=========================================+======================+======================|
+|   0  NVIDIA A30                     On  | 00000000:65:01.0 Off |                    0 |
+| N/A   32C    P0              33W / 165W |  11189MiB / 24576MiB |      0%      Default |
+|                                         |                      |             Disabled |
++-----------------------------------------+----------------------+----------------------+
+
++---------------------------------------------------------------------------------------+
+| Processes:                                                                            |
+|  GPU   GI   CI        PID   Type   Process name                            GPU Memory |
+|        ID   ID                                                             Usage      |
+|=======================================================================================|
+|    0   N/A  N/A     39265      C   VLLM::EngineCore                          11176MiB |
+
+```
+
+- 第一行分别为：命令行工具版本、GPU驱动版本、CUDA版本
+- 第一栏分别为：GPU(GPU卡号，0～4)、Fan(风扇转速，0～100%)
+- 第二栏分别为：Name(显卡名字)、Temp(温度，摄氏度)
+- 第三栏分别为：Perf(性能状态，P0~P12，最高性能为P0，最低性能为P12)
+- 第四栏分别为：Persistence-M(持续模式，默认为关闭，比较节能，如果设置成ON，耗能比较大，但新的GPU应用启动时，花费的时间会更短)、Pwr:Usage/Cap(能耗)
+- 第五栏分别为：Bus-Id(GPU总线，domain:bus:device.function)
+- 第六栏分别为：Disp.A(GPU的显示是否初始化)、Memory-Usage(显存利用率)
+- 第七栏分别为：Volatile GPU-Util(GPU浮动利用率)
+- 第八栏分别为：Uncorr. ECC(Error Correcting Code错误检查和纠正码)、Compute M.(计算模式)
+
 
 
 
