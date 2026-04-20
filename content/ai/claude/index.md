@@ -17,6 +17,39 @@ categories:
 
 基础层也可以称为是 Claude Code 的长期记忆系统，它的核心文件是 CLAUDE.md
 
+
+Claude Code 在查找和应用项目内的 CLAUDE.md 时，还有两个更为精妙和强大的机制：递归向上查找和动态向下发现
+
+#### 递归向上查找
+
+当你启动 Claude Code 时，它会从你当前所在的目录（cwd）开始，一路向上递归，直到项目的根目录（通常是 .git 所在的目录）或者你的用户主目录。在这个过程中，它会加载并拼接沿途遇到的所有 CLAUDE.md 文件。
+
+
+#### 动态向下发现
+它们只有在 AI Agent 通过 @ 指令或 Read 工具，实际去读取那个子目录下的文件时，才会被动态地加载进来。
+它实现了“按需加载上下文（Context on Demand）”，既保证了相关性，又避免了在启动时就加载整个庞大项目的无关上下文，极大地节省了 Token 并提高了 AI Agent 的专注度。
+```shell
+/my-monorepo
+├── .git
+├── .claude/
+│   └── CLAUDE.md         # (A) 项目根上下文
+├── services/
+│   ├── user-service/
+│   │   ├── .claude/
+│   │   │   └── CLAUDE.md     # (B) user-service 微服务上下文
+│   │   ├── main.go
+│   │   └── internal/
+│   │       └── db.go
+│   └── order-service/
+│       ├── .claude/
+│       │   └── CLAUDE.md     # (C) order-service 微服务上下文
+│       └── main.go
+└── libs/
+    └── shared-utils/
+        └── string.go
+```
+
+
 ### 四大核心组件
 {{<figure src="./four_components.png#center" width=800px >}}
 
