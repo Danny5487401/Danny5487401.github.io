@@ -41,7 +41,7 @@ https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle
 
 ## JSON-RPC
 
-JSON-RPC 2.0是一种基于JSON（JavaScript Object Notation）的远程过程调用（RPC）协议。它是一种轻量级的、无状态的、跨语言的通信协议，常用于客户端与服务端之间的交互。
+JSON-RPC 2.0 是一种基于JSON（JavaScript Object Notation）的远程过程调用（RPC）协议。它是一种轻量级的、无状态的、跨语言的通信协议，常用于客户端与服务端之间的交互。
 
 MCP 协议使用 JSON-RPC 2.0 作为消息传输格式.
 
@@ -131,6 +131,7 @@ Resources（资源）是 MCP 协议中的核心原语之一，服务器通过它
 
 ### 1. API 密钥：适合简单场景的"快速方案"
 
+
 ### 2. OAuth 2.1：生产环境的"标准方案"
 
 
@@ -172,12 +173,65 @@ https://modelcontextprotocol.io/seps/985-align-oauth-20-protected-resource-metad
 1. 受保护资源元数据（MCP 服务器的"安全指南"）
 ```shell
 /.well-known/oauth-protected-resource
+
+# figma 
+(⎈|sandbox:clm-dev)➜  ~ curl -Ss 'https://mcp.figma.com/.well-known/oauth-protected-resource' | jq .
+
+{
+  "resource": "https://mcp.figma.com/mcp",
+  "authorization_servers": [
+    "https://api.figma.com"
+  ],
+  "bearer_methods_supported": [
+    "header"
+  ],
+  "scopes_supported": [
+    "mcp:connect"
+  ],
+  "resource_name": "Figma MCP",
+  "resource_documentation": "https://developers.figma.com/docs/figma-mcp-server/"
+}
 ```
+
+
+服务端: https://github.com/modelcontextprotocol/python-sdk/blob/652478266702ac71a1d03692337bd5207ddbedf4/src/mcp/server/auth/routes.py#L190
+
+客户端: https://github.com/modelcontextprotocol/python-sdk/blob/652478266702ac71a1d03692337bd5207ddbedf4/src/mcp/client/auth/utils.py#L67
+
+
 
 2.  授权服务器元数据（OAuth 服务器的"通信手册"）
 
 ```shell
 /.well-known/oauth-authorization-server
+
+# figma
+⎈|sandbox:clm-dev)➜  ~ curl -sS 'https://mcp.figma.com/.well-known/oauth-authorization-server' | jq .
+{
+  "issuer": "https://api.figma.com",
+  "authorization_endpoint": "https://www.figma.com/oauth/mcp",
+  "token_endpoint": "https://api.figma.com/v1/oauth/token",
+  "grant_types_supported": [
+    "authorization_code",
+    "refresh_token",
+    "urn:ietf:params:oauth:grant-type:jwt-bearer"
+  ],
+  "response_types_supported": [
+    "code"
+  ],
+  "registration_endpoint": "https://api.figma.com/v1/oauth/mcp/register",
+  "code_challenge_methods_supported": [
+    "S256"
+  ],
+  "token_endpoint_auth_methods_supported": [
+    "client_secret_basic",
+    "client_secret_post"
+  ],
+  "scopes_supported": [
+    "mcp:connect"
+  ],
+  "require_state_parameter": true
+}
 ```
 
 

@@ -26,7 +26,12 @@ tags:
 - OV（Organization Validation）：面向企业用户，证书在 DV 证书验证的基础上，还需要公司的授权，CA 通过拨打信息库中公司的电话来确认；
 - EV（Extended Validation）：打开 Github 的网页，你会看到 URL 地址栏展示了注册公司的信息，这会让用户产生更大的信任，这类证书的申请除了以上两个确认外，还需要公司提供金融机构的开户许可证，要求十分严格
 
-
+```shell
+# OV（Organization Validation 类型案例
+(⎈|sandbox:clm-dev)➜  ~ openssl s_client -connect www.baidu.com:443 -servername www.baidu.com </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer
+subject=C=CN, ST=beijing, L=beijing, O=Beijing Baidu Netcom Science Technology Co., Ltd, CN=baidu.com
+issuer=C=BE, O=GlobalSign nv-sa, CN=GlobalSign RSA OV SSL CA 2018
+```
 
 ### 数字证书编码格式
 X.509 证书目前有以下两种编码格式:

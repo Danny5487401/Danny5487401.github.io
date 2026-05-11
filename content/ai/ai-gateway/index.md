@@ -70,7 +70,8 @@ Gateway API Inference Extension 定义了两个核心 CRD：InferencePool 和 In
 ## 第三方实现
 
 ### higress
-https://github.com/alibaba/higress/blob/1bcef0c00c4d14b2af42921de2e955600b91fda2/docs/architecture.md
+架构: https://github.com/higress-group/higress/blob/v2.2.1/docs/architecture.md
+
 
 {{<figure src="./higress-structure.png#center" width=800px >}}
 

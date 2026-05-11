@@ -65,17 +65,19 @@ Hooks 是流程规则。它回答的是什么时候检查。它们在关键节�
 
 而 Skills 回答的，是另外一个非常关键的问题：“怎么做，以及何时做”，它不是工具，也不是分工机制。它是一种可操作知识结构
 
-#### Skills（技能）
+#### Skills（技能）：教 AI 怎么做
 
 [claude code skills](https://code.claude.com/docs/en/skills) 遵从 [agentskills协议](https://github.com/agentskills/agentskills)
-
-
 
 
 Skills 是一种可被语义触发的能力包，它包含领域知识、执行步骤、输出规范与约束条件，并在需要时渐进式加载到主 Agent 的认知空间中。
 
 
-从工程角度，Skill 内容分为两类，参考型和任务型。参考型 Skill 影响“怎么做”，任务型 Skill 决定“做什么”。前者是语义环境，后者是具体行动。
+从工程角度，Skill 内容分为两类，参考型和任务型。
+- 参考型 Skill 影响“怎么做”
+- 任务型 Skill 决定“做什么”。
+
+前者是语义环境，后者是具体行动。
 
 
 从团队协作的视角来看，这里是一些最佳实践。

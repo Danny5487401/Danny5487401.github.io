@@ -36,6 +36,7 @@ OpenClaw 的外围就是各种 IM 软件。除了 IM 软件，还有两个项目
 
 
 ### Gateway 网关层：系统的“交通枢纽”
+https://docs.openclaw.ai/gateway
 ```shell
 (⎈|sandbox:danny-xia-test)➜  Danny5487401.github.io git:(main) ✗ openclaw gateway status 
 
@@ -283,8 +284,90 @@ Batch: disabled (failures 0/2)
 
 
 
+## tools 和 plugins
+https://docs.openclaw.ai/tools
 
+OpenClaw 内置了文件操作、Shell 执行、网络请求、浏览器控制等多个工具组，每个工具组包含若干具体工具。
+
+### 内置 tools
+
+- 文件操作工具:  read / write / edit
+- Shell 执行工具: exec / process 管理后台进程
+- 网络工具:  web_search 网络搜索 / x_search / web_fetch 抓取网页内容
+- 浏览器工具: browser
+- 消息与通知工具:  message / text-to-speech(tts 文本转语音)
+
+### 插件 plugins
+https://docs.openclaw.ai/tools/plugin#quick-start
+
+插件是一个小型代码模块，用于在不修改 OpenClaw 核心代码的前提下，动态扩展其功能。典型用途包括：
+
+
+- 注册 Tool: 提供语音通话、文件处理等新工具
+- 注册 Hook
+- 注册 CLI 命令
+- 注册 HTTP 路由
+- 注册消息渠道:（如 Microsoft Teams）
+- 注册 Provider 登录: 集成自定义 AI 模型认证流程
+- 注册后台服务
+- 注册 Context Engine
+- 独占插槽（Slots），比如 memory 或 contextEngine 上下文编排引擎
+
+外部插件可以通过 clawhub 安装. 
+
+
+OpenClaw 会按顺序扫描插件来源：
+
+- plugins.load.paths
+- 工作区 .openclaw/extensions/
+- 全局目录 ~/.openclaw/extensions/
+- bundled extensions
+
+
+## Agent Client Protocol (ACP)
+- https://agentclientprotocol.com/get-started/introduction
+- https://docs.openclaw.ai/cli/acp
+  
+早期的 AI 编程助手大多以“聊天机器人”的形式存在，它们擅长回答概念性问题或生成代码片段，但在处理涉及多文件修改、复杂测试调试、全仓库重构等工程级任务时，往往显得力不从心。
+为了解决这一问题，社区涌现出了一批专用的“编码 Harness”（如 Claude Code, Codex CLI 等）。
+这些工具通常拥有独立的文件系统访问权限、shell 执行能力以及针对编程任务优化的提示词工程。
+ 
+
+OpenClaw 没有采用现成的 gRPC、GraphQL 或 REST，而是基于 JSON-RPC 2.0 扩展出一套专为 AI Agent 场景定制的轻量级协议——ACP（Agent Client Protocol）.
+
+ACP 定义了一套标准的通信接口，使得 OpenClaw 能够像调用本地函数一样，启动并控制任何兼容 ACP 的外部进程.
+当用户在聊天中输入“用 Codex 修复这个测试失败”时，OpenClaw 会自动识别意图，通过 ACP 后端插件（如 acpx）启动一个 Codex 实例，将其绑定到当前的对话线程中，并实时流式传输其执行结果。
+
+
+### 何时使用 ACP
+
+
+选择 ACP 的场景：
+
+- 需要读取或修改大量本地文件。
+- 需要运行复杂的 Shell 命令链或编译流程。
+- 需要使用特定的外部 CLI 工具（如 git, docker, npm 的深度交互）。
+- 任务需要长时间的上下文保持和迭代优化（利用持久化会话）。
+- 明确要求使用特定的外部模型（如 "Use Claude Code to..."）。
+
+选择原生子代理的场景：
+- 简单的问答或代码片段生成。
+- 需要在严格受限的沙箱环境中运行（防止恶意代码执行）。
+- 任务主要是路由、总结或协调其他代理。
+- 对启动速度极其敏感的短时任务。
+
+
+### 核心机制——线程绑定与持久化会话
+
+1. 绑定建立：当用户在一个线程中发起 ACP 会话请求（例如 /acp spawn codex --thread auto），OpenClaw 会启动一个 ACP 会话，并将该会话的 ID 与当前线程的 ID 关联起来，存储在会话元数据中。
+
+2. 消息路由：此后，该线程内产生的所有新消息，不再被视为普通的聊天输入，而是被自动路由到绑定的 ACP 会话中，作为该会话的“下一轮输入”。
+
+3. 输出回传：ACP 会话产生的所有输出（包括中间思考、命令执行结果、最终代码）都会以消息形式发送回同一个线程。
+
+4. 上下文保持：由于会话是持久的（Persistent Mode），ACP 智能体能够“记住”之前在该线程中的所有交互历史，从而实现连续的工程协作
 
 ## 参考
 - [爆火全网的OpenClaw强在哪儿](https://time.geekbang.org/column/article/946360)
 - [openclaw 核心原理与实战](https://time.geekbang.org/column/article/954978)
+- [深入剖析了 OpenClaw中 ACP Agents 的全方位实现机制](https://cloud.tencent.com/developer/article/2644227)
