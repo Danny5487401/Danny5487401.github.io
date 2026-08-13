@@ -183,6 +183,20 @@ mcp-server-1.0.0        2d19h
 mcp-server.internal     9d
 ```
 
+
+
+
+
+
+
+### Envoy AI Gateway
+
+https://github.com/envoyproxy/ai-gateway
+
+{{<figure src="./envoy-ai-gateway.png#center" width=800px >}}
+
+
+
 ## 参考
 
 - https://gateway-api-inference-extension.sigs.k8s.io/

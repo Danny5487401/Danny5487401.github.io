@@ -283,6 +283,26 @@ Batch: disabled (failures 0/2)
 - MMR 去重：通过最大边际相关性算法，剔除高度相似的结果。
 
 
+### Context engine 上下文引擎
+https://docs.openclaw.ai/concepts/context-engine
+
+内置 legacy engine.
+
+{{<figure src="./context_engine_hook.png#center" width=800px >}}
+
+钩子
+- ingest
+- assemble
+- compact
+- after true
+
+
+#### 第三方 Context engine plugin
+
+- https://github.com/martian-engineering/lossless-claw
+- https://github.com/volcengine/OpenViking/blob/v0.3.17/examples/openclaw-plugin/INSTALL.md
+
+
 
 ## tools 和 plugins
 https://docs.openclaw.ai/tools
@@ -366,6 +386,7 @@ ACP 定义了一套标准的通信接口，使得 OpenClaw 能够像调用本地
 3. 输出回传：ACP 会话产生的所有输出（包括中间思考、命令执行结果、最终代码）都会以消息形式发送回同一个线程。
 
 4. 上下文保持：由于会话是持久的（Persistent Mode），ACP 智能体能够“记住”之前在该线程中的所有交互历史，从而实现连续的工程协作
+
 
 ## 参考
 - [爆火全网的OpenClaw强在哪儿](https://time.geekbang.org/column/article/946360)
