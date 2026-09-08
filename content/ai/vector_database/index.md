@@ -77,7 +77,9 @@ Qdrant完全独立开发，支持集群部署，不需要借助ETCD、Pulsar等�
 
 
 
-### pgvector
+### pg
+
+PG16 及之前，向量功能主要靠pgvector插件实现，而 PG17 直接将vector类型纳入原生支持. 
 
 <=> : 是 pgvector 的余弦距离运算符。用  1 - 距离  转成相似度分数，越接近 1 越相似。
 

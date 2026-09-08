@@ -160,6 +160,44 @@ heartbeat 每 30 分钟无脑唤醒一次，让 agent 做点事情。
 
 ### 3. 工具调用与 Skills 渐进式披露
 
+如果把这些全部塞进一个 SKILL.md，会有两个问题。
+- token 爆炸：每次激活都要加载几千 tokens。
+- 信息噪声：用户问“收入增长率怎么算”，Claude 却要阅读关于成本分析、现金流、资产负债表的全部内容。
+
+渐进式披露（Progressive Disclosure，也即是渐进式的加载):https://agentskills.io/specification#progressive-disclosure
+- metadata: name 和 description
+- 指导: skill.md 当sklll 激活
+- 资源: script/references/assets 
+
+
+
+skill 格式: https://docs.openclaw.ai/clawhub/skill-format
+```yaml
+---
+name: todoist-cli
+description: Manage Todoist tasks, projects, and labels from the command line.
+version: 1.2.0
+metadata:
+  openclaw:
+    requires:
+      env:
+        - TODOIST_API_KEY
+      bins:
+        - curl
+    primaryEnv: TODOIST_API_KEY
+    envVars:
+      - name: TODOIST_API_KEY
+        required: true
+        description: Todoist API token.
+      - name: TODOIST_PROJECT_ID
+        required: false
+        description: Optional default project ID.
+    emoji: "\u2705"
+    homepage: https://github.com/example/todoist-cli
+---
+
+```
+
 
 ## openclaw 部署
 

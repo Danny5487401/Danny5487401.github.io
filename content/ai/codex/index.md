@@ -32,8 +32,43 @@ openai/codex 遵循这个规范.
 建议在你的项目根目录下创建一个名为 AGENTS.md 的文件，专门存放那些写给 AI Agent 看的、结构化的核心指令。
 
 
+
+
+## skill
+https://learn.chatgpt.com/docs/build-skills
+
+
+
+扫描路径: 使用 ~/.agents/skills/ 作为中央 canonical 目录
+
+分发: 打包成 plugin
+
+
+### Agent Skill 开放标准
+Agent Skill 标准通常包括技能的定义格式、调用协议、响应格式等关键要素。技能可以通过 MCP（Model Context Protocol）或其他通信机制与 AI 模型进行交互，为模型提供超出其内置能力的功能，如数据库查询、API 调用、文件操作等。
+
+
+Agent Skill 标准在 AI 应用开发中具有重要意义：
+
+- 能力扩展：AI 模型无需掌握所有领域知识，可通过调用相应的技能来完成特定任务。
+- 安全性：通过预定义的技能接口，可以控制 AI 对系统资源的访问权限，提高系统的安全性。
+- 可维护性：技能作为独立的组件，可以单独开发、测试和更新，而不影响 AI 模型本身。
+- 可复用性：同一技能可以被多个 AI 模型或应用共享使用，提高开发效率。
+- 实时性：AI 可以获取实时数据和执行实时操作，而不仅仅依赖于训练时的数据
+
+
+
+遵从 Agent Skill 开放标准列表: https://agentskills.io/clients
+- openclaw
+- hermes
+- trae
+- claude code
+- chatgpt
+
 ### 第三方应用
 - 线上监控诊断产品 arthas: https://github.com/alibaba/arthas/blob/master/AGENTS.md
+
+
 
 
 

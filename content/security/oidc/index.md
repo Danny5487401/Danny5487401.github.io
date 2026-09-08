@@ -21,17 +21,23 @@ id_token通常是JWT（Json Web Token），JWT有三部分组成，header，body
 
 ## 授权方式
 
-OAuth 2.0定义了四种授权方式。
+{{<figure src="./keycloak_ authentication_flow.png#center" width=800px >}}
 
-- 授权码模式（authorization code）: 适用于拥有服务器端能力的 Web 应用。用户授权后，客户端获取授权码，再通过后台请求换取访问令牌，避免暴露敏感信息
-- 简化模式（implicit）: 用于纯前端应用（如 SPA），直接返回令牌，但安全性较低，不推荐高敏感场景。
-- 密码模式（resource owner password credentials）: 用户直接提供用户名和密码换取令牌，仅适用于高度信任的客户端，如自有客户端与自有服务。
-- 客户端模式（client credentials）,也叫应用授信模式: 适用于服务间通信，无用户参与，使用客户端自身凭证获取访问权限。
+OAuth 2.0定义了四种授权方式,这四种授权方式在 Keycloak 客户端的 `Capability config` 中对应以下开关：
+
+| OAuth 2.0 授权方式 | `grant_type` | Keycloak 开关 | 说明 |
+| --- | --- | --- | --- |
+| 授权码模式 | `authorization_code` | `Standard flow` | 启用 OIDC Authorization Code Flow；服务端客户端通常还需开启 `Client authentication`，纯前端公共客户端建议配合 PKCE |
+| 简化模式 | `implicit` | `Implicit flow` | 启用 OIDC Implicit Flow；该模式安全性较低，不推荐新应用使用 |
+| 密码模式 | `password` | `Direct access grants` | Keycloak 将 Resource Owner Password Credentials 称为 Direct Access Grants；不推荐新应用使用 |
+| 客户端模式（应用授信模式） | `client_credentials` | `Service accounts roles` | 必须同时开启 `Client authentication`，并在 `Service account roles` 中为服务账号分配所需角色 |
+
+`Authorization` 开关用于启用 Keycloak 的细粒度授权服务，并不对应授权码模式。`OAuth 2.0 Device Authorization Grant` 和 `OIDC CIBA Grant` 则是前述四种方式之外的扩展授权流程。
 
 
 ### 授权码模式（authorization code）
 
-{{<figure src="./featured.png#center" width=800px >}}
+
 
 {{<figure src="./authorization_code_without_id_token.png#center" width=800px >}}
 
@@ -41,6 +47,52 @@ OAuth 2.0定义了四种授权方式。
 1. 三方应用后端携带这个授权码向你服务器的 token 颁发接口请求数据。（请给我一个 token，授权码是 xxx）
 1. 返回 id_token, access_token。(好的，这是你的 token，可以携带 access_token 去用户信息接口获取数据)
 
+
+
+### 扩展一: Device Authorization Flow
+
+标准的 Authorization Code Flow 依赖浏览器重定向，用户需要在授权页面输入账号密码并点击同意。但对于以下场景，这套流程完全行不通：
+
+- 智能电视 / 流媒体盒子：有屏幕，但没有键盘，无法输入复杂的 URL 和密码
+- CLI 工具（如 gh auth login、AWS CLI SSO）：运行在终端，无法弹出浏览器
+- IoT 设备：资源受限，可能没有显示屏，更没有浏览器
+
+
+{{<figure src="./device_auth.png#center" width=800px >}}
+
+
+1. 首先用户启动应用
+2. 应用携带 client_id, scope 请求 Authorization Server 的 /oauth/device/code 接口获取登录URL
+3. Authorization Server 返回 device_code, user_code, verification_url, verification_uri_complete, expires_in, interval
+4. 用户打开URL或者扫码访问，并且授权
+5. 应用按照服务器返回的轮询间隔，开始轮询 Authorization Server
+6. Authorization Server 判断用户是否已经同意授权
+7. 如果用户同意授权，则返回 access_token
+8. 应用使用 access_token 访问资源
+9. 服务器判断 access_token 是否有效，如果有效，返回对应资源
+
+
+
+### 扩展二: authorization code+ PKCE ( Proof Key for Code Exchange)
+
+PKCE 主要是为了减少公共客户端的授权码拦截攻击.
+
+OAuth 2.0 核心规范定义了两种客户端类型， confidential 机密的， 和 public 公开的， 区分这两种类型的方法是， 判断这个客户端是否有能力维护自己的机密性凭据 client_secret.
+
+
+{{<figure src="./featured.png#center" width=800px >}}
+
+这里步骤 3 是不安全.
+在 OAuth 2.0 核心规范中， 要求授权服务器的 anthorize endpoint 和 token endpoint 必须使用 TLS（安全传输层协议）保护， 但是授权服务器携带授权码code返回到客户端的回调地址时， 有可能不受TLS 的保护， 恶意程序就可以在这个过程中拦截授权码code， 拿到 code 之后， 接下来就是通过 code 向授权服务器换取访问令牌 access_token ， 对于机密的客户端来说， 请求 access_token 时需要携带客户端的密钥 client_secret ， 而密钥保存在后端服务器上， 所以恶意程序通过拦截拿到授权码code 也没有用， 而对于公开的客户端（手机App， 桌面应用）来说， 本身没有能力保护 client_secret， 因为可以通过反编译等手段， 拿到客户端 client_secret， 也就可以通过授权码 code 换取 access_token， 到这一步，恶意应用就可以拿着 token 请求资源服务器了
+
+
+
+{{<figure src="./authorization_code_with_pkce.png.png#center" width=800px >}}
+
+在向授权服务器的 authorize endpoint 请求时，需要额外的 code_challenge 和 code_challenge_method 参数， 向 token endpoint 请求时， 需要额外的 code_verifier 参数， 最后授权服务器会对这三个参数进行对比验证， 通过后颁发令牌.
+
+
+既然固定的 client_secret 是不安全的， 那就每次请求生成一个随机的密钥（code_verifier）， 第一次请求到授权服务器的 authorize endpoint时， 携带 code_challenge 和 code_challenge_method， 也就是 code_verifier 转换后的值和转换方法， 然后授权服务器需要把这两个参数缓存起来， 第二次请求到 token endpoint 时， 携带生成的随机密钥的原始值 (code_verifier) ， 然后授权服务器使用下面的方法进行验证
 
 
 
@@ -97,6 +149,7 @@ Keycloak实现了业内常见的认证授权协议和通用的安全技术，主
 - SAML。
 
 #### OpenID Provider 元数据
+
 ```shell
 (⎈|kind-cilium-cluster:nacos)➜  ~ curl -s http://keycloak.keycloak:8080/realms/myrealm/.well-known/openid-configuration  | jq .
 {
