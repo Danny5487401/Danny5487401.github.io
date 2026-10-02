@@ -7,13 +7,22 @@ categories:
 tags:
   - ai
   - codex
-draft: false
+
 ---
 
 “Codex”是指一系列软件智能体产品，包括 Codex CLI、Codex Cloud 和 Codex VS Code 扩展。
 
 
-## 项目文档记忆：AGENTS.md
+## memory
+https://learn.chatgpt.com/docs/customization/memories
+
+本地内存在 ~/.codex/memories
+```shell
+~ ls ~/.codex/memories
+extensions        memory_summary.md MEMORY.md         raw_memories.md   rollout_summaries skills            xcrun_db
+```
+
+### 项目文档记忆：AGENTS.md
 
 - https://github.com/agentsmd/agents.md
 - https://agents.md/#examples
@@ -65,9 +74,45 @@ Agent Skill 标准在 AI 应用开发中具有重要意义：
 - claude code
 - chatgpt
 
-### 第三方应用
+### 第三方应用 agent.md
 - 线上监控诊断产品 arthas: https://github.com/alibaba/arthas/blob/master/AGENTS.md
 
+
+
+## hooks 
+https://learn.chatgpt.com/docs/hooks
+
+
+事件决定何时触发（如 SessionStart、PreToolUse、PostToolUse、Stop），matcher筛选具体情形或工具，handler执行命令或 MCP 工具。
+```shell
+~ cat ~/.codex/hooks.json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /Users/python/.codex/hooks/ai-coding-rules-session-start.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /Users/python/.codex/hooks/ai-coding-rules-pre-tool-use.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
 
 
 

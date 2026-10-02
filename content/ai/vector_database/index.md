@@ -69,7 +69,7 @@ $$
 
 ### milvus
 
-Milvus部署依赖许多外部组件，如存储元信息的ETCD、存储使用的MinIO、消息存储Pulasr 等等
+Milvus部署依赖许多外部组件，如存储元信息的ETCD、存储使用的MinIO、消息存储 Pulasr 等等.
 
 
 ### qdrant
@@ -161,22 +161,35 @@ PG16 及之前，向量功能主要靠pgvector插件实现，而 PG17 直接将v
 
 向量检索算法有 kNN（k-Nearest Neighbors）和 ANN （ Approximate Nearest Neighbor) 两种。
 - kNN（k-Nearest Neighbors）是一种蛮力检索方式，当给定目标向量时，计算该向量与候选向量集中所有向量的相似度，并返回最相似的 K 条。当向量库中数据量很大时 kNN 会消耗很多计算资源，耗时也不理想
-- ANN （ Approximate Nearest Neighbor）其基本思想是预先计算向量间的距离，并将距离相近的向量存储在一起，从而在检索时可以更高效。预先计算就是构建向量索引的过程
+- ANN （ Approximate Nearest Neighbor）其基本思想是预先计算向量间的距离，并将距离相近的向量存储在一起，从而在检索时可以更高效。预先计算就是构建向量索引的过程.
+
+
+可以将 ANN 算法分为三个不同的类别：树、哈希和图。HNSW 属于图类别中的一种。
 
 在向量数据库领域，HNSW（Hierarchical Navigable Small-World）和 DiskANN 正逐渐成为主流索引方案。
 
 其中NHSW主要以内存搜索为主，DiskANN主要以磁盘搜索为主。
 
-### HNSW（Hierarchical Navigable Small-World 层次导航小世界图)
+### HNSW ( Hierarchical Navigable Small-World 层次导航小世界图)
+- https://milvus.io/docs/zh/hnsw.md 
 
 {{<figure src="./hnsw.png#center" width=800px >}}
 
-它是跳表和小世界图（SWG）结构的扩展，可以有效地找到近似的最近邻。
+它是概率跳表（the probability skip list）和可导航小世界图（navigable small world graphs )结构的扩展，可以有效地找到近似的最近邻。
 
 HNSW是一种基于多层图的算法，在顶层，我们可以看到一个由极少向量构成的图，这些向量之间的连线最长，也就是说，这是一个由相似度最低的相连向量构成的图。
 我们越深入到较低层，发现的向量就越多，图也变得越密集，越来越多的向量彼此靠得更近。
-在最底层，我们可以找到所有的向量，其中相似度最高的向量彼此距离最近。在搜索时，该算法从顶层的任意入口点开始，找到与查询向量最接近的向量（由灰色点表示）。
-然后，它向下移动一层，并从上层离开的同一向量开始重复相同的过程，依此类推，逐层进行，直到到达最底层并找到查询向量的最近邻。
+在最底层，我们可以找到所有的向量，其中相似度最高的向量彼此距离最近。
+工作原理：
+
+1. 入口点：搜索从顶层的一个固定入口点开始，该入口点是图中的一个预定节点。
+
+2. 贪婪搜索：算法贪婪地移动到当前层的最近邻居，直到无法再接近查询向量为止。上层起到导航作用，作为粗过滤器，为下层的精细搜索找到潜在的入口点。
+
+3. 层层下降：一旦当前层达到局部最小值，算法就会通过预先建立的连接跳转到下层，并重复贪婪搜索。
+
+4. 最后 细化：这一过程一直持续到最底层，在最底层进行最后的细化步骤，找出最近的邻居
+
 
 
 ### DiskANN (DISK Approximate Nearest Neighbors)

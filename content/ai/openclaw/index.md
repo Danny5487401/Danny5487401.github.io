@@ -272,6 +272,11 @@ Memory 系统的原始数据来自两类 Markdown 文件：
 
 
 #### L3 存储层：数据怎么持久化 
+
+memory-core 默认存储
+
+{{<figure src="./memory-core.png#center" width=800px >}}
+
 SQLite-vec：Local-First 的向量存储选择 SQLite-vec 而非 Pinecone 或 Milvus，体现了 OpenClaw 的 Local-First 哲学。
 所有数据都存储在本地，用户拥有完全的数据主权。SQLite 的单文件部署特性，也让整个系统的安装和迁移变得极其简单——只需要复制一个.db 文件
 
@@ -430,3 +435,4 @@ ACP 定义了一套标准的通信接口，使得 OpenClaw 能够像调用本地
 - [爆火全网的OpenClaw强在哪儿](https://time.geekbang.org/column/article/946360)
 - [openclaw 核心原理与实战](https://time.geekbang.org/column/article/954978)
 - [深入剖析了 OpenClaw中 ACP Agents 的全方位实现机制](https://cloud.tencent.com/developer/article/2644227)
+- [Memory for OpenClaw: From Zero to LanceDB Pro](https://www.lancedb.com/blog/openclaw-memory-from-zero-to-lancedb-pro)

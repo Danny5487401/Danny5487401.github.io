@@ -41,6 +41,7 @@ https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle
 
 ## JSON-RPC
 
+
 JSON-RPC 2.0 是一种基于JSON（JavaScript Object Notation）的远程过程调用（RPC）协议。它是一种轻量级的、无状态的、跨语言的通信协议，常用于客户端与服务端之间的交互。
 
 MCP 协议使用 JSON-RPC 2.0 作为消息传输格式.
@@ -104,6 +105,8 @@ MCP 支持两种标准传输方式：标准输入/输出（stdio) 和 Streamable
   "params": ["User logged in"]
 }
 ```
+
+
 ## 服务端特性
 
 https://modelcontextprotocol.io/specification/2025-11-25/server
@@ -124,7 +127,6 @@ Resources（资源）是 MCP 协议中的核心原语之一，服务器通过它
 提示词 允许服务器定义可复用的提示词模板和工作流，客户端可以轻松将这些模板呈现给用户或 LLM。
 
 ## 客户端端特性 
-
 
 ## MCP 的两种认证模式：API 密钥 vs OAuth 2.1
 
@@ -434,6 +436,12 @@ MCP Inspector 的强大功能源于其独特的双组件架构，两者协同工
 ```shell
 (⎈|sandbox:clm-dev1)➜  ~ npx @modelcontextprotocol/inspector
 ```
+
+
+
+
+## mcp 扩展协议
+https://modelcontextprotocol.io/extensions/overview
 
 
 ## 参考
