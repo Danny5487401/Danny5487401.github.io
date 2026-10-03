@@ -79,10 +79,17 @@ Agent 的记忆其实需要解决三个传统软件用不同机制分别处理�
 
 ### 基准测试算法
 
-#### LoCoMo——Long-Context Conversations with Memory
+#### github.com/snap-research/locomo
+
+Long-Context Conversations with Memory
 
 它评估 AI 系统在长篇自然对话中回忆和推理信息的能力。LoCoMo 中的对话跨越数百个回合，模拟用户和 AI 助手之间的真实多会话交互
 
+
+
+### github.com/xiaowu0162/longmemeval
+
+LongMemEval 是一个面向多轮多会话历史的长期记忆能力的评测基准
 
 
 ### 第三方实现
@@ -92,10 +99,64 @@ Agent 的记忆其实需要解决三个传统软件用不同机制分别处理�
 - https://github.com/mem0ai/mem0: Mem0是轻量级语义检索记忆框架，同时提供托管服务与开源版本，Pro版额外集成知识图谱能力。
 - https://github.com/TencentCloud/TencentDB-Agent-Memory
 - https://github.com/rohitg00/agentmemory: Agent 执行工具调用时，它通过 Hook 机制自动静默捕获所有操作
+- https://github.com/vectorize-io/hindsight: 模仿人类记忆的组织方式：把原始事实、亲身经历、归纳观察、策划摘要分层管理，让 Agent 能像人一样从经验中形成理解，而不只是背诵对话记录。
+
+
+
+
+### Mem0 ("mem-zero")
+
+原理: https://docs.mem0.ai/core-concepts/how-it-works
+
+{{<figure src="./mem0-structure.png#center" width=800px >}}
+
+
+### hindsight
+
+
+架构: https://hindsight.vectorize.io/#architecture-deep-dive
+
+{{<figure src="./hindsight-structure.png#center" width=800px >}}
+
+
+
+记忆组织为五种类型: https://hindsight.vectorize.io/#memory-types
+- World fact — 关于外部世界的客观信息。 "Alice works at Google."
+- Experience fact — Agent 自身参与的对话和事件。 "I recommended Python to Bob."
+- Observation — 系统从多条原始事实中自动归纳出的模式和理解。. "User was a React enthusiast, has now switched to Vue."
+- Mental model — 用户策划的、针对常见查询的高层摘要。
+- Knowledge page — a living document the bank writes about itself.
+
+
+
+
+#### 流程拆成三个核心动作
+
+##### retain: 结构化理解保留
+
+Retain操作是Hindsight记忆系统的入口，负责将新信息转化为结构化的记忆存储。它不仅仅是简单的数据保存，还包括事实提取、实体识别、关系映射和时间标记等复杂处理过程.
+
+
+##### Recall：四路并行检索 + 融合排序
+
+recall() 负责从记忆库中检索信息。它不是单一策略检索，而是四种检索策略并行执行，然后融合结果：
+
+
+| 策略 | 作用 | 适用场景 |
+| :--: | :--: | :--: |
+| Semantic | 向量相似度 | 意思相近但不完全匹配 |
+| Keyword | BM25 精确匹配 | 特定术语、人名、版本号 |
+| Graph | 实体、时间、因果关联 | 跨实体推理 |
+| Temporal | 时间范围过滤 | “上周”“上个月”这类查询 |
+
+
+
+##### Reflect：从记忆中生成新认知
+reflect 是 Hindsight 中最像"思考"的操作。它不是检索已有信息，而是对已有记忆进行深度分析，形成新的连接和洞察。
+
+
 
 ## 参考
 
 - [Agent 设计模式之美 11｜记忆模块导论](https://time.geekbang.org/column/article/987077)
-
-
 
